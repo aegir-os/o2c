@@ -2772,9 +2772,9 @@ package body O2c_Compiler is
 
                procedure Bc_After_Element is
                begin
-                  O2c_BC.Un (O2c_BC.Set_Single);
+                  O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Single);
                   if not Bc_First then
-                     O2c_BC.Bin (O2c_BC.Set_Union);
+                     O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Union);
                   end if;
                   Bc_First := False;
                end Bc_After_Element;
@@ -2792,7 +2792,7 @@ package body O2c_Compiler is
                           (Interfaces.Unsigned_64 (1), Hi - Lo + 1)
                         - Interfaces.Unsigned_64 (1)));
                   if not Bc_First then
-                     O2c_BC.Bin (O2c_BC.Set_Union);
+                     O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Union);
                   end if;
                   Bc_First := False;
                end Bc_After_Range;
@@ -2912,9 +2912,10 @@ package body O2c_Compiler is
                --  is why Op_Btest is a no-op), so `not b` IS `b = 0` - the
                --  same integer EQ the BOOLEAN equality path already uses.
                --  Push_Int is +1 and Bin is -1, so the pair is depth-neutral
-               --  and no caller's stack accounting changes.
-               O2c_BC.Push_Int (0);
-               O2c_BC.Bin (O2c_BC.Eq);
+               --  and no caller's stack accounting changes - which is why the
+               --  pair is now the LOWERING's two instructions for Op_Not and the
+               --  site is one line.
+               O2c_Ir_Lower.Apply (O2c_Ir.Op_Not);
             end if;
             R.Text := "not (" & R.Text & ")";
          when Lex.Tok_Minus | Lex.Tok_Plus =>
@@ -4487,7 +4488,7 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     O2c_BC.Bin (O2c_BC.Set_Intersect);
+                     O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Intersect);
                      --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " and " & X.Text & ")";
@@ -4610,7 +4611,7 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     O2c_BC.Bin (O2c_BC.Set_Symdiff);
+                     O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Symdiff);
                      --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " xor " & X.Text & ")";
@@ -4662,7 +4663,7 @@ package body O2c_Compiler is
                   --  `&` is Oberon's and.  Both operands are already on the
                   --  stack and already evaluated: this is the strict operator,
                   --  so there is nothing to short-circuit.
-                  O2c_BC.Bin (O2c_BC.Band);
+                  O2c_Ir_Lower.Apply (O2c_Ir.Op_And);
                end if;
                R.Text := R.Text & " and " & X.Text;
                R.Lit := False;
@@ -4686,7 +4687,7 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     O2c_BC.Bin (O2c_BC.Set_Union);
+                     O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Union);
                      --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " or " & X.Text & ")";
@@ -4756,7 +4757,7 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     O2c_BC.Bin (O2c_BC.Set_Diff);
+                     O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Diff);
                      --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " and not " & X.Text & ")";
@@ -4830,7 +4831,7 @@ package body O2c_Compiler is
                   --  BOOLEAN or.  As with `&` above, both operands are on the
                   --  stack and already evaluated, so there is nothing to
                   --  short-circuit.
-                  O2c_BC.Bin (O2c_BC.Bor);
+                  O2c_Ir_Lower.Apply (O2c_Ir.Op_Or);
                end if;
                R.Text := R.Text & " or " & X.Text;
                R.Lit := False;
@@ -4858,7 +4859,7 @@ package body O2c_Compiler is
                  & "a SET operand (line " & Natural'Image (Cur.Line) & ")";
             end if;
             if O2c_BC.Bytecode_Mode then
-               O2c_BC.Bin (O2c_BC.Set_In);
+               O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_In);
             end if;
             Used_Set := True;
             R.Text := To_Unbounded_String

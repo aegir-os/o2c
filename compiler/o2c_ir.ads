@@ -83,6 +83,11 @@ package O2c_Ir is
                Op_Not, Op_And, Op_Or,
 
                --  memory: addresses are values, so this is one level
+               --  RESERVED, and measured as unneeded (3bs): nothing in the
+               --  parser emits either form, and that is not an accident of the
+               --  corpus - a POINTER dereference needs NO instruction in this
+               --  VM, because the address IS the value.  What follows a deref
+               --  is a field or an index access, and those have their own ops.
                Op_Load,                      --  d := *s1
                Op_Store,                     --  *d := s1
                --  RESERVED, and measured as unneeded: this VM has no
@@ -138,7 +143,22 @@ package O2c_Ir is
                --  record's ADDRESS comes off the operand stack, where the
                --  designator chain left it.
                Op_Load_Fld,                  --  d := *(s1 + Imm_1), kind Imm_2
-               Op_Store_Fld);                --  *(s1 + Imm_1) := value
+               Op_Store_Fld,                 --  *(s1 + Imm_1) := value
+               --  The SET operators, appended as their OWN ops rather than
+               --  routed through Op_And/Op_Or.  Both operands of a SET operator
+               --  are Tc_Word - a set is a 64-bit word - and so are both
+               --  operands of a BOOLEAN and/or, so no width table could choose
+               --  between Band and Set_Intersect.  Making the SET family its own
+               --  quads is what keeps Bc_Op a WIDTH table, which is what makes
+               --  it mechanically checkable; the alternative was a Tc_Set class
+               --  that would force every arithmetic op to decide its behaviour
+               --  at a width it has no operations for.
+               Op_Set_Union,                 --  d := s1 + s2  (sets)
+               Op_Set_Intersect,             --  d := s1 * s2
+               Op_Set_Diff,                  --  d := s1 - s2
+               Op_Set_Symdiff,               --  d := s1 / s2
+               Op_Set_In,                    --  d := s1 in s2  (an element in a set)
+               Op_Set_Single);               --  d := {s1}
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

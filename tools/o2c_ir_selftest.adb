@@ -460,6 +460,80 @@ begin
                 "Slots = 0 with an offset steps into the object (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
+         --  The SET table: six ops, one instruction each, so only the table can
+         --  be checked - and it is the table that made these their OWN quads
+         --  rather than a Tc_Set width, because a BOOLEAN and a SET are both
+         --  words and only the op can say which was meant.
+         Check (O2c_Ir_Lower.Bc_Set (Op_Set_Union) = O2c_BC.Set_Union
+                and then O2c_Ir_Lower.Bc_Set (Op_Set_Intersect)
+                  = O2c_BC.Set_Intersect
+                and then O2c_Ir_Lower.Bc_Set (Op_Set_Diff) = O2c_BC.Set_Diff
+                and then O2c_Ir_Lower.Bc_Set (Op_Set_Symdiff)
+                  = O2c_BC.Set_Symdiff
+                and then O2c_Ir_Lower.Bc_Set (Op_Set_In) = O2c_BC.Set_In
+                and then O2c_Ir_Lower.Bc_Set (Op_Set_Single) = O2c_BC.Set_Single,
+                "the six SET operators map to the six emitter ops");
+
+         Raised2 := False;
+         begin
+            declare
+               X : constant O2c_Bc.Op := O2c_Ir_Lower.Bc_Set (Op_Add);
+            begin
+               pragma Unreferenced (X);
+            end;
+         exception
+            when Program_Error => Raised2 := True;
+         end;
+         Check (Raised2, "a non-SET op asked of the SET table raises");
+
+         --  BOOLEAN and/or live in the WIDTH table, at the only width a boolean
+         --  has - and at a width that has no such form they raise.
+         Check (O2c_Ir_Lower.Bc_Op (Op_And, Tc_Word) = O2c_BC.Band
+                and then O2c_Ir_Lower.Bc_Op (Op_Or, Tc_Word) = O2c_BC.Bor,
+                "BOOLEAN and/or pick Band and Bor at word width");
+         Raised2 := False;
+         begin
+            declare
+               X : constant O2c_Bc.Op := O2c_Ir_Lower.Bc_Op (Op_And, Tc_Real);
+            begin
+               pragma Unreferenced (X);
+            end;
+         exception
+            when Program_Error => Raised2 := True;
+         end;
+         Check (Raised2, "and at a width with no form raises");
+
+         --  And the lowering of each, BY COUNT: `not` is the pair §3a chose
+         --  (`b = 0`), so it is TWO instructions while every other operator here
+         --  is one - which is exactly why Op_Not is written out rather than
+         --  folded into a table whose entries are all one instruction.
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Apply (Op_Not);
+         Check (O2c_BC.Insns = Before + 2,
+                "not lowers to the two instructions of b = 0 (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Apply (Op_Set_Union);
+         Check (O2c_BC.Insns = Before + 1,
+                "a SET union is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Apply (Op_Set_Single);
+         Check (O2c_BC.Insns = Before + 1,
+                "a SET singleton is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Apply (Op_And);
+         Check (O2c_BC.Insns = Before + 1,
+                "a BOOLEAN and is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
          O2c_BC.Push_Int (1);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));

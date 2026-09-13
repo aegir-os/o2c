@@ -53,6 +53,12 @@ package body O2c_Ir_Lower is
                when O2c_Ir.Op_Le => return O2c_Bc.Le;
                when O2c_Ir.Op_Gt => return O2c_Bc.Gt;
                when O2c_Ir.Op_Ge => return O2c_Bc.Ge;
+               --  BOOLEAN and/or.  A boolean IS a word here, so these belong in
+               --  the width table - and a SET's and/or does NOT, which is why the
+               --  SET family is its own ops: both operands are Tc_Word either
+               --  way, and only the op can say which was meant.
+               when O2c_Ir.Op_And => return O2c_Bc.Band;
+               when O2c_Ir.Op_Or  => return O2c_Bc.Bor;
                when others =>
                   raise Program_Error with "O2c_Ir_Lower: no word form of "
                     & O2c_Ir.Op'Image (Op);
@@ -161,6 +167,31 @@ package body O2c_Ir_Lower is
       O2c_Ir_Lower.Emit_Quad
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Store_Fld;
+
+   function Bc_Set (Op : O2c_Ir.Op) return O2c_Bc.Op is
+   begin
+      case Op is
+         when O2c_Ir.Op_Set_Union     => return O2c_Bc.Set_Union;
+         when O2c_Ir.Op_Set_Intersect => return O2c_Bc.Set_Intersect;
+         when O2c_Ir.Op_Set_Diff      => return O2c_Bc.Set_Diff;
+         when O2c_Ir.Op_Set_Symdiff   => return O2c_Bc.Set_Symdiff;
+         when O2c_Ir.Op_Set_In        => return O2c_Bc.Set_In;
+         when O2c_Ir.Op_Set_Single    => return O2c_Bc.Set_Single;
+         when others =>
+            raise Program_Error with "O2c_Ir_Lower: " & O2c_Ir.Op'Image (Op)
+              & " is not a SET operator";
+      end case;
+   end Bc_Set;
+
+   procedure Apply (O : O2c_Ir.Op) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      O2c_Ir.Emit (O);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Apply;
 
    procedure Load_Local (Slot : Natural) is
    begin
@@ -560,7 +591,46 @@ package body O2c_Ir_Lower is
                Store_Value (Q.Dst);
             end if;
 
-         when Op_Not | Op_And | Op_Or | Op_Load | Op_Store
+         when Op_Not =>
+            --  `not b` in this VM IS `b = 0`: a BOOLEAN is 0/1 (which is why
+            --  Op_Btest is a no-op), so no new opcode is needed and §3a chose
+            --  this deliberately.  Push_Int is +1 and Bin is -1, so the pair is
+            --  depth-neutral.  Kept explicit rather than folded into Bc_Op: two
+            --  instructions CAN be checked by a count, unlike a width choice, and
+            --  a table entry saying Op_Not -> Eq would read as a mistake.
+            O2c_BC.Push_Int (0);
+            O2c_BC.Bin (O2c_BC.Eq);
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
+         when Op_And | Op_Or =>
+            --  BOOLEAN and/or, where the width is not a question: a boolean is a
+            --  word in this VM.
+            O2c_BC.Bin (Bc_Op (Q.Op, O2c_Ir.Tc_Word));
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
+         when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
+            | Op_Set_Symdiff | Op_Set_In =>
+            --  A binary SET operator: both operands are already on the stack, and
+            --  the opcode comes from Bc_Set's table rather than from a width.
+            O2c_BC.Bin (Bc_Set (Q.Op));
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
+         when Op_Set_Single =>
+            --  The only UNARY one: it takes an element off the stack and leaves
+            --  the singleton set, which is net zero, so the emitter's Un models
+            --  it exactly as the hand-written site did.
+            O2c_BC.Un (Bc_Set (O2c_Ir.Op_Set_Single));
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
+         when Op_Load | Op_Store
             | Op_Addr_Local | Op_Return
             | Op_Halt =>
             --  Each arrives with the construct that needs it, and until then

@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         372
+    commits         373
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3066,6 +3066,73 @@ gate30, all seven suites green, zero warnings.
     Store 2, Global 4         scalar global access (Op_Copy with a V_Global Dst)
     Trap 6, Dup_Top 8, Discard 5, Un 3
                               stack shuffles and the bounds trap
+
+### 3bs. DONE — the operator families, and the SET operators are their own quads
+
+The recommendation 3br's sizing ended on, taken: **the SET operators become their own IR
+ops** rather than `Type_Class` growing a `Tc_Set`.
+
+    Op_Set_Union, Op_Set_Intersect, Op_Set_Diff, Op_Set_Symdiff, Op_Set_In,
+    Op_Set_Single
+
+with `Bc_Set` as the table beside `Bc_Op`.  The reason is the one that made a decision
+necessary at all: `and`/`or` on BOOLEANS emit `Band`/`Bor` and on SETS emit
+`Set_Intersect`/`Set_Union`, and **both operands are `Tc_Word`** — a SET is a 64-bit word —
+so no width table can choose between them.  A `Tc_Set` class would have forced `Bc_Op` to
+declare a behaviour for every arithmetic op at a width that has no arithmetic, and a table
+full of raises has stopped being a table.  Six ops keep it a WIDTH table, and all six are
+one instruction each, so the self-test checks the table — as it does for `Bc_Op`,
+`Bc_Load_Idx` and `Bc_Fld`.
+
+**BOOLEAN and/or went the other way, INTO the width table**, because a boolean IS a word in
+this VM: `Bc_Op (Op_And, Tc_Word) = Band`, `Bc_Op (Op_Or, Tc_Word) = Bor`, and at `Tc_Real`
+they raise.  That asymmetry — one family by width, one by op — is the entire content of the
+decision, and both halves are pinned by the self-test.
+
+**`Op_Not` stayed explicit, and is deliberately NOT in the table.**  `not b` IS `b = 0` in
+this VM (§3a: a BOOLEAN is 0/1, which is why `Op_Btest` is a no-op), so its lowering is two
+instructions — `Push_Int 0; Bin (Eq)` — and unlike a width or a table entry, **a count CAN
+check that**.  Folding it into a table whose entries are all one instruction would have
+thrown the check away, and an entry reading `Op_Not -> Eq` would have looked like a
+mistake.
+
+**One helper**, `Apply (O)`, for "an operator whose operands are already on the operand
+stack" — the left one pushed when it was parsed, then the right.  Binary or unary is the
+LOWERING's business, so a site does not have to know: `Op_Set_Single` is the unary one and
+goes through the emitter's `Un`, which models its net-zero depth exactly as the
+hand-written site did.
+
+    grep -c 'O2c_BC.Band|O2c_BC.Bor|O2c_BC.Set_*' compiler/o2c_compiler.adb = 0
+    11 sites migrated: 9 SET, the BOOLEAN pair, and the `not` pair
+
+**Evidence**: **72 of 72** fixtures byte-identical against a front end built from `HEAD`,
+with the SET and BOOLEAN fixtures printing their goldens (`set`, `setops`, `boolops`);
+self-test 60 -> 68 checks; gate31 all seven suites green, zero warnings.
+
+**Three ops are now measured as UNUSED, and it is the same measurement three times.**
+`Op_Addr_Local` (3br) and `Op_Load` / `Op_Store` (the `d := *s1` and `*d := s1` forms) are
+emitted by NOTHING in the parser:
+
+    O2c_BC.Load (   ... 0 sites   <- the one that used to be here was
+    O2c_BC.Store (  ... 2 sites      Load/Store (Global (n)), a module variable, which
+    address-of-local ... 0 sites      the IR expresses as a V_Global operand of Op_Copy
+
+and that is not an accident of this corpus: a POINTER dereference needs NO instruction in
+this VM, because the address IS the value — what follows it is a field or an index access,
+which has its own ops.  All three stay (the enum is append-only), each with a comment
+saying it is reserved and why nothing needs it.
+
+**What is left now — two subjects and the shuffles:**
+
+    Bin 32 (from 42), Push_Int 23, Push_Str 5
+                                  M5's expression builder: the front end emitting
+                                  arithmetic AS IT PARSES
+    Mark 20, Jump 18              control flow
+    Trap 6, Dup_Top 8, Discard 5, Un 2
+                                  the bounds trap and stack shuffles
+    Store 2, Global 4             two global stores: Op_Copy with a V_Global Dst, which
+                                  is exactly what Bc_Store already does
+    Op_Return, Op_Halt            un-lowered, and nothing emits them yet
 
 ## 4. Method — what worked, and what did not
 

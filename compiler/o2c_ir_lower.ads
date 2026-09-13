@@ -102,6 +102,20 @@ package O2c_Ir_Lower is
    procedure Load_Global (Name : String);
    procedure Store_Global (Name : String);
 
+   --  The SET operators -> the emitter's, one entry each.  This is the table
+   --  that made them their own quads: `and`/`or` on BOOLEANS emit Band/Bor while
+   --  on SETS they emit Set_Intersect/Set_Union, and both operands are Tc_Word,
+   --  so the choice cannot be a width - it has to be the op.  All six are one
+   --  instruction each, so the self-test checks the TABLE, as it does for
+   --  Bc_Op, Bc_Load_Idx and Bc_Fld.
+   function Bc_Set (Op : O2c_Ir.Op) return O2c_Bc.Op;
+
+   --  An OPERATOR whose operands are already on the operand stack - the left one
+   --  pushed when it was parsed, then the right.  Binary or unary: the lowering
+   --  knows which each op is, so a site does not have to.  A no-op outside
+   --  bytecode mode.
+   procedure Apply (O : O2c_Ir.Op);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.
