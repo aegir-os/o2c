@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         391
+    commits         392
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3986,6 +3986,36 @@ fixtures from the wired-native era, and `filesintr.ob2` pins the intrinsics by E
 
 Nothing else changed: record actuals and the Texts flip are committed (3cj), the metric is back at
 `Files.Old`, and the ledger stands at seven.
+
+### 3cl. The Files bisect, measured: New is fine and NOTHING is written
+
+3ck left the question "which of New/Register/Set/WriteString/Close/Length disagrees".  Two probes,
+with the flip in, answered part of it and stopped at a wall worth naming:
+
+    f := Files.New ("fb.txt");
+    if f = NIL then Out.String ("new=NIL") else Out.String ("new=ok") end;   ->  new=ok
+    Files.Register (f); Files.Set (r, f, 0); Files.WriteString (r, "abc");
+    Files.Close (r);
+    if Files.Length (f) = 3 then Out.String ("3") else Out.String ("NOT-3") end;
+
+So `New` returns a VALID file object, the write lands NOWHERE (no file appears on the host, and
+the earlier probe's file - the one that turned up in the repo root with a garbage name - is the
+only trace any Files write has ever left), and `Length` disagrees.
+
+The second probe was meant to read the rider's `f.name` back and was refused: "field 'f' of
+Files.Rider is not exported", which is correct - and it is also the reason the NEXT step needs a
+different instrument.  The name has to be observed through the library's own API (write a known
+name, then ask `Files.Old`), not by reaching into a record.
+
+**The shape of the remaining work, stated so the next session does not have to rediscover it:**
+the Files bodies were authored for the Ada path, where the intrinsics are Ada-level helpers whose
+behaviour the *host* compiler supplies.  In bytecode the same bodies reach the intrinsics through
+3l's native dispatch, and everything *around* those calls - the FileDesc bookkeeping, the Rider's
+position, the name handling - is what the two probes say is wrong.  That is a CLUSTER, not one
+line: expect the same population of small defects as the Strings/Texts path had (six, in the
+end), and expect the fixtures to come from OBNC's `FilesTest.obn` rather than from `tests/bc`.
+
+The flip is out again; the metric is at `Files.Old`; the ledger still stands at seven.
 
 ## 4. Method — what worked, and what did not
 
