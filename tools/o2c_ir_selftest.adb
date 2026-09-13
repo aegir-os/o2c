@@ -143,13 +143,20 @@ begin
 
       --  A native call: an Op_Arg run, then the call, whose arity must match
       --  the run.  The count is pinned: two arguments push, the call is one.
+      --  The arguments are the CALLER's to push (Op_Arg only counts them), so
+      --  the test pushes them the way the front end does and then checks that
+      --  the call itself is one instruction.
       Before := O2c_BC.Insns;
+      O2c_BC.Push_Int (7);
+      O2c_BC.Push_Int (9);
       O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => C5, others => <>));
       O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => C5, others => <>));
       O2c_Ir_Lower.Emit_Quad
         ((Op => Op_Call_Native, Imm_1 => 1, Imm_2 => 2, others => <>));
       Check (O2c_BC.Insns = Before + 3,
-             "two arguments and a native call lower to three instructions");
+             "two pushed arguments and a native call are three instructions");
+      Check (O2c_BC.Insns /= Before + 5,
+             "Op_Arg does NOT push a second copy");
 
       Raised2 := False;
       begin

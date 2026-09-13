@@ -100,11 +100,13 @@ package body O2c_Ir_Lower is
             null;
 
          when Op_Arg =>
-            --  The argument of the call that follows, pushed in order: the
-            --  native surface takes its operands from the stack, so "in order"
-            --  IS the calling convention.  Counted, so the arity can be
-            --  checked when the call arrives rather than left to the verifier.
-            Push_Value (Q.Src1);
+            --  One argument has ALREADY been pushed, in order, by the front end
+            --  as it parsed it - so this does NOT push again.  (M4a pushed, and
+            --  that is wrong: it would double the operand, the same bug the
+            --  qualified call path had in 3u.)  The op exists so the arity is
+            --  DECLARED and can be checked against the call, instead of being
+            --  left to the verifier or to luck.  Src1 carries the value for
+            --  readers and for the arity's sake, not to be emitted.
             N_Args := N_Args + 1;
 
          when Op_Call_Native =>
