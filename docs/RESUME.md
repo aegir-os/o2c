@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         380
+    commits         381
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3448,7 +3448,12 @@ in the compiler**, written in the language this backend compiles.  Flipping that
 Past the WHOLE Strings module, and into Texts.  That is a far bigger step than wiring
 `Strings.Pos` as one more native, so the metric's next move is not a native at all.
 
-**Blocker A — the VM's verifier cannot verify an EARLY RETURN.**  Its own comment says it:
+**Blocker A — CORRECTED IN 3ca: the mechanism below is WRONG** (the trigger is a parameterless
+FUNCTION, and the failing offset is in the BODY, which has no early return).  Kept as written
+because the correction is the finding: the first diagnosis named the verifier when the emitter
+is at fault, and only the offset said so.
+
+**Blocker A, as first (wrongly) diagnosed — the VM's verifier and EARLY RETURNs.**  Its comment says it:
 
     This walk is linear, and by construction the code after a return is the next procedure in
     the payload, so the frame's depth is not carried across: reset it.
@@ -3498,6 +3503,53 @@ The experiment was REVERTED: a `Scoped => True` image is one the VM REFUSES to l
 worse than a refusal at compile time, and it would also have silently fixed `Strings.Length`
 under `bytecode_gaps.sh`'s recorded gap.  Reverted to the documented state, and the metric is
 back at `Strings.Pos` - which is the honest place for it to be until the two blockers are fixed.
+
+### 3ca. CORRECTION — 3bz's Blocker A was misdiagnosed; the trigger is a PARAMETERLESS FUNCTION
+
+3bz attributed its verifier violation to the VM's linear walk and its depth reset at `RET`,
+which assumed "the code after a return is the next procedure".  **The mechanism was wrong**,
+and the offset said so: the violation is reported *inside the module BODY*, and the body of the
+reproducer has no early return at all.  What follows is what the bytes say.
+
+**The trigger, narrowed to one construct.**  A user procedure with no parameters and a RESULT:
+
+    procedure P: integer;
+    begin return 7 end P;
+    ...
+      n := P;                     <- this fails, and it is the whole programme
+
+fails (248-byte image, rejected).  A function WITH a parameter (`Q(x: integer)`) works, and so
+does a parameterless PROCEDURE.  So it is specifically **a parameterless user function called in
+an expression** - and the corpus cannot express one: the `(): T` spelling is refused by the
+parser ("expected an identifier"), and the parenless spelling is what procedures use.  Three
+probes were wrong before the byte dump was right; that is the same toll 3bq and 3wt paid, and it
+is worth stating again: the offset and the bytes answered in one step what four theories could
+not.
+
+**What the image shows.**  e1's code contains NO `Call` opcode at all (0xC0 never appears), and
+where the call should be it has
+
+    Load_Const 0 ; RET           <- the CALLEE's return sequence
+    Store_G n  ...               <- the store that expected the call's result
+
+so the callee's return was emitted into the CALLER's code, and the body stores a value it never
+pushed.  The verifier rejects it - correctly.  The fault is in the front end's expression path
+for a bare procedure name with results, not in the VM.
+
+**And the leverage is large**: this is exactly the shape the Oakwood library bodies are built
+from (`function`-shaped procedures called in expressions), so it sits on the path 3bz identified.
+The fix belongs with that path, and its test is e1 above.
+
+    tests/bc/parfn.ob2  `procedure P: integer; begin return 7 end P;` used as `n := P` -
+    a fixture the corpus has no way to write today, which is why nothing said so.
+
+**What OBNC gives us, since the user pointed at it** (`/tmp/obnc-0.17.2`): the library ORACLE.
+`lib/obnc/` holds the Oakwood sources (`Math.obn`, `Out.obn`, `Files.obn`, `In.obn`,
+`Input.obn`, ...) **with tests**: `MathTest.obn`, `OutTest.obn`, `FilesTest.obn`, `InTest.obn`,
+`InputTest.obn`, each with a `.sh` driver and an `.env` expectation file in places.  And
+`tests/obnc/` is the compiler's own suite, split into `passing/` and `failing-at-compile-time/`
+- which is the same two-way split `run_bc.sh` uses (goldens and negatives), and a far better
+source of library fixtures than anything in `tests/bc` today.
 
 ## 4. Method — what worked, and what did not
 
