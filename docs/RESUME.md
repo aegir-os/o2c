@@ -5873,6 +5873,34 @@ a fact - here the offending TOKEN - rather than one that modelled it.  "M3 state
 named nothing; `kind=TOK_MINUS text='-'` named the bug, and the four-way operator test above turned it
 into a guard to read.
 
+### 3ep. The metric has LEFT the bytecode backend: the next refusal is an M19 import rule
+
+With `Reals` flipped on AND the parser fix in place, `hello.ob2` compiles past every earlier barrier and
+stops here:
+
+    o2c error: M19 imports: only Out, plus library modules provided earlier (found 'Geom')
+
+That is an M19-era IMPORT rule - a module may import `Out` and whatever was registered before it - and it is
+not a bytecode-backend refusal at all.  `samples/hello.ob2` imports `Geom`, so the sample needs `Geom`
+compiled before it; the compound invocation passes all three precisely so the later ones can import the
+earlier ones.
+
+**So the goal's metric has now advanced five times in this stretch - and has left the subsystem the work
+was aimed at:**
+
+    Reals.Convert is an FFI primitive and is not yet supported   <- where 3ec started
+    LEN of an unknown parameter                                  <- 3em
+    ARRAY OF parameter is not in the frame: str                   <- 3em
+    M3 statement expected at line 63                              <- 3em (a PARSER limit)
+    M19 imports: ... (found 'Geom')                               <- now (a MODULE-STORY limit)
+
+For `Reals` specifically: the bytecode backend is CLEAR and the parser is CLEAR.  What stands between it
+and `Scoped => True` is an import/registration story, and that is a different question from this stretch's.
+
+The `Reals` flip is reverted again - not because it fails, but because its evidence would be the suites,
+and the honest state is "advances past the backend, stops at an M19 import rule", which is a statement
+about the corpus rather than about `Reals`.  Tree green, `run_bc` PASS, 449 commits.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
