@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         390
+    commits         391
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3947,6 +3947,45 @@ LOCAL array - so the library fixture is testing the corpus's blind spot rather t
 **The next refusal is `Files`**, and its bodies are a different kind of test again: `Files` is
 where the intrinsics (3l's `FStat`/`FRead`/`FWrite`/`FClose`) live, and its own body is what
 `Files.*` in user code reaches.
+
+### 3ck. Files COMPILES — and does not work, so the flip stays out
+
+`Compile_Builtin (Oak_Files_Src, Scoped => True)` was measured, and it is the first library in
+this run whose flip is not landable for a *behavioural* reason rather than a crash or a refusal:
+
+**It compiles, and the metric moves past it:**
+
+    hello.ob2 refuses at   bytecode backend: Math.ln is not yet supported
+
+- a third library's bodies in the image, and the refusal now sits in Math.
+
+**But the file operations do not work.**  A probe that writes three bytes through a Rider, reads
+the length back and then reads the bytes:
+
+    f := Files.New ("probe.txt"); Files.Register (f); Files.Set (r, f, 0);
+    Files.WriteString (r, "abc"); Files.Close (r);
+    if Files.Length (f) = 3 then Out.String ("3") else Out.String ("?") end;
+    Files.Set (r, f, 0); Files.Read (r, c); Out.Char (c); ...
+
+prints `?` and three blanks - so the length is not 3 and the writes did not land.  A SILENT wrong
+answer, which is worse than the refusal it would replace, so:
+
+    Compile_Builtin (Oak_Files_Src, Scoped => False);   --  restored
+
+**Why, and it is the same shape as 3l.**  `Files` is the one library whose members are reached
+today as VM NATIVES - `Files.Delete` and `Files.Rename` are in the wired set, and the intrinsics
+(`FStat`/`FRead`/`FWrite`/`FClose`) are the Ada-level helpers of 3l, dispatched by MODULE NAME
+when the builtin's own source calls them (§3aw's region A).  Flipping the module replaces those
+native routes with CALLS TO THE BODIES, and the bodies were authored for the Ada path: the
+intrinsic calls inside them are wired, but what the bodies compute around them is not right yet.
+
+**So the probe above is the reproducer and the test**, and the next step is to find which of
+`New`/`Register`/`Set`/`WriteString`/`Close`/`Length`/`Read` disagrees - the same bisect the
+`Pos` work used, and it has the same kind of net: two of those (`Delete`, `Rename`) already have
+fixtures from the wired-native era, and `filesintr.ob2` pins the intrinsics by EFFECT.
+
+Nothing else changed: record actuals and the Texts flip are committed (3cj), the metric is back at
+`Files.Old`, and the ledger stands at seven.
 
 ## 4. Method — what worked, and what did not
 
