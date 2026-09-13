@@ -209,6 +209,16 @@ package O2c_BC is
    --  relative to the start of the CODE section payload, which is what the
    --  VM verifies and resolves against.
    function Begin_Proc (NParams : Natural; NResults : Natural) return Natural;
+   --  The two halves of Begin_Proc, for a NESTED procedure.  A nested body has
+   --  to be emitted BEFORE its enclosing one - the code section is a single
+   --  buffer and each procedure's extent is its Buf_Off up to the next one's, so
+   --  bytes emitted in between would be executed by the enclosing procedure - and
+   --  Oberon already puts nested declarations ahead of the enclosing begin.  So a
+   --  nested procedure takes its ID at its declaration and opens its BODY at its
+   --  begin, by which time its own nested ones have been emitted.  Begin_Proc is
+   --  exactly these two calls, and behaves as it always did.
+   function Reserve_Proc (NParams : Natural; NResults : Natural) return Natural;
+   procedure Open_Proc (Id : Natural);
    procedure End_Proc;
    --  Open the module body.  Called when the statement part begins, after
    --  every declared procedure has been closed, so the body's code is

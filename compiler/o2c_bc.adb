@@ -677,24 +677,40 @@ package body O2c_BC is
    end Mutex_Unlock;
 
    --  ---- procedures and frames -----------------------------------------
-   function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
+   function Reserve_Proc (NParams : Natural; NResults : Natural) return Natural is
+      Id : Natural;
    begin
       if N_Procs_Used = Max_Procs then
          raise Wrong_Construct with
            "bytecode backend: too many procedures";
       end if;
+      N_Procs_Used := N_Procs_Used + 1;
+      Id := N_Procs_Used;
+      --  Buf_Off is provisional: Open_Proc puts it where the body really starts,
+      --  which for a nested procedure is after its own nested ones.
+      Procs (Id) := (Buf_Off    => Length (Code),
+                     Frame_Slots => 0,
+                     NParams     => NParams,
+                     NResults    => NResults);
+      return Id;
+   end Reserve_Proc;
+
+   procedure Open_Proc (Id : Natural) is
+   begin
       if Cur_Proc /= 0 then
          raise Wrong_Construct with
            "bytecode backend: a procedure is already open";
       end if;
-      N_Procs_Used := N_Procs_Used + 1;
-      Cur_Proc := N_Procs_Used;
+      Procs (Id).Buf_Off := Length (Code);   --  the body starts HERE
+      Cur_Proc := Id;
       Next_Frame := 0;
-      Procs (Cur_Proc) := (Buf_Off    => Length (Code),
-                           Frame_Slots => 0,
-                           NParams     => NParams,
-                           NResults    => NResults);
-      return Cur_Proc;
+   end Open_Proc;
+
+   function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
+      Id : constant Natural := Reserve_Proc (NParams, NResults);
+   begin
+      Open_Proc (Id);
+      return Id;
    end Begin_Proc;
 
    procedure End_Proc is

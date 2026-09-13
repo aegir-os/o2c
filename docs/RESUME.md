@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         423
+    commits         424
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5113,6 +5113,30 @@ would be EXECUTED by the enclosing procedure.  That, and not the id, is the real
 `Convert`'s locals), and deeper nesting should REFUSE rather than be approximated - which is this
 backend's rule everywhere else.  Recursion in a nested procedure wants a real id at its declaration,
 so it is the one case the deferred-open must be careful with.
+
+### 3dr. Step one of nesting is in; step two found the re-entry trap it has to respect
+
+3dq's design, implemented in verified pieces.  The emitter half is IN and green:
+
+    Reserve_Proc (NParams, NResults)   the id, with no body opened
+    Open_Proc (Id)                     the body, opened where the code really starts
+    Begin_Proc                         exactly those two calls, behaviour unchanged
+
+`run_bc` and `run_vm` both PASS with it, so nothing regressed - which is what the two-halves split
+was for.  It is also the piece that makes Buf_Off a LATE assignment, and that is the whole mechanism:
+a nested body opens the buffer before its enclosing one, and the enclosing one is re-pointed when its
+own begin arrives.
+
+**Step two - always reserve the id, open the body at the `begin` - broke 143 fixtures, and the reason
+is worth more than the change.**  The front end's own comment says it: "The front end may reach a
+procedure declaration more than once for one declaration, and Begin_Proc must run once: this is how it
+tells" - and `not Proc_Open` was that detector.  Deferring the open to the `begin` means the SECOND
+pass sees no procedure open, reserves a SECOND id, and every later call resolves to the wrong one.
+
+So the re-entry guard must move with the open, and it cannot be `Proc_Open` any more.  The symbol is
+overwritten before the id is taken, so the flag has to be captured above that - a small, exact piece
+of work, and the next thing to do.  The revert is clean (`git checkout compiler/o2c_compiler.adb`,
+`run_bc` PASS) and the emitter half is committed.
 
 ## 4. Method — what worked, and what did not
 
