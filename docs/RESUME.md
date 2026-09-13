@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         352
+    commits         353
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2371,6 +2371,43 @@ there.  That is still cheaper than 3ak, where patching a branch three times cost
 four reverts - but it is a toll, and the plan should carry the lesson: an M-number
 is a guess until measured, and a "duplication" claim needs the KEYS checked before
 it is called a target.
+
+### 3ay. M4a DONE - the IR carries CALLS, and the arity is checked
+
+The IR and its lowering now express a call into the VM's native surface:
+
+    Op_Call_Native     appended to the closed op set, with Imm_1 = native id and
+                       Imm_2 = arity;
+    Quad_Info          gains two immediates - general, rather than a quad kind per
+                       opcode;
+    Op_Arg             pushes its argument IN ORDER, which is the calling
+                       convention: the native surface takes its operands from the
+                       stack, so order IS the interface;
+    the lowering       CHECKS the Op_Arg run against the call's arity and raises on
+                       a mismatch - the alternative is an image that fails
+                       verification later, or worse, one that does not.
+
+**The closed op set earned its keep on the first use.**  Adding `Op_Call_Native`
+broke the lowerer's `case` - a COMPILE ERROR, exactly as designed, so the new op
+could not be left un-lowered by accident.  That is the property the whole layer
+exists for, demonstrated rather than asserted.
+
+**Verified against the real emitter**, in the self-test that runs from
+`tests/run_bc.sh`: two arguments and a native call lower to exactly three
+instructions, and a call whose arity disagrees with the `Op_Arg` run raises rather
+than emitting.
+
+**One language rule learned**, and it is the kind that bites silently: a NAMED
+aggregate still needs every component, so adding `Imm_1`/`Imm_2` broke three quad
+literals in the tool.  `others => <>` is the fix, and it makes them survive the
+next field too.  The compiler named all three sites, which is cheaper than my
+having remembered.
+
+All seven suites green, 52 corroborated by both backends, zero warnings.
+
+**M4b next**: the first parser route through it - one member family, one route -
+with the corpus as the net.  The two routes stay distinct on purpose (`Mod_Name`
+for a module's own intrinsics, `MNm`/`MName` for a caller), as 3ax measured.
 
 ## 4. Method — what worked, and what did not
 

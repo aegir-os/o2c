@@ -121,25 +121,46 @@ begin
 
       Before := O2c_BC.Insns;
       O2c_Ir_Lower.Emit_Quad
-        ((Op => Op_Copy, Dst => Lx, Src1 => C5, Src2 => No_Value));
+        ((Op => Op_Copy, Dst => Lx, Src1 => C5, Src2 => No_Value, others => <>));
       Check (O2c_BC.Insns = Before + 2, "x := 5 lowers to two instructions");
       Check (O2c_Ir_Lower.Lowered = 1, "the lowerer counted that quad");
 
       Before := O2c_BC.Insns;
       O2c_Ir_Lower.Emit_Quad
-        ((Op => Op_Copy, Dst => Lg, Src1 => C5, Src2 => No_Value));
+        ((Op => Op_Copy, Dst => Lg, Src1 => C5, Src2 => No_Value, others => <>));
       Check (O2c_BC.Insns = Before + 2,
              "a global store lowers to two instructions");
 
       begin
          O2c_Ir_Lower.Emit_Quad
            ((Op => Op_Jump, Dst => No_Value, Src1 => No_Value,
-             Src2 => No_Value));
+             Src2 => No_Value, others => <>));
       exception
          when Program_Error =>
             Raised2 := True;
       end;
       Check (Raised2, "an op with no lowering raises rather than passing");
+
+      --  A native call: an Op_Arg run, then the call, whose arity must match
+      --  the run.  The count is pinned: two arguments push, the call is one.
+      Before := O2c_BC.Insns;
+      O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => C5, others => <>));
+      O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => C5, others => <>));
+      O2c_Ir_Lower.Emit_Quad
+        ((Op => Op_Call_Native, Imm_1 => 1, Imm_2 => 2, others => <>));
+      Check (O2c_BC.Insns = Before + 3,
+             "two arguments and a native call lower to three instructions");
+
+      Raised2 := False;
+      begin
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => C5, others => <>));
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Call_Native, Imm_1 => 1, Imm_2 => 2, others => <>));
+      exception
+         when Program_Error =>
+            Raised2 := True;
+      end;
+      Check (Raised2, "a native call whose arity disagrees raises");
 
       O2c_BC.End_Proc;
       O2c_BC.Finish;

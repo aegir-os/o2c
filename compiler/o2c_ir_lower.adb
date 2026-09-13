@@ -6,6 +6,7 @@ with O2c_Ir; use O2c_Ir;
 package body O2c_Ir_Lower is
 
    N_Lowered : Natural := 0;
+   N_Args    : Natural := 0;   --  Op_Arg run since the last call
 
    function Lowered return Natural is
    begin
@@ -98,11 +99,34 @@ package body O2c_Ir_Lower is
          when Op_Nop =>
             null;
 
+         when Op_Arg =>
+            --  The argument of the call that follows, pushed in order: the
+            --  native surface takes its operands from the stack, so "in order"
+            --  IS the calling convention.  Counted, so the arity can be
+            --  checked when the call arrives rather than left to the verifier.
+            Push_Value (Q.Src1);
+            N_Args := N_Args + 1;
+
+         when Op_Call_Native =>
+            --  A native call: id and arity are immediates, and the arity must
+            --  match the Op_Arg run that precedes it.  A mismatch is a bug in
+            --  the front end, and the alternative to catching it here is an
+            --  image that fails verification later - or, worse, one that does
+            --  not.
+            if N_Args /= Q.Imm_2 then
+               raise Program_Error with "O2c_Ir_Lower: native"
+                 & Natural'Image (Q.Imm_1) & " takes"
+                 & Natural'Image (Q.Imm_2) & " arguments but"
+                 & Natural'Image (N_Args) & " were pushed";
+            end if;
+            N_Args := 0;
+            O2c_BC.Native_Call (Q.Imm_1, Q.Imm_2);
+
          when Op_Add | Op_Sub | Op_Mul | Op_Div | Op_Mod
             | Op_Neg | Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge
             | Op_Not | Op_And | Op_Or | Op_Load | Op_Store
             | Op_Addr_Local | Op_Addr_Global | Op_Label | Op_Jump
-            | Op_Jump_False | Op_Arg | Op_Call | Op_Return | Op_Halt =>
+            | Op_Jump_False | Op_Call | Op_Return | Op_Halt =>
             --  Each arrives with the construct that needs it, and until then
             --  says so loudly and says WHICH op - the next stage reads this
             --  message rather than guessing where to start.

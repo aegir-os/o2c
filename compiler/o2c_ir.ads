@@ -87,6 +87,12 @@ package O2c_Ir is
                --  arguments, in order - which keeps every quad three-address.
                Op_Arg,
                Op_Call,                      --  d := call s1
+               --  A call into the VM's native surface rather than into a
+               --  procedure in the image: Imm_1 is the native id and Imm_2 its
+               --  arity, which the lowering checks against the Op_Arg run that
+               --  precedes it.  Appended, never inserted - the opcode BYTES
+               --  are append-only, and so is this list.
+               Op_Call_Native,
                Op_Return,                    --  return s1
                Op_Halt);
 
@@ -95,6 +101,11 @@ package O2c_Ir is
       Dst : Value_Id := No_Value;
       Src1 : Value_Id := No_Value;
       Src2 : Value_Id := No_Value;
+      --  Two immediates: enough for a native's id and arity, and for any
+      --  operand that is a number rather than a value.  Kept general on
+      --  purpose - the alternative is a quad kind per opcode.
+      Imm_1 : Natural := 0;
+      Imm_2 : Natural := 0;
    end record;
 
    --  ---- building --------------------------------------------------------
@@ -128,7 +139,9 @@ package O2c_Ir is
    procedure Emit (Op : O2c_Ir.Op;
                    Dst : Value_Id := No_Value;
                    Src1 : Value_Id := No_Value;
-                   Src2 : Value_Id := No_Value);
+                   Src2 : Value_Id := No_Value;
+                   Imm_1 : Natural := 0;
+                   Imm_2 : Natural := 0);
 
    --  ---- reading it back: the walker interface ---------------------------
 

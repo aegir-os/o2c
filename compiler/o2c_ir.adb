@@ -142,14 +142,17 @@ package body O2c_Ir is
    procedure Emit (Op : O2c_Ir.Op;
                    Dst : Value_Id := No_Value;
                    Src1 : Value_Id := No_Value;
-                   Src2 : Value_Id := No_Value) is
+                   Src2 : Value_Id := No_Value;
+                   Imm_1 : Natural := 0;
+                   Imm_2 : Natural := 0) is
    begin
       Require_Init;
       if N_Quads = Cap_Quads then
          raise Program_Error with "O2c_Ir: too many quads";
       end if;
       N_Quads := N_Quads + 1;
-      Quads (N_Quads) := (Op => Op, Dst => Dst, Src1 => Src1, Src2 => Src2);
+      Quads (N_Quads) := (Op => Op, Dst => Dst, Src1 => Src1, Src2 => Src2,
+                          Imm_1 => Imm_1, Imm_2 => Imm_2);
    end Emit;
 
    function Quad_Count return Natural is
