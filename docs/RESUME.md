@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         397
+    commits         398
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4178,6 +4178,43 @@ user module named `XYplane` exactly as `filesintr.ob2` reaches Files.  So:
 That is why `Files` was not a mystery and is not a cluster of six: some of its region-A arms emit
 (the FStat/Delete pair 3cn read) and the question 3co posed - why one `New` works and the other does
 not - is the next entry's business, not this one's.
+
+### 3cr. The region-A AUDIT — four silent arms, and the Math flip is BLOCKED (not silent)
+
+Gate 46 came back green on all seven suites, which clears the debt 3cq left open.  Then the audit,
+because 3cq's *rule* was worth checking before acting on it - and checking it was right.
+
+**The audit**: every arm keyed on `To_String (Mod_Name) = "..."` (the intrinsic dispatch), classified
+by whether its body makes an EMITTING call (`O2c_Ir_Lower.` / `Call_Native` / `Bc_*`) or REFUSES
+(`Wrong_Construct`) or does neither.  34 sites, 12 of them the Ada-side foreign declarations rather
+than arms.
+
+    region A (the expression dispatcher, 7262-7548):  Convert REFUSES, Env REFUSES, Args REFUSES,
+                                                      XYplane REFUSES, In REFUSES, Files EMITS x2
+    the older cluster (3147-3481):                    Math SILENT, Args SILENT, Input SILENT,
+                                                      In SILENT, MathL REFUSES, XYplane REFUSES,
+                                                      Reals REFUSES, Files EMITS x2
+
+**Two corrections to 3cq, both mine.**  First, "region A is hand-written per arm and can be silent"
+is simply false: it emits or refuses, every arm.  Second, the XYplane arm I had called a silent gap
+is a *deliberate refusal* (7416, with the comment "Refused in bytecode mode rather than silently
+emitting nothing") - my scan had classified it EMITS because the `emits` regex matched
+`O2c_BC.Bytecode_Mode`, the guard itself.  A classifier that counts a guard as an emission is worse
+than none; the rerun tests for an emitting *call*.
+
+**What IS silent, and why it matters**: four arms in the older cluster - Math's and MathL's
+transcendentals (Power, Exp, Ln, Log, Sin, Cos, Tan, ArcSin, ArcCos, ArcTan, ArcTan2), Args.ArgCount,
+Input's InAvail/InReadCh/InTime, and In's InChar/InInt/InLong/InReal.  Each is reachable exactly as
+`filesintr.ob2` reaches Files - a module NAMED after the builtin calling the intrinsic BARE - and a
+flipped builtin's own body does the same thing.  So the audit answers the question it was run to
+answer: **flipping Math today would produce a silently wrong body**, because Math's own source
+computes with Ln/Sin/Cos and there is no bytecode path for them anywhere.  Refused now, with four
+pinned reproducers whose messages each name their own arm, which is stronger evidence than the
+suite's ok/blocked - it shows each probe reached the site it was written for.
+
+**So the Math flip is BLOCKED, not pending**: the transcendentals need natives and VM arms
+(append-only ids) before the flip is anything but a wrong answer.  That is a feature, not a bug
+hunt - and finding it before the flip rather than after is the whole reason to audit first.
 
 ## 4. Method — what worked, and what did not
 

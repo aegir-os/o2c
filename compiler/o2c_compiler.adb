@@ -3159,6 +3159,14 @@ package body O2c_Compiler is
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
                                             "ARCTAN2"))
             then
+               --  Found by the 3cr region-A audit: this arm appends Ada text and
+               --  makes no bytecode call, so a flipped builtin's own body would
+               --  compile, run, and quietly do nothing.  Refuse instead -
+               --  the rule the two aggregates follow.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Math/MathL transcendentals" & " is not yet supported";
+               end if;
                --  M41/M47 FFI: REAL/LONGREAL transcendental calls
                declare
                   Nm   : constant String := Cur.Text (1 .. Cur.Len);
@@ -3328,6 +3336,14 @@ package body O2c_Compiler is
             if To_String (Mod_Name) = "Args"
               and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "ARGCOUNT")
             then
+               --  Found by the 3cr region-A audit: this arm appends Ada text and
+               --  makes no bytecode call, so a flipped builtin's own body would
+               --  compile, run, and quietly do nothing.  Refuse instead -
+               --  the rule the two aggregates follow.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Args.ArgCount in a builtin's own body" & " is not yet supported";
+               end if;
                --  M50 FFI: argument count (builtin Args only)
                Next;
                if Cur.Kind = Lex.Tok_LParen then
@@ -3395,6 +3411,14 @@ package body O2c_Compiler is
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
                                             "INTIME"))
             then
+               --  Found by the 3cr region-A audit: this arm appends Ada text and
+               --  makes no bytecode call, so a flipped builtin's own body would
+               --  compile, run, and quietly do nothing.  Refuse instead -
+               --  the rule the two aggregates follow.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Input's InAvail/InReadCh/InTime" & " is not yet supported";
+               end if;
                --  M48 FFI: Input primitives (builtin Input module only)
                declare
                   Nm : constant String := Cur.Text (1 .. Cur.Len);
@@ -3428,6 +3452,14 @@ package body O2c_Compiler is
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
                                             "INREAL"))
             then
+               --  Found by the 3cr region-A audit: this arm appends Ada text and
+               --  makes no bytecode call, so a flipped builtin's own body would
+               --  compile, run, and quietly do nothing.  Refuse instead -
+               --  the rule the two aggregates follow.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "In's InChar/InInt/InLong/InReal" & " is not yet supported";
+               end if;
                --  M45 FFI: input primitives (builtin In module only)
                declare
                   Nm : constant String := Cur.Text (1 .. Cur.Len);

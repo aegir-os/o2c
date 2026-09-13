@@ -479,6 +479,18 @@ note "--- FOUND BY THE 3cq SWEEP: aggregates were SILENT, not refused ---"
 check "record aggregate"  blocked 'module G50; type R = record a: integer; b: integer end; var r: R; begin r := {a = 1, b = 2} end G50.'
 check "numeric array aggregate"  blocked 'module G51; type A3 = array 3 of integer; var a: A3; begin a := {1, 2, 3} end G51.'
 
+note "--- FOUND BY THE 3cr region-A AUDIT: four arms were SILENT too ---"
+#  The expression-side dispatch (region A) turned out to emit or refuse, never to be silent - but
+#  the OLDER cluster above it, keyed on the same module names, had four arms that append Ada text
+#  and make no bytecode call.  Each is reachable exactly as filesintr.ob2 reaches Files: a module
+#  NAMED after the builtin, calling the intrinsic BARE.  A flipped builtin's own body does the
+#  same thing - which is the finding that matters, because Math is the next flip on the metric
+#  path and its own body calls Ln/Sin/Cos this way.  All four refuse now.
+check "Math transcendentals, bare"   blocked 'module Math; var r: real; begin r := Ln (2.0) end Math.'
+check "Args.ArgCount, bare"          blocked 'module Args; var n: integer; begin n := ArgCount () end Args.'
+check "Input.InAvail, bare"          blocked 'module Input; var b: boolean; begin b := InAvail () end Input.'
+check "In.InChar, bare"              blocked 'module In; var c: char; begin c := InChar (c) end In.'
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0
