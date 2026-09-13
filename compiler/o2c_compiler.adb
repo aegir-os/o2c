@@ -12964,7 +12964,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Reals_Src, Scoped => False);
+      Compile_Builtin (Oak_Reals_Src, Scoped => True);   --  re-test (3ev)
       if Emits ("Reals") then
          --  Reals: parsed above in every case, emitted
          --  only when something imports it (see Emits).

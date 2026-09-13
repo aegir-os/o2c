@@ -6105,6 +6105,33 @@ simply outside it.  An epoch would work too, but it must be set at the DECLARATI
 
 Tree green, `run_bc` PASS, 455 commits, four fixtures (nestproc 42, aopidx 65, minus2 -5, nestsib 42).
 
+### 3ew. LANDED: Reals is flipped.  The blocker was frame state leaking across modules
+
+The proc-id-range bound planned in 3ev turned out to be unnecessary once the mechanism was read
+correctly.  The instrument had said `Parent(37) != 0` for a MODULE-LEVEL procedure - and a module-level
+procedure's parent must be 0.  So `Frame_Proc` was not 0 when that procedure was reserved: the frame state
+LEAKS from one module to the next, and the next module's first procedure records a parent that belongs to a
+previous module.  From there the walk wanders, and eventually matches a builtin's local named `g`.
+
+The fix needs no new state, because the compiler already marks the boundary: `End_Body` is called at every
+module boundary, so that is where the chain is cut -
+
+    Frame_Proc := 0;  Saved_Frame_Proc := 0;  Link_Of := -1;  Next_Frame := 0;
+
+A module-level procedure's parent is then 0, the walk stops at the module level, and it cannot leave the
+module at all.  (An epoch or an id range would work too; cutting the chain where the compiler already says
+"module over" is simply the smallest true statement of the same thing.)
+
+**Reals is flipped and the gate is 7/7 PASS with it ON**, so this is a real capability now, not a probe:
+
+    Reals.Convert (1.0 / 3.0, s)  ->  3.33333E-01
+
+Fixture `tests/bc/realsconv.ob2` pins it.  The metric reaches `Term.SetColor is an FFI primitive and is not
+yet supported` - six advances from where this stretch began, and no longer inside the bytecode backend.
+
+Five fixtures now cover what this work found: nestproc 42, aopidx 65, minus2 -5, nestsib 42, realsconv
+3.33333E-01.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

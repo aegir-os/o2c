@@ -759,6 +759,17 @@ package body O2c_BC is
       if Cur_Proc /= 0 and then Cur_Proc = Body_Proc then
          End_Proc;
       end if;
+      --  The frame state is NOT per module on its own: a module that ends without
+      --  closing its last frame leaves Frame_Proc set, and the NEXT module's
+      --  first procedure then records a PARENT from the previous module.  That is
+      --  how a module-level procedure's parent chain reached back into a builtin's
+      --  records, and how a module-level global came to be refused as "more than
+      --  one level up" (3ev).  End_Body is called at every module boundary, so
+      --  this is where the chain is cut.
+      Frame_Proc := 0;
+      Saved_Frame_Proc := 0;
+      Link_Of := -1;
+      Next_Frame := 0;
    end End_Body;
 
    function Local (Ada_Name : String) return Natural is
