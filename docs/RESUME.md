@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         436
+    commits         437
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5523,6 +5523,31 @@ that has answered every question in this stretch.
 Both the changes and the fixture are reverted (the fixture is kept at /tmp/nestproc.ob2, and it will go
 into tests/bc/ the moment it prints 42 rather than 0).  Tree green, `run_bc` PASS, committed state is
 3eb.
+
+### 3ee. The depth trace: the condition is RIGHT, and 3ed's contradiction was a misreading
+
+3ed asked for the depth at the reserve and left two facts to reconcile.  One trace answered it, and the
+answer is that there was nothing to reconcile:
+
+    D reserve Outer depth= 0 npar= 0      --  a top-level procedure
+    D reserve Bump  depth= 1 npar= 0      --  a nested one
+
+`Nested_Depth` is exactly what the design assumed: 0 at module level, 1 inside a top-level procedure.
+So `Nested_Depth > 0` is the correct condition for "this declaration is nested, it needs a link", and
+the pair of facts in 3ed - a top-level procedure with `nparams = 1` AND no link interned - cannot both
+be about the same procedure.  They were: I read the procedure table by index and took the entry whose
+BODY I recognised, but the bodies are emitted nested-first (that is the whole point of the deferred
+open), so the index and the declaration order do not line up the way I assumed.
+
+**That is the fifth wrong inference about this front end in this stretch, and the cheapest to correct**
+- two printed numbers, no code change.  What it leaves is a much smaller problem: the depth condition,
+the +1 parameter count and the link interning are all right, and the FAILURE is that the caller's
+`LOAD_ADDR_L` did not appear in the image for `Bump;` (a parameterless call).  The patch matched its
+text at the parameterless expression path, so the next probe is a print at that site: is it reached for
+`Bump;` at all, and does `Proc_Nested` say true there.
+
+Tree green, `run_bc` PASS; committed state is 3eb.  The fixture is at /tmp/nestproc.ob2 (expected 42,
+currently 0) and goes into tests/bc/ when it passes.
 
 ## 4. Method — what worked, and what did not
 
