@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         420
+    commits         421
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5028,6 +5028,30 @@ with a depth violation, because the module's own emission pushes the value AND t
 expects to push it itself.  The arm for the constant path is therefore reverted, the fixture uses the
 literal instead, and 3dn's follow-up is to find where the argument machinery expects to own that push
 (the same question `XYplane.IsDot` would face if its result were ever passed as an argument).
+
+### 3do. `Reals` is the next flip, and the flip found a NESTED PROCEDURE with no proc id
+
+The metric is at `Reals.Convert`, whose refusal says "is an FFI primitive and is not yet supported".
+It is NOT an FFI primitive: the embedded source is ordinary Oberon - `Convert` is a dozen lines of
+real arithmetic with two NESTED procedures, `Put` and `Digit`, and no intrinsic anywhere.  The
+refusal is the generic one for an unflipped builtin, so the lever is the same as Strings, Texts and
+Files: `Compile_Builtin (Oak_Reals_Src, Scoped => True)`.
+
+**Flipping it found a real gap, immediately and precisely:**
+
+    o2c error: bytecode backend: call to 'Put' resolved to symbol 13 named 'Put'
+               (kind S_PROC, params 1) with no procedure id
+
+A NESTED procedure has no bytecode procedure id, so any call to one cannot be lowered.  That is the
+whole of it - the message names the symbol, its kind and its parameter count - and it is a gap that
+only a body with nested procedures could reach, which is what a builtin's own source is.  The flip is
+reverted (it does not compile), the tree is green, and this is the next step: find where `Bc_Proc` is
+assigned and why a nested declaration does not get one.  `Nested_Depth` exists in the front end
+(M32 parses them), so the parsing is not the part that is missing.
+
+**A note on method, since it keeps being the thing that matters**: every one of the last four steps
+was found by TURNING SOMETHING ON and reading what it said, not by reading the code and predicting.
+The transpose - "an FFI primitive" - was itself wrong for the same reason.
 
 ## 4. Method — what worked, and what did not
 
