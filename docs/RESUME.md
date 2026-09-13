@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         432
+    commits         433
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5383,6 +5383,38 @@ one-place check rather than a redesign.
 
 The instrument and the recipe are reverted; the tree is green (`run_bc` PASS) and the committed state is
 3dv's leak fix.  The recipe script is /tmp/nest_recipe.py.
+
+### 3ea. Both of 3dz's explanations are eliminated — the recipe LOSES internings
+
+3dz named two suspects: one loop still comparing `Cur_Proc`, and a non-uniform ownership field.  Both
+were checked in the recipe-applied file and both are false:
+
+    761:  if Locals (I).Proc = Frame_Proc        --  Local's lookup
+    771:  Locals (N_Locals) := (Proc => Frame_Proc,
+    790:  if Locals (I).Proc = Frame_Proc        --  Local_Slot's lookup
+
+All three agree, and there is no `Cur_Proc` left in a locals context.  So the comparisons are uniform
+and my explanation was wrong - the fourth hypothesis about this front end that inspection has killed.
+
+**What IS established, and it is a clean discriminator**: with the recipe the table holds 74 entries
+and `m` is not among them; without it, 92 entries and `m` is.  The recipe therefore LOSES internings -
+18 of them - and `m` is one.  The instrumented runs are the evidence:
+
+    clean:        S clean-slot m cur= 30 nloc= 92      and the check fires
+    with recipe:  S enter m frame= 30 nloc= 74         and it does not
+
+**So the next probe is not a hypothesis at all**: run the *same* two instruments (`Local`'s enter/intern
+and `Local_Slot`'s enter, which are written and were removed only to keep the tree clean) on the clean
+tree and on the recipe tree, and DIFF the two logs.  The 92nd-vs-74th difference says the recipe
+suppresses 18 `Local` calls; the diff says which, and each one is a call that reached the intern before
+and does not now.  That is the whole remaining question, and it is a log comparison rather than a guess.
+
+**Everything else about the recipe stands**: 3dw's three pieces take 144 failures to 1, reproduced
+twice, and the script is /tmp/nest_recipe.py.  The two small fixes (End_Proc tolerating a bodyless
+declaration, Return_Void only for a real body) are part of it.
+
+Instrument and recipe reverted; tree green (`run_bc` PASS, `run_vm` PASS); committed state is 3dv's
+leak fix.
 
 ## 4. Method — what worked, and what did not
 
