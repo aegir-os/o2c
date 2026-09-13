@@ -485,21 +485,32 @@ package body O2c_Ir_Lower is
 
    procedure Call_Proc (Proc_Id : Natural; Arity : Natural) is
       First : Natural;
+      N_Args : Natural := Arity;
    begin
       if not O2c_BC.Bytecode_Mode then
          return;
       end if;
-      for K in 1 .. Arity loop
+      if O2c_BC.Proc_Nested (Proc_Id) then
+         --  The static link, pushed LAST so it lands in the callee's highest
+         --  slot - Push_Frame pops in reverse.  It goes HERE, in the one place
+         --  every IR call passes through: the front end has SIX Call_Proc sites,
+         --  and adding the push to two of them left the reached one with an empty
+         --  operand stack at the callee's first argument (3ek, measured as
+         --  "pc=3131 sp=0" by the VM itself).
+         Load_Addr_L (0);       --  the caller's own frame base
+         N_Args := N_Args + 1;
+      end if;
+      for K in 1 .. N_Args loop
          pragma Unreferenced (K);
          O2c_Ir.Emit (O2c_Ir.Op_Arg);
       end loop;
       --  Quad ids are 1-based and Quad_Count is the LAST one emitted, so with
       --  Arity = 0 this is Quad_Count + 1 and the loop below lowers the call
       --  alone - the parameterless case, the common one in a statement part.
-      First := O2c_Ir.Quad_Count - Arity + 1;
-      O2c_Ir.Emit (O2c_Ir.Op_Call, Imm_1 => Proc_Id, Imm_2 => Arity);
+      First := O2c_Ir.Quad_Count - N_Args + 1;
+      O2c_Ir.Emit (O2c_Ir.Op_Call, Imm_1 => Proc_Id, Imm_2 => N_Args);
       --  the arguments, then the call
-      for K in 0 .. Arity loop
+      for K in 0 .. N_Args loop
          O2c_Ir_Lower.Emit_Quad
            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (First + K)));
       end loop;

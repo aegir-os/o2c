@@ -353,7 +353,17 @@ package body O2c_Compiler is
       elsif S >= 0 then
          O2c_Ir_Lower.Load_Local (Natural (S));
       else
-         O2c_Ir_Lower.Load_Global (Ada_Name);
+         declare
+            Up : constant Integer := O2c_BC.Up_Level_Slot (Ada_Name);
+         begin
+            if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
+               O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
+               O2c_Ir_Lower.Push_Int (Up);
+               O2c_Ir_Lower.Load_Idx (Size);
+            else
+               O2c_Ir_Lower.Load_Global (Ada_Name);
+            end if;
+         end;
       end if;
    end Bc_Load;
 
@@ -6170,9 +6180,9 @@ package body O2c_Compiler is
 
    --  The id of the declaration being parsed: it cannot be read back from the
    --  symbol at the begin, because the local declarations move N_Sym.
-   Decl_Bc_Proc : Natural := 0;
 
    procedure Decl_Procedure is
+      Decl_Bc_Proc : Natural := 0;
       Name  : constant String := Ident_Text;
       PName : array (1 .. Max_Params) of Unbounded_String;
       PTyp  : array (1 .. Max_Params) of EType;
@@ -6404,8 +6414,9 @@ package body O2c_Compiler is
                end loop;
                Syms (N_Sym).Bc_Proc :=
                  O2c_BC.Reserve_Proc
-                   (N_Par + N_Open + (if Nested_Depth > 1 then 1 else 0),
-                    (if Is_Function then 1 else 0));
+                   (N_Par + N_Open + (if Nested_Depth > 0 then 1 else 0),
+                    (if Is_Function then 1 else 0),
+                    Nested => Nested_Depth > 0);
                Decl_Bc_Proc := Syms (N_Sym).Bc_Proc;
             end;
          end if;
@@ -6647,6 +6658,13 @@ package body O2c_Compiler is
                end;
             end if;
          end loop;
+         if Nested_Depth > 0 then
+            declare
+               LSl : constant Natural := O2c_BC.Local ("o2c_link");
+            begin
+               O2c_BC.Set_Link_Slot (LSl);
+            end;
+         end if;
       end if;
       --  local declarations (M10): optional CONST/TYPE/VAR sections
       --  between the header and BEGIN.  Their symbols push onto the
@@ -10023,7 +10041,16 @@ package body O2c_Compiler is
                   --  reached its caller (3dd, 3de).
                   declare
                      By_Ref : constant Boolean := Syms (Idx).By_Ref;
+                     Up     : constant Integer :=
+                       (if By_Ref then -1
+                        else O2c_BC.Up_Level_Slot (Ada_Id (Head (1 .. H_Len))));
                   begin
+                     if O2c_BC.Bytecode_Mode and then Up >= 0
+                       and then O2c_BC.Link_Slot >= 0
+                     then
+                        O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
+                        O2c_Ir_Lower.Push_Int (Up);
+                     end if;
                      if O2c_BC.Bytecode_Mode and then By_Ref then
                         O2c_Ir_Lower.Load_Local
                           (Natural (O2c_BC.Local_Slot
@@ -10050,7 +10077,11 @@ package body O2c_Compiler is
                              & "backend: only INTEGER/CHAR/BOOLEAN "
                              & "assignments are supported";
                         end if;
-                        if Syms (Idx).By_Ref then
+                        if Syms (Idx).By_Ref
+                          or else (O2c_BC.Link_Slot >= 0
+                                   and then O2c_BC.Up_Level_Slot
+                                     (Ada_Id (Head (1 .. H_Len))) >= 0)
+                        then
                            O2c_Ir_Lower.Store_Idx
                              ((if Syms (Idx).Typ = T_Char
                                or else Syms (Idx).Typ = T_Bool then 1

@@ -217,7 +217,12 @@ package O2c_BC is
    --  nested procedure takes its ID at its declaration and opens its BODY at its
    --  begin, by which time its own nested ones have been emitted.  Begin_Proc is
    --  exactly these two calls, and behaves as it always did.
-   function Reserve_Proc (NParams : Natural; NResults : Natural) return Natural;
+   function Reserve_Proc (NParams : Natural; NResults : Natural;
+                          Nested : Boolean := False) return Natural;
+   function Proc_Nested (Id : Natural) return Boolean;
+   procedure Set_Link_Slot (Slot : Natural);
+   function Link_Slot return Integer;
+   function Up_Level_Slot (Ada_Name : String) return Integer;
    procedure Open_Proc (Id : Natural);
    procedure End_Proc;
    --  Open the module body.  Called when the statement part begins, after

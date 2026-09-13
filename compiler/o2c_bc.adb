@@ -75,6 +75,7 @@ package body O2c_BC is
       Frame_Slots : Natural := 0;
       NParams     : Natural := 0;
       NResults    : Natural := 0;
+      Nested      : Boolean := False;
    end record;
 
    Procs        : array (1 .. Max_Procs) of Proc_Entry;
@@ -84,6 +85,8 @@ package body O2c_BC is
    --  before its enclosing one.  For a top-level procedure they are the same.
    Cur_Proc     : Natural := 0;   --  0 = no procedure BODY open
    Frame_Proc   : Natural := 0;   --  whose frame is being built
+   Link_Of      : Integer := -1;
+   Saved_Link_Of : Integer := -1;
    Saved_Frame_Proc : Natural := 0;
    Saved_Next_Frame : Natural := 0;
    Body_Proc    : Natural := 0;   --  the module body, once opened
@@ -683,7 +686,8 @@ package body O2c_BC is
    end Mutex_Unlock;
 
    --  ---- procedures and frames -----------------------------------------
-   function Reserve_Proc (NParams : Natural; NResults : Natural) return Natural is
+   function Reserve_Proc (NParams : Natural; NResults : Natural;
+                          Nested : Boolean := False) return Natural is
       Id : Natural;
    begin
       if N_Procs_Used = Max_Procs then
@@ -694,14 +698,17 @@ package body O2c_BC is
       Id := N_Procs_Used;
       Saved_Frame_Proc := Frame_Proc;
       Saved_Next_Frame := Next_Frame;
+      Saved_Link_Of := Link_Of;
       Frame_Proc := Id;
+      Link_Of := -1;
       Next_Frame := 0;
       --  Buf_Off is provisional: Open_Proc puts it where the body really starts,
       --  which for a nested procedure is after its own nested ones.
       Procs (Id) := (Buf_Off    => Length (Code),
                      Frame_Slots => 0,
                      NParams     => NParams,
-                     NResults    => NResults);
+                     NResults    => NResults,
+                     Nested      => Nested);
       return Id;
    end Reserve_Proc;
 
@@ -734,6 +741,7 @@ package body O2c_BC is
       Procs (Frame_Proc).Frame_Slots := Next_Frame;
       Frame_Proc := Saved_Frame_Proc;
       Next_Frame := Saved_Next_Frame;
+      Link_Of := Saved_Link_Of;
       Cur_Proc := 0;
    end End_Proc;
 
@@ -783,6 +791,31 @@ package body O2c_BC is
 
    function Frame_Open return Boolean is
      (Frame_Proc /= 0);
+
+   function Proc_Nested (Id : Natural) return Boolean is
+     (Id in Procs'Range and then Procs (Id).Nested);
+
+   procedure Set_Link_Slot (Slot : Natural) is
+   begin
+      Link_Of := Integer (Slot);
+   end Set_Link_Slot;
+
+   function Link_Slot return Integer is (Link_Of);
+
+   function Up_Level_Slot (Ada_Name : String) return Integer is
+   begin
+      if Saved_Frame_Proc = 0 then
+         return -1;
+      end if;
+      for I in 1 .. N_Locals loop
+         if Locals (I).Proc = Saved_Frame_Proc
+           and then To_String (Locals (I).Name) = Ada_Name
+         then
+            return Integer (Locals (I).Slot);
+         end if;
+      end loop;
+      return -1;
+   end Up_Level_Slot;
 
    function Local_Slot (Ada_Name : String) return Integer is
    begin
