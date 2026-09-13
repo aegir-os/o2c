@@ -5957,6 +5957,43 @@ asserts the refusal ('negative: a name two levels up refused').
 in the enclosing frame, so a two-level access is `Load_Local (link)`, index the PARENT's link slot,
 `Load_Idx`, then the final index - a link walk.  Not done here; refused by name until it is.
 
+### 3es. Reals does NOT land: the metric advanced, and its bytecode is broken
+
+The flip was tried, measured, and reverted.  Two results, both useful.
+
+**1. The metric advanced again.** With `Reals` on, the compound command moves past it:
+
+    o2c error: bytecode backend: Term.SetColor is an FFI primitive and is not yet supported
+
+so the backend now clears `Reals` AND reaches the next library module.  That is the sixth advance of this
+metric in this stretch and it is a real gain in coverage.
+
+**2. But `Reals`'s own code is broken at runtime**, so flipping it would land a feature that does not work -
+and no suite would notice, because nothing exercises `Reals`.  That is exactly the blindness the standing
+rule forbids.  Minimal reproduction (8 lines, /tmp/rr.ob2):
+
+    module RR;  import Out, Reals;
+    var s: array 32 of char; r: real;
+    begin  r := 1.0;  Reals.Convert (r, s);  Out.String (s);  Out.Ln  end RR.
+
+    -> vm: internal error in phase 3: STORAGE_ERROR (stack overflow or erroneous memory access)
+
+**Bisected, so the next probe starts ahead.**  Not the caller's real arithmetic, not strings, not nested
+procedures with parameters:
+
+    r := 1.0; Reals.Convert (r, s)        CRASH
+    r := 1.0 / 3.0; Reals.Convert (r, s)  CRASH
+    s[0] := "a"; ... Out.String (s)       prints "aa"
+    r := 1.0 / 3.0; Out.Ln                runs
+    nested procedure WITH a parameter     prints 42
+
+So the fault is INSIDE `Convert`'s own body - 115 lines with a nested `Digit`, a nested `Put(ci)`, a
+`for ... to len(str) - 1`, `str[i] := CHR(0)`, and `e := 0 - e` (the shape 3eo fixed).  The next step is to
+narrow it within that body rather than around it; the LEN and indexed-store sites are the ones it exercises
+that no fixture does.
+
+Tree green (flip reverted), `run_bc` PASS, 452 commits.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
