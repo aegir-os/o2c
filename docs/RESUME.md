@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         400
+    commits         401
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4292,6 +4292,47 @@ an intrinsic arm, which is the one path that does not check.
 its characters (the natives' contract, offset 0 of the field's data, not of the field's storage),
 in the intrinsic arms and the value path alike.  Then `FRead`/`FWrite`/`FClose` get a real address,
 and the Files bodies become correct - they are already correct in every other respect.
+
+### 3cu. The lowering is located, and the fix is a missing ARGUMENT
+
+3ct said the fix is "lower an array-valued field to the address of its characters".  The code that
+does that already exists - and the reason a field is wrong is visible without running anything.
+
+**The address arithmetic lives in `O2c_Ir_Lower.Addr_Global`, and both indexed paths already call it
+with three arguments:**
+
+    the `[` branch, scalar element    (2142):  Addr_Global (Base_Name,
+                                                 (if Is_Ptr or Base_On_Stack then 0 else Total_Slots (Base_UT)),
+                                                 Nested)
+    the `[` branch, user-typed row    (2180):  the same, to make the two agree after they diverged
+
+`Nested` is the accumulated field offset, and its comment says why the second argument is
+conditional: a POINTER's `Total_Slots` is zero, so a field reached through a pointer must be given
+its offset explicitly - "the diagnostic blamed the array's length while the length was fine and the
+address was a globals slot that does not exist".
+
+**The value path calls the same primitive with TWO arguments** (2298, at the end of
+`Parse_Rec_Ptr_Chain`, under `if VK = V_Arr and then UTypes (UT).Elem = T_Char`):
+
+    Addr_Global (Base_Name, Total_Slots (Base_UT))          --  no `Nested`
+
+So a field's characters are addressed as if the field began at the object's base.  That is the
+missing argument, and it is the whole of 3ct's root cause.
+
+**And the layout question that looked like it might be the bug is answered, and is not a bug.**  The
+array field's characters start at the field's own offset; the 8-byte word that made `FileDesc` 80
+bytes instead of 72 sits *after* the 64 characters (the length word at 64, `size` at 72), which is
+exactly why `Field_Offset (name)` is 0 and why the natives' `Name_At` - which reads from the address
+given, offset 0, to a NUL - is consistent with the indexed access `f^.name[i]`.  The two agree.  The
+value path is the only party disagreeing.
+
+**The remaining blocker is one read and one edit**: `Parse_Factor`'s handling of an array-char
+designator, to see why `Out.String (fp^.name)` produced `vm: malformed code` when 2298 should have
+pushed an address - either the factor discards a value the chain pushed (a depth mismatch the
+verifier caught) or the chain's push is skipped and the factor never compensates.  Then 2298 takes
+its third argument like its indexed siblings already do, and `fldv.ob2` / `fldv2.ob2` (kept in
+/tmp, reproduced in 3ct) become the fixtures: `Out.String (fp^.name)` should print ABC, and
+`Show (fp^.name)` should stop being refused.
 
 ## 4. Method — what worked, and what did not
 
