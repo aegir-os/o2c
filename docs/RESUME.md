@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         410
+    commits         411
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4668,6 +4668,46 @@ received.  This is not a Files bug: it is every assignment to a `var` scalar for
 and it is why `eof`/`pos`/`res` (fields, not formals) all behaved.
 
 So the flip stays out, for a reason that is now one instruction wide.
+
+### 3de. The `var` scalar store — site found, plan complete, not started
+
+3dd named the blocker from `Read`'s disassembly (`STORE_L [1]` for a `var` scalar formal) and
+located the general defect.  This turn found the one site that emits it and settled the whole plan;
+the edit itself wants a fresh session, because it is four layers and every program passes through it.
+
+**The site** - the statement dispatcher's plain scalar assignment:
+
+    9869:  else
+    9870:     declare V : Expr_Rec := Parse_Expr;      --  the value goes on the stack here
+    ...
+    9886:        Bc_Store (Ada_Id (Head (1 .. H_Len)));  --  and this is STORE_L/STORE_G
+
+`Bc_Store` (350) chooses local-vs-global from `Local_Slot`, and a `var` formal IS a frame name - which
+is exactly why it picks `STORE_L`, writing the slot that HOLDS the address.  The other three
+`Bc_Store` sites are `Assign_Pointer` (2785), `NEW` (7790) and a procedure value (9176); none of them
+is the scalar case.
+
+**The plan, with the operands the spec already provides:**
+
+    LOAD_ADDR_L (0x15)   "VAR params, arrays"     -> the address, from the slot
+    STORE_IDX_B / _I     via Store_Idx (1 | 8)    -> [base, idx, value]
+    LOAD_IND_I (0x17)    the read side, same shape
+
+so the front end must push the base and the index BEFORE the value is parsed (Store_Idx consumes
+[base, idx, v] in that order), and `By_Ref` is already on the symbol (`Syms (Idx).By_Ref`, as
+`Bc_Field_Base` uses).
+
+**Plumbing to append, all of it append-only:** `Load_Addr_L` on `O2c_BC` (procedure, `Byte_Of =>
+16#15#`, u16 operand like `Load_L`), an `Op_Load_Addr_L` on the IR plus its `Emit_Quad` arm - which
+the missing `others` arm forces, by design - and a `Load_Addr_L` helper on `O2c_Ir_Lower`.
+`Store_Idx`/`Load_Idx` already exist and are what the indexed paths use.
+
+**And the read side is the same bug**, which is why `Files.Pos` (a field) worked while `ch` (a
+formal) did not: `LOAD_L` of a by-ref scalar yields the ADDRESS, so a read of one is wrong too.
+
+**The test is already written**: `fres.ob2` in /tmp must print `c=[h]` instead of `c=[ ]`, and
+`fall.ob2` must print `hello`.  A fixture belongs beside `arrfield.ob2` when it does - one that
+assigns to a `var` scalar formal and shows the caller's variable changed.
 
 ## 4. Method — what worked, and what did not
 
