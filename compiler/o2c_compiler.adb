@@ -3808,10 +3808,29 @@ package body O2c_Compiler is
                              O2c_BC.Local_Slot (Ada_Id (LNm));
                         begin
                            if Sl < 0 then
-                              raise O2c_BC.Wrong_Construct with "bytecode "
-                                & "backend: LEN of an unknown parameter";
+                              --  One level up: an open-array parameter of the
+                              --  ENCLOSING procedure.  Local_Slot searches the
+                              --  current frame only, so the name is not here -
+                              --  but the link reaches the enclosing frame, and an
+                              --  array-of travels as TWO slots, so the LENGTH is
+                              --  one above the address (3em).
+                              declare
+                                 Up : constant Integer :=
+                                   O2c_BC.Up_Level_Slot (Ada_Id (LNm));
+                              begin
+                                 if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
+                                    O2c_Ir_Lower.Load_Local
+                                      (Natural (O2c_BC.Link_Slot));
+                                    O2c_Ir_Lower.Push_Int (Up + 1);
+                                    O2c_Ir_Lower.Load_Idx (8);
+                                 else
+                                    raise O2c_BC.Wrong_Construct with "bytecode "
+                                      & "backend: LEN of an unknown parameter";
+                                 end if;
+                              end;
+                           else
+                              O2c_Ir_Lower.Load_Local (Natural (Sl) + 1);
                            end if;
-                           O2c_Ir_Lower.Load_Local (Natural (Sl) + 1);
                         end;
                      elsif Syms (LId).UT /= 0
                        and then UTypes (Syms (LId).UT).Arr_Len > 0
@@ -8905,11 +8924,28 @@ package body O2c_Compiler is
                begin
                   if O2c_BC.Bytecode_Mode then
                      if Sl < 0 then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "ARRAY OF parameter is not in the frame: "
-                          & Head (1 .. H_Len);
+                        --  One level up: an array-of parameter of the ENCLOSING
+                        --  procedure.  Its slot holds the array's ADDRESS, so
+                        --  dereferencing the enclosing slot through the link
+                        --  yields the base an indexed access needs - the same
+                        --  shape as the LEN site above (3em).
+                        declare
+                           Up : constant Integer :=
+                             O2c_BC.Up_Level_Slot (Ada_Id (Head (1 .. H_Len)));
+                        begin
+                           if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
+                              O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
+                              O2c_Ir_Lower.Push_Int (Up);
+                              O2c_Ir_Lower.Load_Idx (8);
+                           else
+                              raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                                & "ARRAY OF parameter is not in the frame: "
+                                & Head (1 .. H_Len);
+                           end if;
+                        end;
+                     else
+                        O2c_Ir_Lower.Load_Local (Natural (Sl));
                      end if;
-                     O2c_Ir_Lower.Load_Local (Natural (Sl));
                   end if;
                end;
                declare

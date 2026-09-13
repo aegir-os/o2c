@@ -5784,6 +5784,35 @@ where it does.
 The probe is reverted (the rule stands: `Reals` goes in only with its own evidence), tree green,
 `run_bc` PASS, 445 commits.
 
+### 3em. The up-level treatment in two more sites - and Reals' whole backend chain clears
+
+Both fallbacks left by 3el were the same species: a site that calls `O2c_BC.Local_Slot` directly, so a name
+one level up is not found and the site refuses.  Given the same treatment as `Bc_Load`/`Bc_Store`:
+
+* **`LEN` of an open-array parameter** - `Load_Local (link)`, `Push_Int (outer slot + 1)`, `Load_Idx (8)`:
+  an array-of travels as two slots, so the LENGTH sits one above the address.
+* **the base of an indexed access** to an array-of parameter - `Load_Local (link)`, `Push_Int (outer slot)`,
+  `Load_Idx (8)`: that slot holds the array's ADDRESS.
+
+Both only replace what was a RAISE, so nothing that compiled before changes behaviour; the gate says so
+anyway (all seven suites PASS, and `nestproc` still prints 42).
+
+**Measured with the `Reals` flip ON, the refusal advanced THREE times and then left the bytecode backend
+entirely:**
+
+    Reals.Convert is an FFI primitive and is not yet supported     <- before this work
+    LEN of an unknown parameter                                    <- after the LEN site
+    ARRAY OF parameter is not in the frame: str                    <- after both
+    M3 statement expected at line 63                               <- a PARSER limitation
+
+The last one is not a backend refusal at all, and the line number is the BUILTIN's, not the sample's -
+this compiler is single-pass, so the module being compiled owns the line.  That is `Oak_Reals_Src`'s line
+63, and with `Reals` ON the backend now compiles the whole module.
+
+The flip is still REVERTED, because the builtin does not compile yet: what stands between `Reals` and
+`Scoped => True` is an M3-era statement-parser limitation, not the bytecode backend.  That is a different
+subsystem and a separate step.  Tree green, `run_bc` PASS; committed state carries the two fixes.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
