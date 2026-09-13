@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         366
+    commits         367
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2710,6 +2710,51 @@ cause - and the expression path looks the id up in `Xs (XI).Bc` while the statem
 path uses `Syms (Idx).Bc_Proc`, which are two different lookups and only the first is
 known to be wired to the export table.  That is a HYPOTHESIS from reading two call
 sites, not a measurement, and the next step is to measure it rather than to act on it.
+
+### 3bm. DONE — 3bl's hypothesis, measured: the metric leaves `Geom`
+
+The hypothesis was right about the symptom and wrong about the lookup, and the
+correction is the useful part.  **The imported-module statement path had no
+bytecode lookup at all** — the `Syms (Idx).Bc_Proc` calls are the two *local*
+statement sites (9462, 9624, the second of which also routes a foreign
+procedure to `Call_Native`).  The imported statement site fell straight through
+the FFI allowlist to the default refusal:
+
+    Geom.SetBase is an FFI primitive and is not yet supported          (7969)
+
+That message names whatever call reached the end of the chain.  It was never a
+diagnosis of `SetBase`, which is an ordinary procedure with a body — so 3bl's
+"may be a misleading diagnosis of a different cause" is now settled: it was
+one, and the cause was a missing branch, not a wrong id.
+
+**The fix is the expression path's branch (3661/3677), in the statement path:**
+
+    if Xs (XI).Bc /= 0 then  O2c_BC.Call_Proc (Xs (XI).Bc);
+    elsif <the FFI allowlist, unchanged>  ...
+
+`Xs (XI).Bc` is the imported procedure's bytecode id and the export/import
+tables already carry it.  `Parse_Actual` has pushed every actual, so NOTHING is
+pushed here; the double-push is exactly what made u3/u4 the callee's garbage.
+
+**The one line 3bl reverted comes back with it**, because it is what gives a
+user library's procedures an id in the first place — 3bl's own reading, now
+measured end to end instead of believed.
+
+**Metric** — `hello.ob2`'s refusal, three states:
+
+    Geom.Sqr is not yet supported                    HEAD, and many steps before
+    Geom.SetBase is an FFI primitive ...             3bl's one line alone
+    Strings.Pos is not yet supported                 now — past Geom entirely
+
+**Verified**: gate25 — all seven suites green (`run_bc`, `run_vm`,
+`run_stress`, `run_m1`, `bytecode_gaps`, `coverage`, `differential`), zero
+warnings, metric reproduced by hand on the same tree.
+
+**Not measured, and recorded rather than assumed**: `o2c_bc_host` takes library
+sources as extra arguments and **no test script passes one**, so `hello.ob2` is
+the only end-to-end exercise of this branch.  A green gate says nothing
+regressed — it is not coverage of the thing that changed, and a host fixture
+importing a user library is the next test this site should have.
 
 ## 4. Method — what worked, and what did not
 

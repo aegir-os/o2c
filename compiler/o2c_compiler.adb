@@ -7657,6 +7657,14 @@ package body O2c_Compiler is
                            --  MARKER_DEFAULT_REFUSAL
                            if O2c_BC.Bytecode_Mode
                            then
+                              if Xs (XI).Bc /= 0 then
+                                 --  The callee's code is in THIS image, so this
+                                 --  is an ordinary call and not a native - the
+                                 --  same branch the expression path takes
+                                 --  (3677).  Parse_Actual already pushed every
+                                 --  actual, so NOTHING is pushed here; pushing
+                                 --  again is what made u3 the callee's garbage.
+                                 O2c_BC.Call_Proc (Xs (XI).Bc);
                               --  The FFI surface takes ADDRESSES: these are
                               --  written in terms of out parameters, so the
                               --  call site pushes where the results go and
@@ -7670,7 +7678,7 @@ package body O2c_Compiler is
                               --  whether that slot holds an INTEGER or a
                               --  REAL, which the native knows and the call
                               --  site does not need to.
-                              if Eq_No_Case (MNm, "Convert")
+                              elsif Eq_No_Case (MNm, "Convert")
                                 and then (Eq_No_Case
                                             (To_String (MName), "ToInt")
                                           or else Eq_No_Case
@@ -12379,6 +12387,12 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       for I in 1 .. N_Libs loop
          if not Is_Provided (To_String (Libs (I).Name)) then
             --  skip a user module that duplicates a builtin (M38)
+            --  A USER library is not a builtin: there is no native to call for
+            --  it, so its own bodies have to be in the image and its procedures
+            --  need ids.  Builtins keep Scoped => False above.
+            if Bytecode_Requested then
+               O2c_BC.Bytecode_Mode := True;
+            end if;
             Compile_Module (To_String (Libs (I).Text), True,
                             M_T, S_T, B_T);
             Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
