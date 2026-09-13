@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         412
+    commits         413
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4745,6 +4745,39 @@ holds the value, and `STORE_L` writes it - which is exactly why the original cod
 
 Part 3 alone is what turns Files.Read's silent loss into a crash, which is why it is not in the tree.
 Run the three together, and `fres.ob2` prints `c=[h]` and `fall.ob2` prints `hello`.
+
+### 3dg. Why LOAD_ADDR_L was never implemented — and the by-ref scalar is a DESIGN fork
+
+3df found that the VM does not implement `LOAD_ADDR_L` and that the caller passes a value.  This is
+the reason, and it is a good one - not an oversight.
+
+**Frame slots are reallocated.**  `Push_Frame` grows the frame arrays by allocating a bigger block and
+copying:
+
+    New_Slots : constant Natural_Array_Access := new Natural_Array'(0 .. Cap - 1 => 0);
+    ...
+    New_Slots (0 .. Old - 1) := Frame_Slots.all;
+    Frame_Slots := New_Slots;
+
+so the address of a frame slot is only valid until the next deeper call - which means `LOAD_ADDR_L`
+("the address of a frame slot's variable") has nowhere safe to point for a LOCAL.  A module-level
+variable's address is fine (the globals block is not reallocated), which is exactly the case
+`Files.Read (r, c)` is: both `r` and the caller's `c` are module-level in any realistic program, and
+`LOAD_ADDR_G` already exists.
+
+**So the by-ref scalar is a three-way design fork, and it is the user's to make:**
+
+    (a) GLOBALS-ONLY   by-ref scalar actuals work when the caller's variable is module-level (push
+                       LOAD_ADDR_G, no VM change, and it unblocks Files); a LOCAL actual is REFUSED
+                       loudly rather than silently not written back.
+    (b) STABLE SLOTS   give frame slots a stable home so LOAD_ADDR_L can exist - the correct fix,
+                       by-ref scalars everywhere, at the cost of reworking the frame model.
+    (c) BOXED SCALARS  the caller boxes its own scalar in storage it owns and copies back, so no VM
+                       opcode is needed and locals work too, at the cost of per-call (or pooled)
+                       allocation.
+
+Whichever is chosen, the callee side (3df part 3) goes with it: `Load_Local` as the base,
+`Push_Int (0)`, the value, `Store_Idx (1 | 8)`.
 
 ## 4. Method — what worked, and what did not
 
