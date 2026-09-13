@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         392
+    commits         393
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4016,6 +4016,39 @@ line: expect the same population of small defects as the Strings/Texts path had 
 end), and expect the fixtures to come from OBNC's `FilesTest.obn` rather than from `tests/bc`.
 
 The flip is out again; the metric is at `Files.Old`; the ledger still stands at seven.
+
+### 3cm. The Files bisect, continued — every SHAPE is fine, so the suspect is the NATIVE ARGUMENT
+
+3cl stopped at "New is fine and nothing is written".  Four more measurements, all with the flip in,
+narrow it further - and two of them correct what the earlier entries implied.
+
+**What is now PROVEN GOOD, shape by shape** (each a user module, none of them using Files):
+
+    an indexed write into an ARRAY FIELD through a pointer      p^.n[0] := "Z"        ->  ZY
+    Files.New's exact combination - a LOCAL pointer, an open-array formal, the 64-step
+    name loop with its if/else, the field written through it                          ->  ZY
+    Files.Set's shape - a `var Rider` record formal written field by field,
+    including a POINTER field, read back                                              ->  7 same
+
+**And the intrinsics ARE emitted inside the compiled library**: the image for a probe that only
+calls `Files.Old` contains `CALL_NATIVE id=9 arity=1`, which is `FStat` (§3aw's region A, keyed on
+the module being compiled).  So "the builtin's own body reaches its intrinsic" works, which was the
+first thing to doubt.
+
+**A correction to 3ck/3cl**: `Files.Length (f)` returning 0 after the write is *consistent* with
+the write not landing - `New` sets `size := 0` and nothing increments it - so `Length` is not wrong
+and this is not a second defect.  The failure is one thing: **the write through a Rider does not
+reach the file.**
+
+**So the suspect is the ARGUMENT CONVENTION for a native that takes an `array of char`.**  In the
+library body `FStat (name)` passes an open-array formal, and the same shape appears in `Write`/
+`WriteString`.  The question to measure next is narrow and mechanical: compare those call sites
+against the `Out.String (s)` call sites, which are known to work, since both hand a native an
+`array of char` argument - if one pushes an address and a length where the other pushes one word,
+the mismatch is the whole bug, and it is the same formal-versus-slot question 3ch raised for CALL
+and never resolved for CALL_NATIVE.
+
+The flip is out; the metric is at `Files.Old`; the ledger stands at seven, with one correction.
 
 ## 4. Method — what worked, and what did not
 
