@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         389
-    fixtures        87 in tests/bc/
+    commits         390
+    fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -3897,6 +3897,56 @@ so the chain loads it rather than interning a global** - and `r1`/`r3` are its r
 which is why 88 fixtures never said a word.  `run_bc`, `bytecode_gaps` and `coverage` are green
 with the refusal in place: a construct that cannot be expressed now says so, in the same shape as
 its three predecessors.
+
+### 3cj. Record actuals WORK — and with them Texts, so the metric is at Files
+
+3ci's refusal is gone, replaced by the fix it named, and one more library came with it.
+
+**The fix is ONE procedure where there were two copies.**  `Bc_Base` decides a record/array
+base's address by three cases, and the copies got the first wrong:
+
+    a VAR formal      its slot holds the CALLER's address, so the base is that value -
+                      `Bc_Load` - not a global run of its name
+    a LOCAL variable  has no address in this VM (3br's reserved Op_Addr_Local), so it REFUSES
+    a GLOBAL          is a run in the image's globals block
+
+Both copies of the base derivation called `Addr_Global` unconditionally, which is why a store
+through a record formal landed in a fresh zeroed global.  And the *caller* side is one line -
+push the variable's address - which 3ci deliberately withheld while the callee was broken,
+because doing it first turned a loud verifier rejection into a silent wrong answer.
+
+    r1   `Set (w)` then `Out.Int (w.pos, 0)`      1 -> 7
+    r3   `Show (w)` reading `x.pos`               0 -> 3
+
+`tests/bc/recactual.ob2` is that fixture - the one that could not exist an hour ago - and
+`bytecode_gaps.sh`'s `blocked` entry is gone, leaving its history in a comment.  That entry would
+have FAILED had it stayed, which is what it was for.
+
+**And with the record actual fixed, Texts landed too.**  `Compile_Builtin (Oak_Texts_Src, Scoped
+=> True)` - which every `Texts.OpenWriter` and `Texts.Write*` call was blocked on, since all of
+them pass a `var Writer`:
+
+    Texts.OpenWriter (w); Texts.WriteString (w, "hi "); Texts.WriteInt (w, 42, 0);
+    Texts.Write (w, "!"); Texts.WriteLn (w)        ->  prints  hi 42!
+
+    hello.ob2 refuses at   bytecode backend: Files.Old is not yet supported
+
+**Two libraries in one session, and the ledger is now seven:**
+
+    3cb  a parameterless function call emitted NOTHING                    fixed, parfn.ob2
+    3cc  a `var ARRAY OF` element write emitted NOTHING                   fixed, vararr.ob2
+    3ce  a literal actual passed no LENGTH                                fixed, litarg.ob2
+    3cg  a literal actual passed an OFFSET where an address was needed    fixed, litarg.ob2
+    3ci  a record actual emitted NOTHING                                  fixed, recactual.ob2
+    3cj  ... and the callee resolved its name as a GLOBAL                 fixed, recactual.ob2
+    3cg/3ch  Strings and Texts now compile their own bodies               strlib, textslib
+
+`textslib.ob2`'s body also carries `Texts.Write`'s own `t[0] := ch` - an indexed write into a
+LOCAL array - so the library fixture is testing the corpus's blind spot rather than repeating it.
+
+**The next refusal is `Files`**, and its bodies are a different kind of test again: `Files` is
+where the intrinsics (3l's `FStat`/`FRead`/`FWrite`/`FClose`) live, and its own body is what
+`Files.*` in user code reaches.
 
 ## 4. Method — what worked, and what did not
 

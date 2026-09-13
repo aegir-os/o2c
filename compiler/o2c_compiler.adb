@@ -1751,6 +1751,46 @@ package body O2c_Compiler is
    --  p^.next^.v into p.next.v; char-array indexing adds 1 (Ada
    --  String is 1-based).  Bare pointer variables are valid D_Ptr
    --  operands (p = NIL / whole-pointer copies).
+   --  The BASE ADDRESS of a whole record or array variable, for a field access.
+   --  THREE cases, and the first two are what the copies of this got wrong:
+   --
+   --    a VAR formal      its slot holds the CALLER's address, so the base is
+   --                      that value - not a global run of its name.  Interning
+   --                      a run called `x` made a store through a record formal
+   --                      land in a fresh zeroed global while the caller's
+   --                      record was untouched (3ci/3cj).
+   --    a LOCAL variable  has NO address in this VM: LOAD_L moves a value and
+   --                      there is no load-address-of-local op, which is why
+   --                      Op_Addr_Local is reserved (3br).  It refuses, loudly.
+   --    a GLOBAL          is a run in the image's globals block.
+   --
+   --  One rule, one place: this arithmetic was written out twice and both copies
+   --  had the first case wrong.
+   procedure Bc_Base (Base_Name : String; Base_UT : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      declare
+         An  : constant String := Ada_Id (Base_Name);
+         BId : constant Natural := Find (Base_Name);
+      begin
+         if BId /= 0 and then Syms (BId).Kind = S_Var
+           and then Syms (BId).By_Ref
+         then
+            Bc_Load (An);
+         elsif BId /= 0 and then Syms (BId).Kind = S_Var
+           and then O2c_BC.Local_Slot (An) >= 0
+         then
+            raise O2c_BC.Wrong_Construct with "bytecode backend: "
+              & "a LOCAL record or array variable's fields have no address yet "
+              & "('" & Base_Name & "')";
+         else
+            O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT));
+         end if;
+      end;
+   end Bc_Base;
+
    function Parse_Rec_Ptr_Chain (Base_Name : String;
                                  Base_UT   : Natural)
      return Desig
@@ -1972,8 +2012,7 @@ package body O2c_Compiler is
                      if not UTypes (Base_UT).Is_Ptr
                        and then not D.Base_On_Stack
                      then
-                        O2c_Ir_Lower.Addr_Global
-                             (Base_Name, Total_Slots (Base_UT));
+                        Bc_Base (Base_Name, Base_UT);
                      end if;
                   else
                      --  Ada mode needs no offset, so a scalar leaf is just its
@@ -2032,8 +2071,7 @@ package body O2c_Compiler is
                      if not UTypes (Base_UT).Is_Ptr
                        and then not D.Base_On_Stack
                      then
-                        O2c_Ir_Lower.Addr_Global
-                             (Base_Name, Total_Slots (Base_UT));
+                        Bc_Base (Base_Name, Base_UT);
                      end if;
                      O2c_Ir_Lower.Load_Fld
                        ((F - 1) * 8, O2c_Ir_Lower.Fld_Ptr);
@@ -2459,23 +2497,17 @@ package body O2c_Compiler is
                   Nm : constant String := Cur.Text (1 .. Cur.Len);
                   Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
                begin
-                  pragma Unreferenced (Sl);
-                  --  REFUSED, and the reason is measured rather than assumed:
-                  --  the CALLEE's side is what is missing.  Inside the callee a
-                  --  record formal's designator chain resolves its name as a
-                  --  GLOBAL - `Push_Base` interns a run called `x` and stores
-                  --  through THAT - so the write lands in a fresh zeroed global
-                  --  and the caller's record is untouched.  Pushing an address
-                  --  here (which is right) therefore turned a loud verifier
-                  --  rejection into a SILENT wrong answer: r1 printed 1 instead
-                  --  of 7 and r3 printed 0 instead of 3.  Refusal is the
-                  --  default, and a refusal is what this gets until the
-                  --  chain's base derivation handles a parameter's own slot -
-                  --  the same "address is in the parameter's slot" rule the
-                  --  ARRAY OF path already uses.
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "a record or fixed-array actual is not yet supported ('"
-                    & Nm & "')";
+                  if Sl >= 0 then
+                     --  A frame local has no address in this VM (3br), so a
+                     --  local record actual still refuses - but the GLOBAL case
+                     --  now works, because the callee's side does: the chain
+                     --  calls Bc_Base, which loads a by-reference formal's own
+                     --  slot instead of interning a global run called `x`.
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "a record or fixed-array actual that is a LOCAL is not "
+                       & "yet supported ('" & Nm & "')";
+                  end if;
+                  O2c_Ir_Lower.Addr_Global (Nm, Total_Slots (Formal.UT));
                end;
             end if;
             A.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
@@ -12384,7 +12416,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Texts_Src, Scoped => False);
+      Compile_Builtin (Oak_Texts_Src, Scoped => True);
       if Emits ("Texts") then
          --  Texts: parsed above in every case, emitted
          --  only when something imports it (see Emits).

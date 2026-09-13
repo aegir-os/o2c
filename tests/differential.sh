@@ -172,6 +172,12 @@ filesintr	ADA_BROKEN	emits Ada that will not compile: a user module named Files 
 #  the import itself (M19) - the fixture's subject is the three imported CALL
 #  sites, which the VM side compiles, runs and checks by output.
 usercall	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
+#  recactual passes a record to a procedure and writes through it - the fixture
+#  for 3cj, and its subject is the VM side (the callee has to resolve a record
+#  formal's own slot).  The Ada side emits Ada that will not build: "w"
+#  conflicts with a declaration, the same name-collision family as gcscalar,
+#  recmix and recreal, and the Ada backend is being retired.
+recactual	ADA_BROKEN	emits Ada that will not compile: a variable name collides with a declaration
 withguard	GOLDEN_SUSPECT	the Ada side does not implement WITH's skip; the VM and the golden DO, and Oberon's WITH skips, so the Ada side is the odd one out
 EOB
 

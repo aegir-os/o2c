@@ -446,15 +446,12 @@ check "LONGINT add/sub/mul/DIV/MOD and unary -" ok 'module G48; var n: longint; 
 #  it is not mistaken for the arithmetic gap again.
 check "LONGINT literal above INTEGER'Last" blocked 'module G49; var n: longint; begin n := 3000000000 end G49.'
 
-#  A record or fixed-array ACTUAL (3ci).  The caller's side is one line - push
-#  the variable's address - but the CALLEE's side resolves a record formal's
-#  name as a GLOBAL, so it stores through a fresh zeroed run of that name and
-#  the caller's record is untouched.  Pushing the address therefore converts a
-#  loud verifier rejection into a SILENT wrong answer (r1 printed 1, not 7), so
-#  it refuses until the chain's base derivation gives a parameter's own slot the
-#  same treatment the ARRAY OF path already has.  This entry FAILS when that
-#  lands, which is the point of it.
-check "a record actual (VAR record formal)" blocked 'module G52; type W = record pos: integer end; var w: W; procedure Set(var x: W); begin x.pos := 7 end Set; begin w.pos := 1; Set(w) end G52.'
+#  A record or fixed-array ACTUAL was BLOCKED here in 3ci and is gone from the
+#  list because the gap CLOSED (3cj): the caller pushes the variable's address
+#  AND the callee's chain loads a by-reference formal's own slot, which is what
+#  made the store land in the caller's record instead of a fresh global run of
+#  the same name.  tests/bc/recactual.ob2 is the fixture that used to be
+#  impossible - and this entry would have FAILED had it stayed.
 
 note "--- ARRAY OF parameters, and the Files intrinsics ---"
 #  Out.String (s) inside a procedure failed with "operand-stack underflow": a
