@@ -114,10 +114,19 @@ package body O2c_Ir_Lower is
             --  image that fails verification later - or, worse, one that does
             --  not.
             if N_Args /= Q.Imm_2 then
-               raise Program_Error with "O2c_Ir_Lower: native"
-                 & Natural'Image (Q.Imm_1) & " takes"
-                 & Natural'Image (Q.Imm_2) & " arguments but"
-                 & Natural'Image (N_Args) & " were pushed";
+               --  Reset BEFORE raising: the run counter is state, and leaving
+               --  it dirty would mis-attribute the arguments of the NEXT call.
+               --  The self-test found this, because it lowers a mismatched call
+               --  and then a valid one.
+               declare
+                  Pushed : constant Natural := N_Args;
+               begin
+                  N_Args := 0;      --  clean state, even on the failure path
+                  raise Program_Error with "O2c_Ir_Lower: native"
+                    & Natural'Image (Q.Imm_1) & " takes"
+                    & Natural'Image (Q.Imm_2) & " arguments but"
+                    & Natural'Image (Pushed) & " were pushed";
+               end;
             end if;
             N_Args := 0;
             O2c_BC.Native_Call (Q.Imm_1, Q.Imm_2);

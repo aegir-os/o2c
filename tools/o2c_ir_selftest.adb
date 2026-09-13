@@ -162,6 +162,26 @@ begin
       end;
       Check (Raised2, "a native call whose arity disagrees raises");
 
+      --  And the EMPTY Op_Arg run, which is what Out.Ln is: a native with no
+      --  arguments.  The arity check has two boundaries and this is the one
+      --  the corpus exercises in every fixture.
+      Before := O2c_BC.Insns;
+      O2c_Ir_Lower.Emit_Quad
+        ((Op => Op_Call_Native, Imm_1 => 2, Imm_2 => 0, others => <>));
+      Check (O2c_BC.Insns = Before + 1,
+             "a no-argument native lowers to one instruction");
+
+      Raised2 := False;
+      begin
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => C5, others => <>));
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Call_Native, Imm_1 => 2, Imm_2 => 0, others => <>));
+      exception
+         when Program_Error =>
+            Raised2 := True;
+      end;
+      Check (Raised2, "an argument pushed at a no-argument native raises");
+
       O2c_BC.End_Proc;
       O2c_BC.Finish;
    end;

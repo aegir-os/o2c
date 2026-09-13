@@ -9034,7 +9034,17 @@ package body O2c_Compiler is
                   Next;
                   if Member = "Ln" then
                      if O2c_BC.Bytecode_Mode then
-                        O2c_BC.Native_Call (2, 0);
+                        --  M4b: the FIRST route through the IR - one member,
+                        --  one place.  No Op_Arg run precedes it, so this is
+                        --  also the arity check's empty case.  The emission is
+                        --  identical to the Native_Call it replaces, which is
+                        --  why the corpus is the net: Out.Ln is in every
+                        --  fixture, so a mistake here cannot hide.
+                        O2c_Ir.Emit (O2c_Ir.Op_Call_Native,
+                                     Imm_1 => 2, Imm_2 => 0);
+                        O2c_Ir_Lower.Emit_Quad
+                          (O2c_Ir.Quad_At
+                             (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
                      end if;
                      Append_Body ("      Aegir_User.Console.Put_Line ("""");");
                   elsif Member = "String" or else Member = "Int"

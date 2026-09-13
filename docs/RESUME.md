@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         353
+    commits         354
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2408,6 +2408,43 @@ All seven suites green, 52 corroborated by both backends, zero warnings.
 **M4b next**: the first parser route through it - one member family, one route -
 with the corpus as the net.  The two routes stay distinct on purpose (`Mod_Name`
 for a module's own intrinsics, `MNm`/`MName` for a caller), as 3ax measured.
+
+### 3az. M4b DONE - the first ROUTE through the IR, and the test caught a real bug
+
+`Out.Ln` was chosen because it is the best-covered construct in the repo: present
+in EVERY fixture, so the corpus is the net rather than a fixture I write.  The
+inline `O2c_BC.Native_Call (2, 0)` became a quad that the lowering emits:
+
+    O2c_Ir.Emit (Op_Call_Native, Imm_1 => 2, Imm_2 => 0);
+    O2c_Ir_Lower.Emit_Quad (<that quad>);
+
+No `Op_Arg` run precedes it, so this is also the arity check's EMPTY case.
+
+**Evidence that it ran** - a temporary trace, as in M2b:
+
+    IR-LN lowered= 1        <- the first Out.Ln in sum.ob2
+    IR-LN lowered= 4        <- counter shared with M2b's two assignments
+
+and the fixture matched its golden, with the image the SAME 352 bytes as before -
+byte-identical emission.  The trace was then removed.
+
+**And the self-test caught a real bug, for the second time.**  The new empty-run
+check failed on first run:
+
+    PROGRAM_ERROR: native 2 takes 0 arguments but 1 were pushed
+
+because a PREVIOUS mismatched call had left the run counter dirty - so a failed
+call poisoned the NEXT one's arity check.  Fixed by resetting the counter before
+raising, with the count captured first so the message still reports it.  That is a
+genuine robustness gap, found because the test lowers both boundaries - zero
+arguments AND a mismatch - rather than one.
+
+All seven suites green, 52 fixtures corroborated by both backends, zero warnings.
+
+**M4c next**: the same pattern, one member at a time, now with a NON-empty Op_Arg
+run - `Out.Char` (one argument) then `Out.Int` (two) - and then the other families.
+Each is a route through machinery that is already verified, which is the point of
+doing the lowering first.
 
 ## 4. Method — what worked, and what did not
 
