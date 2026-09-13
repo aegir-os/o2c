@@ -3882,6 +3882,29 @@ package body O2c_Compiler is
                elsif Syms (Id).Params /= 0 then
                   raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
                     & "' needs arguments";
+               else
+                  --  NO PARENTHESES and no parameters: a parameterless call.
+                  --  The paren case above emitted the call; THIS shape emitted
+                  --  nothing at all, so `n := P` stored whatever happened to be
+                  --  on the operand stack - a wrong image, with no diagnostic,
+                  --  in the one call shape the corpus cannot even write (the
+                  --  `(): T` spelling is refused by the parser, which is why a
+                  --  parameterless FUNCTION has had no fixture anywhere).
+                  --  Found by compiling the Oakwood library bodies (3bz/3ca),
+                  --  whose functions are exactly this shape.
+                  if O2c_BC.Bytecode_Mode then
+                     if Syms (Id).Foreign_Native /= 0 then
+                        O2c_Ir_Lower.Call_Native (Syms (Id).Foreign_Native, 0);
+                     elsif Syms (Id).Bc_Proc = 0 then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "call to '" & Cur.Text (1 .. Cur.Len)
+                          & "' with no procedure id";
+                     else
+                        --  The result stays on the operand stack, where CALL
+                        --  left it - the shape every expression wants.
+                        O2c_Ir_Lower.Call_Proc (Syms (Id).Bc_Proc, 0);
+                     end if;
+                  end if;
                end if;
                return R;
             end if;

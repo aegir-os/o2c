@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         381
-    fixtures        83 in tests/bc/
+    commits         382
+    fixtures        84 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -3550,6 +3550,45 @@ The fix belongs with that path, and its test is e1 above.
 `tests/obnc/` is the compiler's own suite, split into `passing/` and `failing-at-compile-time/`
 - which is the same two-way split `run_bc.sh` uses (goldens and negatives), and a far better
 source of library fixtures than anything in `tests/bc` today.
+
+### 3cb. FIXED — a parameterless FUNCTION call emitted NOTHING, and now has a fixture
+
+3ca narrowed the defect to one shape; this is the fix, and it was four lines of emission that
+had never been written.
+
+**The site.**  `Parse_Factor`'s bare-procedure-name branch (the expression path) had:
+
+    if Cur.Kind = Lex.Tok_LParen then   --  f(x): emits the call
+       ...
+    elsif Syms (Id).Params /= 0 then    --  f with no parens but formals: refused
+       raise ...
+    end if;                             --  and NOTHING for `Params = 0, no parens`
+
+So `n := P` fell through both arms and emitted no call at all.  The result was a store of
+whatever happened to be on the operand stack - the wrong-image class this backend exists to
+eliminate - and the corpus had no way to say so: `(): T` is refused by the parser, so a
+parameterless FUNCTION could not be written in a fixture.  The `else` arm now emits it, through
+the same three-way dispatch the paren arm uses (`Foreign_Native` -> `Call_Native 0`,
+`Bc_Proc = 0` -> refuse, else `Call_Proc (id, 0)`), and the result stays on the operand stack
+where CALL left it.
+
+**And the fixture the corpus could not write is now the test:**
+
+    tests/bc/parfn.ob2   `procedure P: integer; begin return 7 end P;`
+                         used as `n := P` AND as `P + 1` - one bare call and one inside an
+                         expression
+
+which prints 7 and 8.  It is enrolled by the discovery loop, and the Ada side has always
+accepted this shape (`n := P;` is valid Ada), so the differential should CORROBORATE it rather
+than record it - the first fixture in a while that both backends agree on.
+
+**Why this one matters more than its size.**  It is the shape the Oakwood library bodies are
+built from, so it sat directly on 3bz's path: the `Scoped => True` lever cannot move the metric
+past a library that calls its own parameterless helpers in expressions.
+
+Evidence: identity (unchanged for the corpus - the fix only adds emission where there was none),
+`run_bc` including the new fixture, gate38; four theories were wrong before the byte dump was
+right (3ca), which is why the fixture ships with the fix rather than after it.
 
 ## 4. Method — what worked, and what did not
 
