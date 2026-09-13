@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         388
+    commits         389
     fixtures        87 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3860,6 +3860,43 @@ one's - and `Texts.WriteString`'s call, above, is its reproducer.
 **A correction to the last four entries' framing**: the "depth -1" family was read as several
 distinct causes, and two of them were real and fixed (3ce's missing length, 3cb's missing call).
 What remains after those is THIS ONE: a model that counts formals where the machine moves slots.
+
+### 3ci. A record ACTUAL — the fourth "no bytecode branch" path, and why it REFUSES
+
+3ch's data (depth -1, causing opcode `Call`) went one step further and found a fourth path of
+the same class as 3cb/3cc/3ce.  The reproducer is twelve lines:
+
+    type W = record pos: integer end;
+    var w: W;
+    procedure Set (var x: W);
+    begin x.pos := 7 end Set;
+    begin w.pos := 1; Set (w); Out.Int (w.pos, 0); Out.Ln end
+
+`Parse_Actual`'s record/array branch - "a variable of exactly this type" - checks the name,
+copies its text and RETURNS: **no `Bytecode_Mode` emission at all.**  So the caller pushed
+nothing where the callee's frame expected an address, and the verifier's depth went to -1 at the
+call.  Same shape as 3cb (a parameterless call), 3cc (an ARRAY OF element write), 3ce (a literal
+actual) - four paths, one habit.
+
+**And the obvious fix makes things WORSE, which is the finding.**  Pushing the variable's address
+is right, and it removed the verifier violation - and then `r1` printed **1** instead of **7**
+and `r3` printed **0** instead of **3**.  The reason is on the CALLEE's side: inside the callee a
+record formal's designator chain resolves its name as a GLOBAL, so `Push_Base` interns a run
+called `x` and the store lands in a fresh zeroed global while the caller's record is untouched.
+A loud verifier rejection had become a SILENT wrong answer.
+
+So it **refuses**, which is the project's default and the honest state:
+
+    o2c error: bytecode backend: a record or fixed-array actual is not yet supported ('w')
+
+and `bytecode_gaps.sh` pins it as `blocked`, so the entry FAILS when the real fix lands.  That
+fix is the same rule the ARRAY OF path already has - **a parameter's address is in its own slot,
+so the chain loads it rather than interning a global** - and `r1`/`r3` are its reproducers.
+
+**No fixture was passing a record actual** (the corpus's record work is globals and pointers),
+which is why 88 fixtures never said a word.  `run_bc`, `bytecode_gaps` and `coverage` are green
+with the refusal in place: a construct that cannot be expressed now says so, in the same shape as
+its three predecessors.
 
 ## 4. Method — what worked, and what did not
 

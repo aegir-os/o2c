@@ -446,6 +446,16 @@ check "LONGINT add/sub/mul/DIV/MOD and unary -" ok 'module G48; var n: longint; 
 #  it is not mistaken for the arithmetic gap again.
 check "LONGINT literal above INTEGER'Last" blocked 'module G49; var n: longint; begin n := 3000000000 end G49.'
 
+#  A record or fixed-array ACTUAL (3ci).  The caller's side is one line - push
+#  the variable's address - but the CALLEE's side resolves a record formal's
+#  name as a GLOBAL, so it stores through a fresh zeroed run of that name and
+#  the caller's record is untouched.  Pushing the address therefore converts a
+#  loud verifier rejection into a SILENT wrong answer (r1 printed 1, not 7), so
+#  it refuses until the chain's base derivation gives a parameter's own slot the
+#  same treatment the ARRAY OF path already has.  This entry FAILS when that
+#  lands, which is the point of it.
+check "a record actual (VAR record formal)" blocked 'module G52; type W = record pos: integer end; var w: W; procedure Set(var x: W); begin x.pos := 7 end Set; begin w.pos := 1; Set(w) end G52.'
+
 note "--- ARRAY OF parameters, and the Files intrinsics ---"
 #  Out.String (s) inside a procedure failed with "operand-stack underflow": a
 #  bare ARRAY OF CHAR pushed nothing (its address is in the parameter's own

@@ -2448,6 +2448,36 @@ package body O2c_Compiler is
                  & To_String (UTypes (Formal.UT).Name) & " (line "
                  & Natural'Image (Cur.Line) & ")";
             end if;
+            if O2c_BC.Bytecode_Mode then
+               --  A record or fixed-array actual is passed as an ADDRESS, and
+               --  this branch emitted NOTHING: the callee's slot held whatever
+               --  was under the call, the verifier's depth went to -1 at the
+               --  call, and a program that compiled stored through a garbage
+               --  base.  The FOURTH path with no bytecode branch on it (3cb,
+               --  3cc, 3ce, and this).
+               declare
+                  Nm : constant String := Cur.Text (1 .. Cur.Len);
+                  Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
+               begin
+                  pragma Unreferenced (Sl);
+                  --  REFUSED, and the reason is measured rather than assumed:
+                  --  the CALLEE's side is what is missing.  Inside the callee a
+                  --  record formal's designator chain resolves its name as a
+                  --  GLOBAL - `Push_Base` interns a run called `x` and stores
+                  --  through THAT - so the write lands in a fresh zeroed global
+                  --  and the caller's record is untouched.  Pushing an address
+                  --  here (which is right) therefore turned a loud verifier
+                  --  rejection into a SILENT wrong answer: r1 printed 1 instead
+                  --  of 7 and r3 printed 0 instead of 3.  Refusal is the
+                  --  default, and a refusal is what this gets until the
+                  --  chain's base derivation handles a parameter's own slot -
+                  --  the same "address is in the parameter's slot" rule the
+                  --  ARRAY OF path already uses.
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "a record or fixed-array actual is not yet supported ('"
+                    & Nm & "')";
+               end;
+            end if;
             A.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
             Next;
             return A;
