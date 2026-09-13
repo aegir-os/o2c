@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         439
+    commits         440
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5620,6 +5620,48 @@ first, not a diagnosis first - the diagnosis has been right four times (3ef incl
 have been local three times out of three only when they were aimed at a value that had been printed.
 
 Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (expected 42, still 0).
+
+### 3eh. ROOT CAUSE: `Decl_Bc_Proc` is one variable, and a nested declaration clobbers it
+
+Reading the procedure table properly (by offset, not by the body I recognised) shows the whole failure in
+four records:
+
+    29  off=3098  body: n := n + 1        <- Bump
+    30  off=3098  body: SAME as 29        <- and OutER's id points here
+    31  off=3123  body: n := 40; Bump; Bump; g := n
+    32  off=3150  body: CALL 3098 ...     <- the module asks for Outer at 3098
+
+Two records at one offset, and `Outer`'s body emitted under `Bump`'s id.  The cause is one line of state:
+
+    Decl_Bc_Proc : Natural := 0;    --  the id a body opens with at its BEGIN
+
+It is a single variable, set at each declaration.  `Outer`'s declaration sets it to Outer's id; then
+`Bump`, declared inside, sets it to Bump's; then `Outer`'s BEGIN opens the body with whatever is in it -
+Bump's id.  So the enclosing body is emitted as the nested procedure, two records point at the nested
+body, and every call to `Outer` - patched from the id at Finish - runs `Bump` instead, which reaches for
+a static link that was never pushed.  That is the wild address, and it is one variable.
+
+**Two corrections to earlier entries, both now measured:**
+
+* `3eg`'s third finding is withdrawn.  The call targets ARE procedure starts; the `-> ?` was a bug in my
+  own lookup (I keyed on `operand + 3`, the length of the CALL header).  The fixups are correct and
+  `Finish` patches against a final `Buf_Off`.  The stale-offset hypothesis was wrong.
+* `3ef`'s diagnosis was also wrong.  `P drop Bump kind=S_PROC` is real, but `N_Sym := Param_Base` runs at
+  the END of `Decl_Procedure`, after the body - so the nested procedure is visible in the enclosing body
+  all along, and `Bump;` resolved and emitted a call.  The visibility fix was not needed, and reverting
+  it cost nothing.
+
+The save/restore of `Decl_Bc_Proc` around the nested declaration was tried WITH the link changes.  It
+turned the `STORAGE_ERROR` into a VM **depth violation** - the first diagnostic that names a stack rather
+than an address, which is progress of exactly the kind worth having: a verifier error instead of a wild
+pointer.  It did not land because it also introduced a compiler warning ("possible infinite recursion" at
+the declaration site), and warnings do not land.  The next attempt should hoist the saved id out of the
+`declare` block that provoked it - that is a three-line change with a known target.
+
+**So the piece stands at**: depth semantics right, +1 parameter count right, link interning right, and the
+id collision identified.  With the collision fixed plus the link push, the failure was already a verifier
+depth violation rather than memory corruption - and a fixture at /tmp/nestproc.ob2 that prints 0 (want 42)
+will say when it is done.
 
 ## 4. Method — what worked, and what did not
 
