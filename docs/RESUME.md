@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         413
+    commits         414
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4778,6 +4778,36 @@ variable's address is fine (the globals block is not reallocated), which is exac
 
 Whichever is chosen, the callee side (3df part 3) goes with it: `Load_Local` as the base,
 `Push_Int (0)`, the value, `Store_Idx (1 | 8)`.
+
+### 3dh. Stable slots: the design is right, the edit is not one pass, and the VM is back as it was
+
+The user chose (b), the correct fix: make frame slot storage stable so `LOAD_ADDR_L` can exist.  The
+design is settled and verified; the edit was attempted and REVERTED, because the file fights back in a
+way worth recording.
+
+**The design, from the code rather than from a guess.**  `Locals` is its own array, separate from the
+operand stack, and exactly ONE place reallocates it (Push_Frame, 2219-2228, doubling a `U64_Array` and
+copying).  So the fix is local: replace that array with a CHUNKED store - 4096-word chunks, allocated
+once, never freed, never moved - plus `Get_Local`/`Set_Local`/`Addr_Of_Local`, `Ensure_Locals` where
+the old code grew, and then `LOAD_ADDR_L` (0x15) with its two verifier/interpreter arms.  The table of
+chunk pointers may still be replaced, which costs nothing, because no address points into it.
+
+**Why the edit is not one pass.**  `grep 'type Context is record'` finds MORE THAN ONE context, and
+`Locals` appears as a field in more than one of them; the constructions at 3011 and 3672 are separate
+from the one at 300.  My anchors matched the first occurrence, edits landed in the wrong record, and
+the build said so:
+
+    obc_vm.adb:2168:49: error: no selector "Chunks" for type "Context" defined at line 300
+    obc_vm.adb:3011:26: error: no value supplied for component "Locals"
+
+Half a refactor of the VM's core is worse than none, so the file was restored from the copy taken
+before the attempt and the tree is green again (`run_vm` PASS, `run_bc` PASS).
+
+**What the next attempt needs to do first**: enumerate every `Context`/`Locals` site before editing -
+`grep -n 'type Context is record\|Locals  *:\|Locals =>\|Locals (\|C.Locals' vm/obc_vm.adb` - and
+patch by LINE RANGE rather than by text, since the text repeats.  Then the chunked store, then
+`LOAD_ADDR_L`, then 3df's parts 2 and 3 (the caller passes an address; the callee stores through it),
+and `fres.ob2` prints `c=[h]` with `fall.ob2` printing `hello`.
 
 ## 4. Method — what worked, and what did not
 
