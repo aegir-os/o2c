@@ -122,8 +122,17 @@ fi
 #  explicit checks below; sorted for a stable order and stable output.
 for SRC in $(ls "$ROOT"/tests/bc/*.out | sort); do
    TN="$(basename "${SRC%.out}")"
+   #  A fixture that imports a USER library hands it over as the front end's
+   #  extra argument - <name>.lib.ob2 - and only when that file exists, so
+   #  every other fixture's command line is unchanged.  A user library's
+   #  procedures are compiled into the image, unlike the FFI modules', which is
+   #  exactly what usercall.ob2 is here to run.
+   LIB=()
+   if [ -f "$ROOT/tests/bc/$TN.lib.ob2" ]; then
+      LIB=("$ROOT/tests/bc/$TN.lib.ob2")
+   fi
    if ! timeout 120 "$FRONT" "$ROOT/tests/bc/$TN.ob2" "$WORK/$TN.obc" \
-        >"$WORK/$TN.compile" 2>&1; then
+        ${LIB[@]+"${LIB[@]}"} >"$WORK/$TN.compile" 2>&1; then
       bad "$TN.ob2 did not compile: $(cat "$WORK/$TN.compile")"
    elif ! timeout 60 "$VM" "$WORK/$TN.obc" >"$WORK/$TN.out" 2>"$WORK/$TN.err"
    then

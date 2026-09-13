@@ -349,6 +349,116 @@ begin
       O2c_BC.Finish;
    end;
 
+   --  ---- procedure calls: Op_Call, the convention in one place ------------
+   --  A call into a procedure in THIS image, as opposed to a native.  The
+   --  callees are declared FIRST and closed: the emitter refuses two open
+   --  frames at once, and declaring them is what gives Call_Proc the params it
+   --  pops and the results it pushes - the depth model the test is checking
+   --  against.  The caller is opened last because Emit_Quad requires an open
+   --  procedure.
+   declare
+      P2, P0   : Natural;
+      Tq       : Value_Id;
+      Bq       : Natural;
+      Bq_L     : Natural;
+      Qc       : Quad_Id;
+      Raised2  : Boolean := False;
+   begin
+      Init;
+      Begin_Proc;
+      O2c_BC.Begin_Mode;
+      P2 := O2c_BC.Begin_Proc (2, 1);
+      O2c_BC.End_Proc;
+      P0 := O2c_BC.Begin_Proc (0, 0);
+      O2c_BC.End_Proc;
+      declare
+         Caller : constant Natural := O2c_BC.Begin_Proc (0, 0);
+         pragma Unreferenced (Caller);
+      begin
+         null;
+      end;
+
+      Tq := New_Temp (Typ => 1);
+
+      --  The helper the front end will call: it DECLARES the arguments, emits
+      --  the call, and lowers exactly those quads.  The argument values were
+      --  pushed by the caller first, the way the front end pushes them while
+      --  parsing - so the helper's own contribution is the CALL, one
+      --  instruction, and three lowered quads.
+      O2c_BC.Push_Int (7);
+      O2c_BC.Push_Int (9);
+      Bq := O2c_BC.Insns;
+      Bq_L := O2c_Ir_Lower.Lowered;
+      O2c_Ir_Lower.Call_Proc (P2, 2);
+      Check (O2c_BC.Insns = Bq + 1,
+             "a procedure call is one instruction (got"
+               & Natural'Image (O2c_BC.Insns - Bq) & ")");
+      Check (O2c_Ir_Lower.Lowered = Bq_L + 3,
+             "the helper lowered the two arguments and the call");
+
+      --  And the QUAD STREAM is the contract: the arguments are declared, and
+      --  the call carries the id and the arity the lowering checks.
+      Qc := Quad_Id (Quad_Count);
+      Check (Quad_At (Qc).Op = Op_Call
+             and then Quad_At (Qc).Imm_1 = P2
+             and then Quad_At (Qc).Imm_2 = 2,
+             "the call quad carries the callee's id and its arity");
+      Check (Quad_At (Qc - 2).Op = Op_Arg and then Quad_At (Qc - 1).Op = Op_Arg
+             and then Quad_At (Qc - 2).Dst = No_Value,
+             "the arguments are DECLARED by Op_Arg, not pushed again");
+
+      --  A declared arity that disagrees with the call is a front-end bug, and
+      --  it must say so with the numbers - the native form's contract, kept.
+      Raised2 := False;
+      begin
+         O2c_BC.Push_Int (7);
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => Tq, others => <>));
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Call, Imm_1 => P2, Imm_2 => 2, others => <>));
+      exception
+         when Program_Error => Raised2 := True;
+      end;
+      Check (Raised2, "a procedure call whose arity disagrees raises");
+      O2c_BC.Discard;             --  the argument that call never consumed
+
+      --  The EMPTY run: a parameterless call, which is the most common
+      --  statement in the language and the corpus's own boundary.
+      Bq := O2c_BC.Insns;
+      O2c_Ir_Lower.Call_Proc (P0, 0);
+      Check (O2c_BC.Insns = Bq + 1,
+             "a parameterless procedure call is one instruction (got"
+               & Natural'Image (O2c_BC.Insns - Bq) & ")");
+
+      --  A result the caller wants in a frame slot: CALL left it on the stack,
+      --  and a temp's home IS the stack, so naming one adds NO instruction -
+      --  which is why an expression-position call can declare a Dst and still
+      --  emit exactly what the hand-written path did.
+      O2c_BC.Push_Int (1);
+      O2c_BC.Push_Int (2);
+      O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => Tq, others => <>));
+      O2c_Ir_Lower.Emit_Quad ((Op => Op_Arg, Src1 => Tq, others => <>));
+      Bq := O2c_BC.Insns;
+      O2c_Ir_Lower.Emit_Quad
+        ((Op => Op_Call, Dst => Tq, Imm_1 => P2, Imm_2 => 2, others => <>));
+      Check (O2c_BC.Insns = Bq + 1,
+             "a call whose result goes to a temp adds no instruction (got"
+               & Natural'Image (O2c_BC.Insns - Bq) & ")");
+
+      --  And an id the emitter does not know is refused by name rather than
+      --  emitted as a call to nothing.  The front end keeps its own guard for
+      --  Bc_Proc = 0 (with a much better message); this is the layer below it.
+      Raised2 := False;
+      begin
+         O2c_Ir_Lower.Call_Proc (999, 0);
+      exception
+         when O2c_BC.Wrong_Construct => Raised2 := True;
+      end;
+      Check (Raised2, "a call to a procedure the emitter never opened raises");
+
+      O2c_BC.End_Proc;
+      O2c_BC.Finish;
+   end;
+
    --  The two paths that must RAISE: a capacity overrun is reported, never
    --  truncated (the project's rule for capacity tables), and an out-of-range
    --  id is refused rather than silently answered.

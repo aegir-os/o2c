@@ -3674,7 +3674,12 @@ package body O2c_Compiler is
                                        --  back garbage, u4's image was rejected
                                        --  as malformed, while the identical
                                        --  shape with LOCAL callees (e2) worked.
-                                       O2c_BC.Call_Proc (Xs (XI).Bc);
+                                       --  Through the IR, which is where this
+                                       --  convention now lives: the id and the
+                                       --  arity, and nothing pushed -
+                                       --  Parse_Actual pushed every actual.
+                                       O2c_Ir_Lower.Call_Proc (Xs (XI).Bc,
+                                         Xs (XI).Params);
                                        --  R.Typ and R.Ptr_UT are ALREADY set
                                        --  from the export above: T_Ptr plus the
                                        --  imported pointer type, when the result
@@ -3826,7 +3831,11 @@ package body O2c_Compiler is
                                 & "to '" & Cur.Text (1 .. Cur.Len)
                                 & "' with no procedure id";
                            end if;
-                           O2c_BC.Call_Proc (Syms (Id).Bc_Proc);
+                           --  Through the IR: the id and the arity, and the
+                           --  result stays on the operand stack where CALL
+                           --  left it.
+                           O2c_Ir_Lower.Call_Proc (Syms (Id).Bc_Proc,
+                             Syms (Id).Params);
                         end if;
                      end if;
                      Call := Call & To_String (R.Text) & " (";
@@ -7664,7 +7673,12 @@ package body O2c_Compiler is
                                  --  (3677).  Parse_Actual already pushed every
                                  --  actual, so NOTHING is pushed here; pushing
                                  --  again is what made u3 the callee's garbage.
-                                 O2c_BC.Call_Proc (Xs (XI).Bc);
+                                 --  Through the IR, which is where this
+                                 --  convention now lives: the id and the
+                                 --  arity, and nothing pushed - Parse_Actual
+                                 --  already pushed every actual.
+                                 O2c_Ir_Lower.Call_Proc (Xs (XI).Bc,
+                                   Xs (XI).Params);
                               --  The FFI surface takes ADDRESSES: these are
                               --  written in terms of out parameters, so the
                               --  call site pushes where the results go and
@@ -7979,7 +7993,19 @@ package body O2c_Compiler is
                         end if;
                         if O2c_BC.Bytecode_Mode
                         then
-                           if Eq_No_Case (MNm, "XYplane")
+                           if Xs (XI).Bc /= 0 then
+                              --  A USER library's parameterless procedure:
+                              --  its code is in THIS image, so it is an
+                              --  ordinary call and not a native.  This site
+                              --  had no such branch, so it fell through to the
+                              --  default refusal below and called an ordinary
+                              --  procedure an "FFI primitive" - the same
+                              --  misleading default 3bl found on the
+                              --  with-arguments site.  The arity is zero by the
+                              --  guard above: the empty Op_Arg run.
+                              O2c_Ir_Lower.Call_Proc (Xs (XI).Bc,
+                                                      Xs (XI).Params);
+                           elsif Eq_No_Case (MNm, "XYplane")
                              and then Eq_No_Case
                                (To_String (MName), "Clear")
                            then
@@ -9475,7 +9501,11 @@ package body O2c_Compiler is
                            O2c_Ir_Lower.Call_Native (Syms (Idx).Foreign_Native,
                                                Syms (Idx).Params);
                         else
-                           O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                           --  Through the IR, which is where this convention
+                           --  now lives: the id and the arity, and nothing
+                           --  pushed - Parse_Actual already pushed them.
+                           O2c_Ir_Lower.Call_Proc (Syms (Idx).Bc_Proc,
+                             Syms (Idx).Params);
                         end if;
                      end if;
                      Call := Call & Head (1 .. H_Len) & " (";
@@ -9629,7 +9659,12 @@ package body O2c_Compiler is
                        & "call to an unknown procedure '"
                        & Head (1 .. H_Len) & "'";
                   end if;
-                  O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                  --  Through the IR.  This is the EMPTY Op_Arg run: a
+                  --  parameterless call has no parentheses, so there is
+                  --  nothing to declare - and the guard above already requires
+                  --  Params to be zero, which is the arity the lowering checks.
+                  O2c_Ir_Lower.Call_Proc (Syms (Idx).Bc_Proc,
+                                          Syms (Idx).Params);
                end if;
             end if;
             end if;            --  close the NEW / regular dispatch split

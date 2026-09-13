@@ -86,6 +86,28 @@ package body O2c_Ir_Lower is
       end loop;
    end Call_Native;
 
+   procedure Call_Proc (Proc_Id : Natural; Arity : Natural) is
+      First : Natural;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      for K in 1 .. Arity loop
+         pragma Unreferenced (K);
+         O2c_Ir.Emit (O2c_Ir.Op_Arg);
+      end loop;
+      --  Quad ids are 1-based and Quad_Count is the LAST one emitted, so with
+      --  Arity = 0 this is Quad_Count + 1 and the loop below lowers the call
+      --  alone - the parameterless case, the common one in a statement part.
+      First := O2c_Ir.Quad_Count - Arity + 1;
+      O2c_Ir.Emit (O2c_Ir.Op_Call, Imm_1 => Proc_Id, Imm_2 => Arity);
+      --  the arguments, then the call
+      for K in 0 .. Arity loop
+         O2c_Ir_Lower.Emit_Quad
+           (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (First + K)));
+      end loop;
+   end Call_Proc;
+
    procedure Reserve_Label (Ir_Label : O2c_Ir.Label_Id; Bc_Label : Natural) is
    begin
       if Natural (Ir_Label) = 0 or else Natural (Ir_Label) > Max_Ir_Labels then
@@ -292,8 +314,36 @@ package body O2c_Ir_Lower is
               (Bc_Op (Q.Op, Value_At (Q.Src1).Class));
             Store_Value (Q.Dst);
 
+         when Op_Call =>
+            --  A call into a procedure in THIS image.  Same arity contract as
+            --  the native form above, and deliberately the same shape: the
+            --  Op_Arg run that precedes must match Imm_2, and the counter is
+            --  reset BEFORE raising so one bad call cannot mis-attribute the
+            --  next one's arguments.
+            if N_Args /= Q.Imm_2 then
+               declare
+                  Pushed : constant Natural := N_Args;
+               begin
+                  N_Args := 0;      --  clean state, even on the failure path
+                  raise Program_Error with "O2c_Ir_Lower: procedure"
+                    & Natural'Image (Q.Imm_1) & " takes"
+                    & Natural'Image (Q.Imm_2) & " arguments but"
+                    & Natural'Image (Pushed) & " were pushed";
+               end;
+            end if;
+            N_Args := 0;
+            O2c_BC.Call_Proc (Q.Imm_1);
+            --  The RESULT, when the caller wants it in a frame slot or a
+            --  global.  CALL has already left it on the operand stack, and a
+            --  temp's home IS that stack (Store_Value), so a call whose result
+            --  feeds the surrounding expression declares no Dst and adds no
+            --  instruction here - which is what the hand-written sites did.
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
          when Op_Not | Op_And | Op_Or | Op_Load | Op_Store
-            | Op_Addr_Local | Op_Addr_Global | Op_Call | Op_Return
+            | Op_Addr_Local | Op_Addr_Global | Op_Return
             | Op_Halt =>
             --  Each arrives with the construct that needs it, and until then
             --  says so loudly and says WHICH op - the next stage reads this

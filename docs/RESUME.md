@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         367
-    fixtures        81 in tests/bc/
+    commits         368
+    fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -2754,7 +2754,79 @@ warnings, metric reproduced by hand on the same tree.
 sources as extra arguments and **no test script passes one**, so `hello.ob2` is
 the only end-to-end exercise of this branch.  A green gate says nothing
 regressed — it is not coverage of the thing that changed, and a host fixture
-importing a user library is the next test this site should have.
+importing a user library is the next test this site should have.  **3bn closes
+that gap** — and needed a THIRD call site to do it.
+
+### 3bn. DONE — `Op_Call`: the call convention is in the lowering, and the net now exists
+
+M4's stated point was that "the convention moves into the lowering pass and stops
+being per-branch".  Natives got there in 3bi–3bk; calls did not.  Now they do, and
+`grep -c 'O2c_BC.Call_Proc' compiler/o2c_compiler.adb` is **0**.
+
+**What landed, in the order the plan named, each step landing alone:**
+
+    compiler/o2c_ir_lower.ads/.adb   Call_Proc (Proc_Id, Arity), and the Op_Call arm
+    tools/o2c_ir_selftest.adb        36 checks -> 44
+    compiler/o2c_compiler.adb        six sites, and nothing else
+    tests/bc/usercall.{ob2,lib.ob2,out}   the run-net that was missing
+
+`Call_Proc` mirrors `Call_Native` deliberately: `Arity` declared `Op_Arg` quads,
+then the call, then the lowering of exactly those quads.  The argument VALUES were
+already pushed by the front end while it parsed them — `Op_Arg` declares, it does
+not push (M4a was wrong about that, and 3u was the cost).  The `Op_Call` arm checks
+the run against `Imm_2` with the native form's exact shape, resets the counter
+BEFORE raising, and calls the emitter's `Call_Proc` with `Imm_1`.
+
+**A Dst, and why an expression-position call may have none.** `CALL` already
+leaves the result on the operand stack, and a temp's home *is* that stack
+(`Store_Value`), so a call whose result feeds the surrounding expression declares
+no `Dst` and emits nothing extra — which is precisely what the hand-written sites
+did, and what makes the migration byte-identical.  A caller that wants the result
+in a frame slot or a global names one.
+
+**Six sites, and the sixth was the finding.**  Five were the ones the plan
+enumerated (imported/expression 3678, local/expression 3832, imported/statement
+7672, local/statement 9485, parameterless local/statement 9644).  The sixth was
+**not on any list**: an imported PARAMETERLESS statement call, `M.Proc;`, has its
+own region (~7996) with its own allowlist (XYplane.Clear, In.Open, XYplane.Open)
+and its own default refusal — so it fell through and called an ordinary procedure
+an "FFI primitive", the same misleading default 3bl found on the sibling site two
+weeks of commits apart.  It was found by RUNNING a two-module program, not by
+reading: `ULib.Set(7); ULib.Bump;` refused at `Bump` while `Set` (with arguments)
+worked, which is what a missing branch looks like from outside.  A `Xs (XI).Bc /=
+0` branch went in at the head of that region; `Set(7); Bump;` now prints 8.
+
+**Evidence, and its kind.**  M4b–M4e were checked by byte-identity; 3bk showed the
+IR can legitimately emit one instruction fewer.  Calls are the identity case after
+all — `Op_Arg` emits no code and `Op_Call` emits the same `CALL` — so this
+migration was checked that way, against a front end built from `HEAD` in a
+worktree:
+
+    12 of 12 corpus fixtures (proc, deepcall, fnexpr, callplain, arrparam, list,
+      nested, withguard, dispatch, gcloop, gcscalar, threadstart)  IDENTICAL
+    the imported paths, which no fixture reached: IDENTICAL too, and they RUN -
+      a statement call with arguments prints 7, a call in an expression prints 3
+
+**And the missing run-net is now a fixture**, which is what 3bm said the site
+needed: `tests/bc/usercall.ob2` imports `usercall.lib.ob2` and exercises all three
+imported forms in one program (statement with arguments, parameterless statement,
+expression) — `Set(7)` then `Bump` then `Add(0)` prints `8`.  `run_bc.sh` and
+`differential.sh` hand the library over when `<name>.lib.ob2` exists, so a fixture
+enrols itself by its presence (the discovery loop's own rule) and no other
+fixture's command line moves.  The Ada host front end takes NO library argument
+(`N_Libs => 0`), so the Ada side refuses the import: that is recorded in the
+differential's list as `usercall ADA_REFUSED`, which is why "ada refused" goes
+10 -> 11 while **corroborated stays 52 and VM WRONG stays 0**.
+
+**Verified**: gate26 — all seven suites green, zero warnings; the self-test's 44
+checks; identity as above; the metric unchanged at `Strings.Pos` (correctly: this
+stage moves no construct, it moves WHERE the convention lives).
+
+**Still per-branch, and next:** `Op_Return`/`Op_Halt`; the designator chain
+(`Op_Addr_Local`/`Op_Addr_Global`/`Op_Load`/`Op_Store`, M3's target); the BOOLEAN
+trio, which waits on the AND/OR opcodes rather than on IR work; and
+`Push_BC_Proc`/`Call_Indirect` — procedure values are a call form, so they are the
+same convention from the other end.
 
 ## 4. Method — what worked, and what did not
 

@@ -54,6 +54,25 @@ package O2c_Ir_Lower is
    --  outside bytecode mode.
    procedure Call_Native (Id : Natural; Arity : Natural);
 
+   --  One call into a procedure IN THIS IMAGE - the other half of the same
+   --  convention, and the half that was still written per-branch in the parser:
+   --  five call sites each worked out for themselves which id to use, what was
+   --  already on the stack, and whether the callee had a body at all.  Two of
+   --  them also had to decide foreign-versus-body inline.
+   --
+   --  Same contract as Call_Native: `Arity` declared arguments whose values the
+   --  front end has ALREADY pushed, the call itself, and the lowering of
+   --  exactly those quads.  The id is the callee's bytecode procedure id, which
+   --  is why this cannot be folded into Call_Native: nothing here is native.
+   --
+   --  The RESULT is left on the operand stack, where CALL puts it.  A caller
+   --  that wants it in a frame slot or a global passes a Dst to the quad; one
+   --  whose result feeds the surrounding expression declares none, exactly as
+   --  the hand-written sites did.
+   --
+   --  A no-op outside bytecode mode.
+   procedure Call_Proc (Proc_Id : Natural; Arity : Natural);
+
    --  Emit the bytecode for one quad.  Called INSIDE an open emitter procedure
    --  (O2c_BC.Proc_Open must hold), because that is what the emitter's stores
    --  and loads address.

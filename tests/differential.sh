@@ -167,6 +167,11 @@ realarr	ADA_BROKEN	emits Ada that will not compile: expected type Boolean
 #  by effect (the byte read back is the byte written); there is nothing here for
 #  the Ada side to corroborate except this limitation.
 filesintr	ADA_BROKEN	emits Ada that will not compile: a user module named Files gets the intrinsics without the helpers the builtin's own body carries
+#  usercall imports a USER library, and the Ada host front end takes no library
+#  argument at all (o2c_ada_host passes N_Libs => 0), so the Ada side refuses
+#  the import itself (M19) - the fixture's subject is the three imported CALL
+#  sites, which the VM side compiles, runs and checks by output.
+usercall	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
 withguard	GOLDEN_SUSPECT	the Ada side does not implement WITH's skip; the VM and the golden DO, and Oberon's WITH skips, so the Ada side is the odd one out
 EOB
 
@@ -181,7 +186,12 @@ for name in $(fixtures); do
    fi
 
    #  ---- the VM side, exactly as run_bc builds and runs it ---------------
-   if ! timeout 120 "$BC_HOST" "$src" "$d/$name.obc" >"$d/vm.compile" 2>&1; then
+   LIB=()
+   if [ -f "$ROOT/tests/bc/$name.lib.ob2" ]; then
+      LIB=("$ROOT/tests/bc/$name.lib.ob2")
+   fi
+   if ! timeout 120 "$BC_HOST" "$src" "$d/$name.obc" \
+        ${LIB[@]+"${LIB[@]}"} >"$d/vm.compile" 2>&1; then
       bad "$name: the bytecode backend no longer compiles it"
       continue
    fi
