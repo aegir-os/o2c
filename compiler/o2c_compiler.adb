@@ -9265,7 +9265,20 @@ package body O2c_Compiler is
                            if not Had_Width then
                               O2c_BC.Push_Int (0);   --  omitted width: 0
                            end if;
-                           O2c_BC.Native_Call (0, 2);
+                           --  M4d: two arguments, both already pushed - the value by the
+                           --  parse and the width by the default above.  Op_Arg declares
+                           --  each; it does not push.
+                           if O2c_BC.Bytecode_Mode then
+                              O2c_Ir.Emit (O2c_Ir.Op_Arg);
+                              O2c_Ir.Emit (O2c_Ir.Op_Arg);
+                              O2c_Ir.Emit (O2c_Ir.Op_Call_Native, Imm_1 => 0, Imm_2 => 2);
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count - 2)));
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count - 1)));
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                           end if;
                         elsif Member = "String" then
                            if not Str_Looped then
                               O2c_BC.Native_Call (1, 1);
