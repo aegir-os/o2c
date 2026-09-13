@@ -8912,6 +8912,18 @@ package body O2c_Compiler is
                                 & To_String (Res) & ")";
                            end Build;
                         begin
+                           --  FOUND BY THE 3cq SWEEP, and it was SILENT: the
+                           --  aggregate was parsed, its text built, and no
+                           --  bytecode at all was emitted - so `r := {a = 1,
+                           --  b = 2}` compiled, ran, and left r as it was
+                           --  (the probe printed 00).  Refusal is the default:
+                           --  this raises until the aggregate emits the field
+                           --  stores its layout already knows.
+                           if O2c_BC.Bytecode_Mode then
+                              raise O2c_BC.Wrong_Construct with "bytecode "
+                                & "backend: a record aggregate is not yet "
+                                & "supported";
+                           end if;
                            Append_Body ("      " & Head (1 .. H_Len)
                                         & " := " & Build (U) & ";");
                         end;
@@ -8920,6 +8932,12 @@ package body O2c_Compiler is
                     and then Cur.Kind = Lex.Tok_LBrace
                   then
                      --  M36: numeric fixed-array aggregate { e1, e2, .. }
+                     --  The same silence as the record aggregate above, found
+                     --  by the same sweep: `a := {1, 2, 3}` printed 000.
+                     if O2c_BC.Bytecode_Mode then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a numeric array aggregate is not yet supported";
+                     end if;
                      Next;
                      declare
                         A : Unbounded_String;

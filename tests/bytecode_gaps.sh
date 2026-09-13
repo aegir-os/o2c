@@ -470,6 +470,15 @@ check "string comparison on an ARRAY OF parameter" ok 'module G51; import Out; v
 #  run over the real Files source (extracted from the compiler) as part of the
 #  3d measurement, and it now gets past both.
 
+note "--- FOUND BY THE 3cq SWEEP: aggregates were SILENT, not refused ---"
+#  Both of these compiled, ran, and left their target untouched: `r := {a = 1, b = 2}` printed
+#  00 and `a := {1, 2, 3}` printed 000.  They are the fifth and sixth instances of one habit -
+#  a parser branch that builds Ada text and emits no bytecode - which is why the sweep exists.
+#  They refuse now.  When the real fix lands (the field and element stores whose offsets and
+#  kinds the type descriptor already carries) these flip to `ok`, and that flip is the point.
+check "record aggregate"  blocked 'module G50; type R = record a: integer; b: integer end; var r: R; begin r := {a = 1, b = 2} end G50.'
+check "numeric array aggregate"  blocked 'module G51; type A3 = array 3 of integer; var a: A3; begin a := {1, 2, 3} end G51.'
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         396
+    commits         397
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4145,6 +4145,39 @@ is also slow - the honest read is that Files is a CLUSTER (3cl predicted six def
 path had six) and that the same effort spent on a SWEEP for the class would cover more ground:
 every instance of it so far - 3cb, 3cc, 3ce, 3ci - was a parser branch that appends Ada text with
 no bytecode call and no refusal, and a scan for that shape would have found all four at once.
+
+### 3cq. The SWEEP — the class had two more instances, and both were SILENT
+
+The 3cp analysis said the four known instances of this class were all the same habit: a parser
+branch that builds Ada text and emits no bytecode and no refusal.  So the sweep is mechanical: scan
+every `Append_Body` site, take a window around it, and keep the ones with no emit and no `raise`.
+
+    87 Append_Body sites, 11 candidates, 1 of them the definition itself
+
+Three reviewed out as by-design - the dynamic-dispatch text at 2655-2681 (whose bytecode the caller
+emits), the method call inside `Parse_Case` at 8536, and `Parse_Actual`'s method text.  The rest were
+probed, and TWO were live:
+
+    r := {a = 1, b = 2}     printed 00    (expected 12)   RECORD aggregate
+    a := {1, 2, 3}          printed 000   (expected 123)  numeric ARRAY aggregate
+
+**Both compiled, ran, and left their target untouched.**  That is the worst shape this project has a
+rule against, and neither was visible in the corpus because no fixture uses an aggregate - which is
+exactly why the sweep was worth a turn and the Files bisect was not.  Both now REFUSE, and both are
+pinned in `tests/bytecode_gaps.sh` as `blocked` so the entries fail when the real fix lands: the
+field and element stores whose offsets and kinds the type descriptor already carries.
+
+**And the sweep produced a rule, which is the more durable result.**  The third candidate in that
+review, XYplane's `Open`/`Dot` in REGION A (the builtin's own body, 7455/7464), also emits no
+bytecode - and it is the same class, in the *other* half of the intrinsic dispatch, reachable by a
+user module named `XYplane` exactly as `filesintr.ob2` reaches Files.  So:
+
+    Before flipping a builtin to Scoped => True, audit its region-A arms.
+    Region B is wired per member; region A is hand-written per arm and can be silent.
+
+That is why `Files` was not a mystery and is not a cluster of six: some of its region-A arms emit
+(the FStat/Delete pair 3cn read) and the question 3co posed - why one `New` works and the other does
+not - is the next entry's business, not this one's.
 
 ## 4. Method — what worked, and what did not
 
