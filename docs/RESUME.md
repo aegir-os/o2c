@@ -6071,6 +6071,40 @@ inferred last step was wrong; the real one is not yet known.  The instrument is 
 print the MATCHED frame, `Frame_Proc` and the walk's start at the raise (needs `with Ada.Text_IO;` in
 o2c_bc.adb).  That is the next measurement, and it is the last thing between this work and flipping Reals.
 
+### 3ev. Reals WORKS; the flip is blocked by a cross-module false positive, and the epoch fix was wrong
+
+**`Reals` works, and this time it is not a probe.** With the sibling-link fix in:
+
+    Reals.Convert (1.0 / 3.0, s)  ->  3.33333E-01
+
+and the metric advances to the next module: `Term.SetColor is an FFI primitive and is not yet supported`.
+So the backend clears `Reals`, `Reals` runs, and the only thing between it and `Scoped => True` is the bug
+below.
+
+**The false positive, measured.** Instrumenting the raise gave the mechanism in one run:
+
+    F matched frame 30 name='g' frame_proc=40 fp_parent=37 np_used=40 n_locals=124
+
+In a module with FOUR procedures, `N_Procs_Used` is 40 and `N_Locals` is 124: the emitter's tables span a
+whole compiler RUN, not a module.  So the `Parent` walk from the live frame wanders into a BUILTIN's records
+and matches its own local named `g` - and a module-level global is refused as "more than one level up".
+
+**The obvious fix is wrong, and the gate said so in one run.**  Adding a per-module `Epoch` (bumped in
+`Begin_Body`, required by the three searches) fixed `B3` - and broke `aopidx`, my own fixture:
+
+    run_bc: FAIL: aopidx.ob2 did not compile: 'g' is more than one level up
+    differential rc=1   run_stress rc=1
+
+Because `Begin_Body` fires at the module BODY, which comes AFTER the declaration pass - so every procedure's
+frames, interned during declarations, carry the PREVIOUS epoch.  The change traded one false positive for
+another, and reverting cost nothing: the state at 454 is green and all four fixtures print correctly.
+
+**The next attempt has a better shape**: bound the walk by the module's PROC-ID RANGE (the first id reserved
+in this module .. `N_Procs_Used`), which needs no new state and cannot go stale - an earlier module's id is
+simply outside it.  An epoch would work too, but it must be set at the DECLARATION boundary, not at the body.
+
+Tree green, `run_bc` PASS, 455 commits, four fixtures (nestproc 42, aopidx 65, minus2 -5, nestsib 42).
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
