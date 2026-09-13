@@ -5901,6 +5901,33 @@ The `Reals` flip is reverted again - not because it fails, but because its evide
 and the honest state is "advances past the backend, stops at an M19 import rule", which is a statement
 about the corpus rather than about `Reals`.  Tree green, `run_bc` PASS, 449 commits.
 
+### 3eq. The M19 rule is not about order, and the samples are a system that must each register
+
+Two probes settled what 3ep left open.
+
+  1. `geom.ob2` ALONE fails on its own source, not on imports:
+         o2c error: exported VARIABLE 'origin': its RECORD type must be exported (M20f)
+  2. `hello.ob2` WITH `geom.ob2` supplied moves on from `Geom` to the NEXT import:
+         o2c error: M19 imports: only Out, plus library modules provided earlier (found 'Geo')
+
+So the M19 rule is NOT order-dependent and is not about `Geom` at all: passing `geom.ob2` registered the
+name `Geom` successfully - even though that module's own compile failed on M20f - and the rule then
+complained about the next name on the line.  And `hello.ob2`'s import list is long:
+
+    import Out, Geom, Geo, Math, MathL, Strings, Texts, Files, In, ...
+
+**The samples are a SYSTEM**: each one imports the others, so `hello.ob2` cannot compile until the modules
+it names have registered, and `geom.ob2` does not register cleanly because of M20f - a rule about an
+exported variable whose record type is not exported, in the sample's own source.
+
+**Where this leaves the goal**: the bytecode backend clears `Reals` and clears `hello.ob2`'s own code.  What
+the metric now reports is the state of the SAMPLE CORPUS - M19 registration and M20f export rules - which is
+a property of the test material, not of the backend.  The next step for the metric is therefore to make the
+samples register in dependency order, and the first concrete blocker in that chain is the sample's own M20f:
+an exported record-typed variable whose type is not exported.
+
+Committed state, tree green, run_bc PASS, 450 commits.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
