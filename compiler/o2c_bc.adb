@@ -834,6 +834,20 @@ package body O2c_BC is
       return False;
    end Frame_Has;
 
+   function Link_For_Callee (Callee : Natural) return Integer is
+      Callee_Parent : constant Natural :=
+        (if Callee in Procs'Range then Procs (Callee).Parent else 0);
+      My_Parent     : constant Natural :=
+        (if Frame_Proc in Procs'Range then Procs (Frame_Proc).Parent else 0);
+   begin
+      if Callee_Parent = Frame_Proc then
+         return Own_Frame;         --  nested directly in the caller
+      elsif Callee_Parent = My_Parent and then Link_Of >= 0 then
+         return Link_Of;           --  a SIBLING: share the parent's frame
+      end if;
+      return No_Link;
+   end Link_For_Callee;
+
    function Too_Deep_Up_Level (Ada_Name : String) return Boolean is
       --  Walk the parents PAST the one enclosing frame this frame's link can
       --  reach.  The chain is real because every recorded procedure names its own

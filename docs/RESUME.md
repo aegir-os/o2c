@@ -6034,6 +6034,43 @@ Gate 7/7 PASS.
 so it is elsewhere in `Convert` - the remaining constructs it uses that no fixture does are a `for` whose
 body calls a NESTED procedure, and the `e := 0 - e` / digit-emission sequence.  That is the next sweep.
 
+### 3eu. THE SIBLING LINK: Reals works.  A nested call passed the wrong frame.
+
+The sweep was aimed at `Reals`'s runtime crash and found a silent wrong answer instead:
+
+    B3 - a nested proc calling its SIBLING:
+      Put and Ten are both nested in Outer; Ten calls Put, which writes Outer's n.
+      Printed 32 where 42 is right.
+
+**The cause was in the link push, and it is a one-line distinction.** `O2c_Ir_Lower.Call_Proc` pushed
+`Load_Addr_L (0)` - the CALLER's own frame - as the callee's static link.  That is correct only when the
+callee is nested DIRECTLY in the caller.  For a SIBLING - two procedures nested in the same parent - the
+link must be the PARENT's frame, which for the caller is its OWN link slot.  Pushing the caller's frame
+instead made the callee read and write through the wrong frame: a silent 32, and a wild address in the one
+place the corpus has this shape - `Reals`' `Digit` calling `Put`.
+
+The fix is a query the emitter is the right layer for, because it holds the parent chain:
+
+    Link_For_Callee (Callee) = Own_Frame  -> Load_Addr_L (0)      nested directly in the caller
+                              = slot >= 0 -> Load_Local (slot)    a SIBLING: the caller's link
+                              = No_Link   -> refuse               two levels out
+
+**`Reals` now works**: `Reals.Convert (1.0 / 3.0, s)` prints `3.33333E-01`.  The runtime crash of 3es WAS
+this bug, and the fixture-first sweep is what found it - not by reproducing the crash, but by pinning the
+shape behind it and noticing the ANSWER was wrong.
+
+**A trap worth recording**: the first attempt at the fix used 0 to mean "the caller's own frame", and it
+silently did nothing, because slot 0 is exactly where a PARAMETERLESS nested procedure's link lives.  0 was
+a valid slot and a marker at once.  Fixture `tests/bc/nestsib.ob2` (42) pins the shape; `nestproc` 42,
+`aopidx` 65, `minus2` -5, and the seven-shape sweep are all clean; gate 7/7 PASS.
+
+**Still blocking the `Reals` FLIP** is bug 2 from this step: with `Reals` on, a module-level global is
+refused as "'g' is more than one level up" - a FALSE POSITIVE in `Too_Deep_Up_Level`, triggered by the
+extra builtins that run before the module.  `Reset` DOES clear `N_Locals`, so the "never cleared" mechanism
+inferred last step was wrong; the real one is not yet known.  The instrument is ready and written down:
+print the MATCHED frame, `Frame_Proc` and the walk's start at the raise (needs `with Ada.Text_IO;` in
+o2c_bc.adb).  That is the next measurement, and it is the last thing between this work and flipping Reals.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

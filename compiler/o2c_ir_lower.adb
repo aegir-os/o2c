@@ -497,7 +497,26 @@ package body O2c_Ir_Lower is
          --  and adding the push to two of them left the reached one with an empty
          --  operand stack at the callee's first argument (3ek, measured as
          --  "pc=3131 sp=0" by the VM itself).
-         Load_Addr_L (0);       --  the caller's own frame base
+         --
+         --  WHICH frame is the question, and the caller's own is only right when
+         --  the callee is nested directly in the caller.  For a SIBLING - two
+         --  procedures nested in the same parent, which is what Reals' Digit
+         --  calling Put is - the link must be the PARENT's frame, i.e. the
+         --  caller's own link.  Pushing the caller's frame instead made the
+         --  callee write through the wrong frame: a silent wrong answer, and the
+         --  wild address behind Reals' STORAGE_ERROR (3eu).
+         declare
+            L : constant Integer := O2c_BC.Link_For_Callee (Proc_Id);
+         begin
+            if L = O2c_BC.Own_Frame then
+               Load_Addr_L (0);       --  the caller's own frame base
+            elsif L >= 0 then
+               Load_Local (Natural (L));   --  the caller's link = the parent
+            else
+               raise O2c_BC.Wrong_Construct with "bytecode backend: a call to a "
+                 & "procedure two levels out is not supported yet";
+            end if;
+         end;
          N_Args := N_Args + 1;
       end if;
       for K in 1 .. N_Args loop

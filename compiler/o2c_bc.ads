@@ -228,6 +228,17 @@ package O2c_BC is
    --  to a module global: a fresh, zeroed variable, which is a wrong answer rather
    --  than a refusal.  Callers refuse instead.
    function Too_Deep_Up_Level (Ada_Name : String) return Boolean;
+   --  Which frame a call must pass as the callee's static link: Own_Frame = the
+   --  caller's own frame (the callee is nested directly in the caller), a slot
+   --  >= 0 = the frame slot holding the caller's link (the callee is a SIBLING,
+   --  nested in the same procedure), No_Link = neither, so the call is refused.
+   --
+   --  A separate constant for the first case matters: slot 0 is a perfectly valid
+   --  place for a link to live - it is where a parameterless nested procedure's
+   --  link sits - so it cannot double as the "own frame" marker.
+   Own_Frame : constant Integer := -2;
+   No_Link   : constant Integer := -1;
+   function Link_For_Callee (Callee : Natural) return Integer;
    procedure Open_Proc (Id : Natural);
    procedure End_Proc;
    --  Open the module body.  Called when the statement part begins, after
