@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         351
+    commits         352
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2334,6 +2334,43 @@ the other is not.
 That is one targeted read, and it is the last one before acting on step 1 - after
 which the consolidation is a known pair with a known difference, and the
 52-corroborated net covers it because every fixture writes through these paths.
+
+### 3ax. CORRECTION - M3b's premise was FALSE, and the map is what proved it
+
+Three turns (3au, 3av, 3aw) worked on the claim that the intrinsic dispatch is
+"duplicated twice".  **It is not.**  The map's last read shows the two regions are
+COMPLEMENTARY, not copies:
+
+    region A  keys on Mod_Name   - the module BEING COMPILED - so it fires when the
+                                   builtin's own source calls its intrinsic, exactly
+                                   like the Files arms I wired in 3l;
+    region B  keys on MNm/MName  - a QUALIFIED NAME in user code - the general
+                                   call dispatch for `Files.Delete (nm)` etc.
+
+So `Native_Call (9, 1)` at 7409 and again at 7767 is TWO ROUTES FOR TWO SOURCES -
+the module's own `Files.Delete` inside `Oak_Files_Src`, and a caller's - and both
+are required.  They cannot drift into each other; there is nothing there to merge.
+I read "the same id twice" as duplication without checking what KEYS each site, and
+that is the error the session keeps repeating in new clothes: the art is not
+reading the code, it is knowing what to ask of it.
+
+**What IS repeated** is inside each region: per-member boilerplate, an
+`elsif Member = ...` chain with its own argument handling for each intrinsic - the
+12+ `Native_Call` sites are that boilerplate, not two copies of one thing.  That is
+real, it is what the structural complaint was pointing at, and it is exactly what
+the IR's `Op_Arg` / `Op_Call` pair exists to absorb: a call becomes a QUAD, and one
+lowering handles every member instead of each member being hand-wired.
+
+**So M3b is retired and its work is re-filed under M4** (calls), where the
+per-member chains get replaced by quads.  M3 = designators, and M3a (the base
+arithmetic, one home, measurable by grep) is its complete contribution; there is no
+M3b.
+
+**The toll, stated plainly**: three measuring turns to learn the target was not
+there.  That is still cheaper than 3ak, where patching a branch three times cost
+four reverts - but it is a toll, and the plan should carry the lesson: an M-number
+is a guess until measured, and a "duplication" claim needs the KEYS checked before
+it is called a target.
 
 ## 4. Method — what worked, and what did not
 
