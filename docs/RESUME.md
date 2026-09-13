@@ -6132,6 +6132,34 @@ yet supported` - six advances from where this stretch began, and no longer insid
 Five fixtures now cover what this work found: nestproc 42, aopidx 65, minus2 -5, nestsib 42, realsconv
 3.33333E-01.
 
+### 3ex. Term flipped too - and the chain is a repeatable shape now
+
+`Term` is compilable Oberon after all: `Oak_Term_Src` has real bodies (`SetColor` is `Bracket`, `Ch`,
+`Out.Int`), it was simply left at `Scoped => False`, and `samples/hello.ob2:460` is the line that needed it.
+Flipping it compiled and advanced the metric a SEVENTH time:
+
+    o2c error: bytecode backend: Input.Read is an FFI primitive and is not yet supported
+
+**And it is exercised**, not flipped blind: `tests/bc/termuse.ob2` calls `Term.SetColor (2, 0)` and the
+golden is the bytes it must emit -
+
+    1b 5b 33 32 6d  1b 5b 34 30 6d  78 0a
+    ESC [ 3 2 m      ESC [ 4 0 m      x \n
+
+which is fg=2 as green and bg=0 as black, built from `CHR` and `Out.Int` inside Oberon bodies.  Gate 7/7
+PASS, with the fixture reported as "termuse.ob2 compiles, runs, and prints the golden".
+
+**The remaining work has a shape now.** Each module still in the chain is one of two things, and the
+measurement that tells them apart is a single grep:
+
+* a compilable builtin left at `Scoped => False` - flip it, probe, build a fixture, gate, land (`Reals`
+  3ew, `Term` here);
+* a native wrapper whose body is `EXTERN` - that needs a VM native, appended at the end of the foreign
+  table, which is a different job.
+
+`Input` (`Oak_Input_Src`, `Scoped => False`) is next and is the same shape as `Term` until the probe says
+otherwise.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

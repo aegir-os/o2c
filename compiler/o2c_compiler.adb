@@ -12976,7 +12976,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Term_Src, Scoped => False);
+      Compile_Builtin (Oak_Term_Src, Scoped => True);   --  probe
       if Emits ("Term") then
          --  Term: parsed above in every case, emitted
          --  only when something imports it (see Emits).
