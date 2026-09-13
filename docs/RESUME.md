@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         411
+    commits         412
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4708,6 +4708,43 @@ formal) did not: `LOAD_L` of a by-ref scalar yields the ADDRESS, so a read of on
 **The test is already written**: `fres.ob2` in /tmp must print `c=[h]` instead of `c=[ ]`, and
 `fall.ob2` must print `hello`.  A fixture belongs beside `arrfield.ob2` when it does - one that
 assigns to a `var` scalar formal and shows the caller's variable changed.
+
+### 3df. The by-ref scalar is a THREE-part fix, and the third part is a missing VM opcode
+
+3de's plan was implemented - the site, the store, the plumbing - and it answered the question by
+failing in a new way, three times over.  The change was reverted; the tree never carried a path that
+turns a wrong-but-running case into a crash.
+
+**Attempt 1: the plumbing did not compile.**  `Byte_Of`'s new arm resolved to the *procedure* I had
+declared rather than to an enum literal, because I added the procedure without adding a member to
+`O2c_BC`'s `Op` enum - the same enum-literal-versus-subprogram trap 3cg hit (`Resolve_Str`).  The
+enum is ONE enum, ending at `Str_Addr);`; the fix was to append `Load_Addr_L` there too.
+
+**Attempt 2: the VM does not implement the opcode.**  With that fixed the image loaded and stopped at
+
+    vm: opcode not implemented in this slice at code offset 2497
+
+`LOAD_ADDR_L` (0x15) is the FIRST row of the spec's address group ("VAR params, arrays") and this VM
+does not implement it - a second spec/VM drift, after 3cw's threading band.  That is a useful fact on
+its own: the spec has promised this op all along and nothing emitted it, so nothing noticed.
+
+**Attempt 3: the caller passes a VALUE.**  Reverting to `Load_Local` as the base - on the reasoning
+that a by-ref formal's slot holds the caller's address, which is true for the Rider parameter `r` -
+gave STORAGE_ERROR, i.e. a wild address.  The conclusion is the opposite of the assumption: for a
+scalar, the CALLER is not passing an address at all.  `Parse_Actual` hands over the value, the slot
+holds the value, and `STORE_L` writes it - which is exactly why the original code lost the update
+*quietly* instead of crashing.
+
+**So the fix has three parts, and only the third is written:**
+
+    1. the VM implements LOAD_ADDR_L - the address of a frame slot's variable
+    2. Parse_Actual passes an ADDRESS for a by-ref scalar actual (it currently passes the value),
+       which is what makes a var scalar parameter mean anything at all
+    3. the callee's store goes through that address (Load_Local as the base, Push_Int (0), the
+       value, Store_Idx (1 | 8)) - which is what I wrote twice today and reverted twice
+
+Part 3 alone is what turns Files.Read's silent loss into a crash, which is why it is not in the tree.
+Run the three together, and `fres.ob2` prints `c=[h]` and `fall.ob2` prints `hello`.
 
 ## 4. Method — what worked, and what did not
 
