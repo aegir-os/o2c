@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         434
+    commits         435
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5448,6 +5448,45 @@ ordinary slot the caller passes, and an up-level access is `Load_Local (link)`, 
 currently falls back to a module global (`Local_Slot` = -1 -> `Load_Global`), which is a silent wrong
 answer - the thing this backend exists to refuse.  So the level field from 3dq comes with the access:
 a name whose declaration level is below this frame means the link, and anything deeper refuses.
+
+### 3ec. The static link: the depth semantics measured, and why the piece is three changes
+
+3eb made nested procedures compile.  The remaining piece for `Reals` is the static link, and the first
+thing to establish is what `Nested_Depth` actually means at the point the design depends on - the
+reserve, which is where the callee's frame size is decided.
+
+    Nested_Depth := Nested_Depth + 1;   Decl_Procedure;   Nested_Depth := Nested_Depth - 1;
+
+at 6687-6689, in the "a nested PROCEDURE declaration" arm.  So a TOP-LEVEL procedure is declared with
+depth 0 and a NESTED one with depth 1 - which means the committed condition for the extra link slot,
+`Nested_Depth > 1`, is off by one: `Put` and `Digit` are declared at depth 1 and get no link slot.
+It should be `> 0`.
+
+**And that one-line fix cannot land alone**, which is the point of this entry.  `Reserve_Proc (N_Par +
+N_Open + 1, ...)` sets the CALLEE's parameter count, and `Push_Frame` pops exactly that many values -
+so counting a link slot without the caller pushing one would mis-set every nested procedure's frame.
+An unflipped `Reals` means the corpus compiles no nested procedures at all, so `run_bc` would stay
+green and tell me nothing: the change is unverifiable in the current tree, and unverifiable changes do
+not land here.
+
+**So the piece is three changes together, and they are now specific:**
+
+    the link slot       `> 0` at the reserve (6407), and the callee declaring it - `Local
+                        ("o2c_link")` once, at its begin, after the parameters.  Both.
+    the caller's push   a call to a nested procedure pushes its own frame address first:
+                        `O2c_BC.Load_Addr_L (0)` is the caller's frame base, and it is stable (3dk),
+                        which is what makes this a slot and not a new opcode.
+    the access          a name whose slot is in the ENCLOSING frame - not this one - loads via
+                        `Load_Local (link)`, `Push_Int (outer slot)`, `Load_Idx (8)`; stores are the
+                        same shape with `Store_Idx`.  The emitter already has the table to answer
+                        "which frame owns this name": `Local_Slot` searches with `Proc = Frame_Proc`,
+                        so the enclosing owner is `Saved_Frame_Proc` - one level, and deeper REFUSES
+                        rather than falling back to a module global, which is a silent wrong answer.
+
+**Measured, for the next attempt**: with the flip, `Reals` stops at `LEN of an unknown parameter` -
+one level up from `Put`, which is exactly the case above.
+
+Tree green (`run_bc` PASS), committed state is 3eb's nested-procedure work.
 
 ## 4. Method — what worked, and what did not
 
