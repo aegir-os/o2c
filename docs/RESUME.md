@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         382
-    fixtures        84 in tests/bc/
+    commits         383
+    fixtures        85 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -3589,6 +3589,39 @@ past a library that calls its own parameterless helpers in expressions.
 Evidence: identity (unchanged for the corpus - the fix only adds emission where there was none),
 `run_bc` including the new fixture, gate38; four theories were wrong before the byte dump was
 right (3ca), which is why the fixture ships with the fix rather than after it.
+
+### 3cc. FIXED — writes through a `var ARRAY OF` parameter emitted NOTHING
+
+3bz's Blocker B: `Strings.Cap` printed its argument unchanged.  The cause was the same class as
+3cb's - a statement that built only the Ada text - and it is now the second defect in a row
+found by compiling a library body.
+
+**The site** is the statement dispatcher's own branch for an element write through an ARRAY OF
+parameter (`Cur.Kind = Tok_LBracket and then Syms (Idx).Open_Arr`).  It checked `By_Ref` -
+refusing a write to a *value* parameter, correctly - then parsed the index and the value and
+called `Append_Body` ... with **no `Bytecode_Mode` branch anywhere**.  So in bytecode mode the
+whole statement vanished: the value expression was even PARSED and its push discarded.  The
+fixture the corpus lacked is now `tests/bc/vararr.ob2`, which is `Cap`'s own shape (`for` over
+`len(a)`, an `&` condition, CHAR arithmetic, `a[i] := CHR(...)`) applied to a `var ARRAY OF
+char` - it prints `HELLO`.
+
+**The first attempt at the fix was wrong in a way worth recording.**  I pushed the base inside
+the `declare` block, next to the bounds check - and an expression's initialiser runs in the
+DECLARATIVE part, so the index went on the stack FIRST: `[index, base]`.  The bounds check then
+compared the *base* against 0 and trapped.  `vm: index out of range` was the whole diagnosis: the
+trap said "the thing you are comparing is not the index", and the fix was to move one push above
+the block.  That is the second time in two stages that the *loud* failure named the mistake while
+a silent one would have been worse.
+
+**What the branch does now**, mirroring the READ path exactly: push the caller's address (the
+parameter's own slot), parse the index, `dup`/compare/`trap`/`mark` twice (0 and the length in
+slot+1 - the same pair the read path uses), parse the value, then `Store_Idx` with an element
+size of 1 for CHAR and 8 otherwise.  `[base, index, value]` is the order the VM's `Store_Idx_*`
+pops, which is why the value is parsed last.
+
+Evidence: identity (unchanged - no existing fixture wrote through an ARRAY OF parameter, which is
+the point), `run_bc` including `vararr`, gate39; and the library symptom is gone: `Strings.Cap`
+applied to `"hello"` now prints `HELLO` (probe `P9`).
 
 ## 4. Method — what worked, and what did not
 

@@ -8556,9 +8556,30 @@ package body O2c_Compiler is
                     & "', line " & Natural'Image (Cur.Line) & ")";
                end if;
                Next;                --  past '['
+               --  The BASE goes on the stack BEFORE the index is parsed: an
+               --  expression's initialiser runs in the declarative part below,
+               --  so pushing it there would put [index, base] on the stack in
+               --  that order - which is what the first attempt at 3cc did, and
+               --  it took a trap to notice.
+               declare
+                  Sl : constant Integer :=
+                    O2c_BC.Local_Slot (Ada_Id (Head (1 .. H_Len)));
+               begin
+                  if O2c_BC.Bytecode_Mode then
+                     if Sl < 0 then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "ARRAY OF parameter is not in the frame: "
+                          & Head (1 .. H_Len);
+                     end if;
+                     O2c_Ir_Lower.Load_Local (Natural (Sl));
+                  end if;
+               end;
                declare
                   Ix : Expr_Rec := Parse_Expr;
                   V  : Expr_Rec;
+                  Sl : constant Integer :=
+                    O2c_BC.Local_Slot (Ada_Id (Head (1 .. H_Len)));
+                  Len : constant Integer := Sl + 1;
                begin
                   if Ix.Typ /= T_Int then
                      raise O2c_Error with "array index must be INTEGER";
@@ -8567,6 +8588,33 @@ package body O2c_Compiler is
                   Next;
                   Expect (Lex.Tok_Assign, "':='");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  THE CALLER'S ARRAY, and this branch emitted NOTHING
+                     --  until 3cc: it built only the Ada text, so `s2[i] := c`
+                     --  did nothing in bytecode mode and SAID nothing - which is
+                     --  how Strings.Cap printed its argument unchanged.  A
+                     --  silent wrong answer, and the same shape the read path
+                     --  already had: the caller's ADDRESS is in the parameter's
+                     --  own slot (pushed above) and the LENGTH that travelled
+                     --  with it is the next slot.
+                     declare
+                        L_In : constant O2c_Ir.Label_Id := New_Lbl;
+                        L_Up : constant O2c_Ir.Label_Id := New_Lbl;
+                     begin
+                        O2c_Ir_Lower.Dup;
+                        O2c_Ir_Lower.Push_Int (0);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Ge);
+                        O2c_Ir_Lower.Jump_True (L_In);
+                        O2c_Ir_Lower.Trap (0);
+                        O2c_Ir_Lower.Mark (L_In);
+                        O2c_Ir_Lower.Dup;
+                        O2c_Ir_Lower.Load_Local (Natural (Len));
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Lt);
+                        O2c_Ir_Lower.Jump_True (L_Up);
+                        O2c_Ir_Lower.Trap (0);
+                        O2c_Ir_Lower.Mark (L_Up);
+                     end;
+                  end if;
                   if Syms (Idx).Typ = T_Char then
                      --  string element: CHAR, Ada index i + 1
                      if Cur.Kind = Lex.Tok_String and then Cur.Len = 1
@@ -8596,6 +8644,12 @@ package body O2c_Compiler is
                      Append_Body ("      " & Head (1 .. H_Len) & " ("
                                   & To_String (Ix.Text) & ") := "
                                   & To_String (V.Text) & ";");
+                  end if;
+                  if O2c_BC.Bytecode_Mode then
+                     --  [base, index, value] are on the stack - the base and the
+                     --  index from above, the value from the branch just taken.
+                     O2c_Ir_Lower.Store_Idx
+                       ((if Syms (Idx).Typ = T_Char then 1 else 8));
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_Assign and then Idx /= 0
