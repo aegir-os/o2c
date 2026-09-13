@@ -107,6 +107,10 @@ package body OBC_VM is
    Op_Load_Const  : constant := 16#14#;
    Op_Load_L      : constant := 16#10#;
    Op_Store_L     : constant := 16#11#;
+   --  The address of a frame slot's variable.  Spec 0x15, "VAR params, arrays",
+   --  unimplemented until the locals pool stopped moving: it was the address of
+   --  a slot that Push_Frame reallocated on every deeper call (3dg/3dh).
+   Op_Load_Addr_L : constant := 16#15#;
    Op_Load_Const_R : constant := 16#2D#;
    Op_Radd       : constant := 16#80#;
    Op_Rsub       : constant := 16#81#;
@@ -297,10 +301,21 @@ package body OBC_VM is
    --  rather than waiting on whatever thread happens to be first.
    Next_Thread_Id : Natural := 1;
 
+   --  The locals pool is CHUNKED so that a slot's ADDRESS is stable.  Push_Frame
+   --  used to reallocate one big array on a deeper call, which silently destroyed
+   --  every VAR parameter's address - the very thing LOAD_ADDR_L hands out, and
+   --  the reason that opcode went unimplemented (3dg).
+   Locals_Chunk_Shift : constant := 12;                    --  4096 words
+   Locals_Chunk_Len   : constant := 2 ** Locals_Chunk_Shift;
+   type Locals_Chunk is array (0 .. Locals_Chunk_Len - 1) of U64;
+   type Locals_Chunk_Access is access Locals_Chunk;
+   type Locals_Chunks is array (Natural range <>) of Locals_Chunk_Access;
+   type Locals_Chunks_Access is access Locals_Chunks;
+
    type Context is record
       Stack       : U64_Array_Access := null;
       SP          : Natural := 0;
-      Locals      : U64_Array_Access := null;
+      Chunks      : Locals_Chunks_Access := null;   --  chunked; see Ensure_Locals
       Pool_Used   : Natural := 0;
       Globals     : U64_Array_Access := null;
       --  Everything else the interpreter needs in order to be suspended and
@@ -337,6 +352,52 @@ package body OBC_VM is
       Loads_Globals : Boolean := True;
    end record;
    type Context_Access is access Context;
+
+   --  Materialise every chunk a slot range needs, so a frame can READ a slot it
+   --  has not written.  Called exactly where the old code grew the array.  A
+   --  chunk is ordinary heap, and is never freed or moved; the TABLE of pointers
+   --  may be replaced, which costs nothing because no address points into it.
+   procedure Ensure_Locals (C : Context_Access; Up_To : Natural) is
+   begin
+      if C.Chunks /= null and then Up_To / Locals_Chunk_Len <= C.Chunks'Last
+      then
+         null;
+      else
+         declare
+            Cap   : Natural :=
+              (if C.Chunks = null then Natural'(1)
+               else C.Chunks'Length * 2);
+            Newer : Locals_Chunks_Access;
+         begin
+            while Cap <= Up_To / Locals_Chunk_Len loop
+               Cap := Cap * 2;
+            end loop;
+            Newer := new Locals_Chunks'(0 .. Cap - 1 => null);
+            if C.Chunks /= null then
+               Newer (0 .. C.Chunks'Length - 1) := C.Chunks.all;
+            end if;
+            C.Chunks := Newer;
+         end;
+      end if;
+      for I in 0 .. Up_To / Locals_Chunk_Len loop
+         if C.Chunks (I) = null then
+            C.Chunks (I) := new Locals_Chunk'(others => 0);
+         end if;
+      end loop;
+   end Ensure_Locals;
+
+   function Get_Local (C : Context_Access; I : Natural) return U64 is
+     (C.Chunks (I / Locals_Chunk_Len) (I mod Locals_Chunk_Len));
+
+   procedure Set_Local (C : Context_Access; I : Natural; V : U64) is
+   begin
+      C.Chunks (I / Locals_Chunk_Len) (I mod Locals_Chunk_Len) := V;
+   end Set_Local;
+
+   function Addr_Of_Local (C : Context_Access; I : Natural) return U64 is
+     (U64 (System.Storage_Elements.To_Integer
+             (C.Chunks (I / Locals_Chunk_Len)
+                      (I mod Locals_Chunk_Len)'Address)));
 
    --  The interpreter contexts that are live right now.  A collection walks
    --  all of them, because interpretation nests: a C callback calling back
@@ -1075,7 +1136,7 @@ package body OBC_VM is
                   end if;
                end;
                PC := PC + 4;
-            when Op_Load_L | Op_Store_L =>
+            when Op_Load_L | Op_Store_L | Op_Load_Addr_L =>
                --  Frame slot bounds are checked by the interpreter, which
                --  knows the current frame; the linear walk here only needs
                --  the stack effect.
@@ -1083,7 +1144,7 @@ package body OBC_VM is
                   Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
-               if Code (PC) = Op_Load_L then
+               if Code (PC) = Op_Load_L or else Code (PC) = Op_Load_Addr_L then
                   Depth := Depth + 1;
                else
                   Depth := Depth - 1;
@@ -2163,9 +2224,10 @@ package body OBC_VM is
 
       --  Frames.  Frame 0 is the module body; a CALL pushes the next frame
       --  at the current top of the locals pool, so slot i of the current
-      --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
-      --  parameter slots are the lowest slots of its frame.
-      Locals      : U64_Array_Access renames Ctx.Locals;
+      --  frame is Get_Local (Ctx, Frame_Base (Cur_Frame) + i), and the
+      --  callee's parameter slots are the lowest slots of its frame.  There
+      --  is no array to rename: the pool is chunked so that a slot's address
+      --  survives a deeper call (see Ensure_Locals).
       --  Frame 0's base is only written when a CALL pushes a frame, so a
       --  program with no calls reads it before any store.  The old local
       --  array got zero from its initialiser; an access does not, so the
@@ -2212,24 +2274,13 @@ package body OBC_VM is
                Return_PC   := New_PC;
             end;
          end if;
-         if Base + Img.Procs (Callee).Frame_Slots > Locals'Length then
-            --  The pool is sized by the call chain, so grow it too.  Existing
-            --  frames keep their slots, which is why the copy starts at zero.
-            declare
-               Cap   : Natural := Locals'Length;
-               Old   : constant Natural := Locals'Length;
-               Newer : U64_Array_Access;
-            begin
-               while Cap < Base + Img.Procs (Callee).Frame_Slots loop
-                  Cap := Cap * 2;
-               end loop;
-               Newer := new U64_Array (0 .. Cap - 1);
-               Newer (0 .. Old - 1) := Locals.all;
-               Locals := Newer;
-            end;
+         --  Materialise the slots this frame will use.  Chunks never move, so
+         --  existing frames keep their slots AND their addresses.
+         if Img.Procs (Callee).Frame_Slots > 0 then
+            Ensure_Locals (Ctx, Base + Img.Procs (Callee).Frame_Slots - 1);
          end if;
          for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
-            Locals (Base + K) := Pop;
+            Set_Local (Ctx, Base + K, Pop);
          end loop;
          Return_PC (Cur_Frame) := Ret_PC;
          Cur_Frame := Cur_Frame + 1;
@@ -2332,7 +2383,7 @@ package body OBC_VM is
                   Mark_Word (C.Stack (K));
                end loop;
                for K in 0 .. C.Pool_Used - 1 loop
-                  Mark_Word (C.Locals (K));
+                  Mark_Word (Get_Local (Live_Contexts (I), K));
                end loop;
                for K in 0 .. Img.N_Globals - 1 loop
                   Mark_Word (C.Globals (K));
@@ -2461,6 +2512,12 @@ package body OBC_VM is
       end Allocate;
 
    begin
+      --  The locals pool is chunked, so it must be MATERIALISED before anything
+      --  reads a slot: the array this replaced was allocated for every slot at
+      --  once, and frame 0 gets no Push_Frame to grow it.  One chunk's worth
+      --  covers the module body; frames larger than that are ensured by
+      --  Push_Frame.  It uses Max_VM_Locals, which is otherwise only a size.
+      Ensure_Locals (Ctx, Max_VM_Locals - 1);
       if not Resuming then
          --  Module globals come from the DATA section.  A thread shares the
          --  root's block, so it must not reload - that would undo every
@@ -2664,7 +2721,7 @@ package body OBC_VM is
                   end if;
                end;
                PC := PC + 4;
-            when Op_Load_L | Op_Store_L =>
+            when Op_Load_L | Op_Store_L | Op_Load_Addr_L =>
                if PC + 2 >= Code'Length then
                   return Bad_Code;
                end if;
@@ -2677,16 +2734,26 @@ package body OBC_VM is
                      Note_At ("local slot out of range", PC);
                      return Bad_Stack;
                   end if;
-                  if Op = Op_Load_L then
+                  if Op = Op_Load_Addr_L then
+                     --  The ADDRESS of this frame's variable, not its value.  A
+                     --  VAR scalar's slot holds the caller's address (so a store
+                     --  through it reaches the caller); this op is what hands
+                     --  that address to a CALLEE, which is the other half of the
+                     --  by-ref scalar convention (3df).
                      if SP >= Max_Stack then
                         return Bad_Stack;
                      end if;
-                     Push (Locals (Addr));
+                     Push (Addr_Of_Local (Ctx, Addr));
+                  elsif Op = Op_Load_L then
+                     if SP >= Max_Stack then
+                        return Bad_Stack;
+                     end if;
+                     Push (Get_Local (Ctx, Addr));
                   else
                      if SP = 0 then
                         return Bad_Stack;
                      end if;
-                     Locals (Addr) := Pop;
+                     Set_Local (Ctx, Addr, Pop);
                   end if;
                end;
                PC := PC + 3;
@@ -3010,8 +3077,7 @@ package body OBC_VM is
                        new Context'
                          (Stack       => new U64_Array (0 .. Max_Stack - 1),
                           SP          => 0,
-                          Locals      =>
-                            new U64_Array (0 .. Max_VM_Locals - 1),
+                          Chunks      => null,
                           Pool_Used   => 0,
                           --  Shared, not copied: threads see the same globals.
                           Globals     => Ctx.Globals,
@@ -3431,10 +3497,10 @@ package body OBC_VM is
                   Base := Frame_Base (Cur_Frame);
                   To := Pop;
                   From := Pop;
-                  Locals (Base + Slot) := From;
-                  Locals (Base + Limit) := To;
-                  Locals (Base + Limit + 1) :=
-                    (if From <= To then U64 (1) else U64 (0));
+                  Set_Local (Ctx, Base + Slot, From);
+                  Set_Local (Ctx, Base + Limit, To);
+                  Set_Local (Ctx, Base + Limit + 1,
+                             (if From <= To then U64 (1) else U64 (0)));
                   --  Oberon-2: the step's direction decides whether the body
                   --  runs at all, from the initial comparison.
                   if (Step >= 0 and then From > To)
@@ -3473,15 +3539,15 @@ package body OBC_VM is
                      Note_At ("FOR slots out of range", PC);
                      return Bad_Stack;
                   end if;
-                  V := To_I64 (Locals (Base + Slot));
-                  Lim := To_I64 (Locals (Base + Limit));
-                  if Locals (Base + Limit + 1) = 1 then
+                  V := To_I64 (Get_Local (Ctx, Base + Slot));
+                  Lim := To_I64 (Get_Local (Ctx, Base + Limit));
+                  if Get_Local (Ctx, Base + Limit + 1) = 1 then
                      V := V + abs (Step);
                   else
                      V := V - abs (Step);
                   end if;
-                  Locals (Base + Slot) := To_U64 (V);
-                  More := (if Locals (Base + Limit + 1) = 1 then V <= Lim
+                  Set_Local (Ctx, Base + Slot, To_U64 (V));
+                  More := (if Get_Local (Ctx, Base + Limit + 1) = 1 then V <= Lim
                            else V >= Lim);
                   if More then
                      PC := Target;
@@ -3672,7 +3738,7 @@ package body OBC_VM is
         (Data, Img,
          new Context'(Stack       => new U64_Array (0 .. Max_Stack - 1),
                       SP          => 0,
-                      Locals      => new U64_Array (0 .. Max_VM_Locals - 1),
+                      Chunks      => null,
                       Pool_Used   => 0,
                       Globals     =>
                         new U64_Array

@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         416
+    commits         417
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4881,6 +4881,42 @@ it is changing and refuses an ambiguous match, one site per edit, with the build
 the chunk types, `Ensure_Locals`, `Get_Local`, `Set_Local`, `Addr_Of_Local` - and the strips of every
 site to change, so the next attempt starts from a written patch rather than from a description of
 one.  Then `LOAD_ADDR_L`, then 3df's parts 2 and 3, and `fres.ob2` prints `c=[h]`.
+
+### 3dk. LANDED — stable locals, and LOAD_ADDR_L implemented at last
+
+The user chose (b) in 3dg: make the locals pool non-moving so `LOAD_ADDR_L` can exist.  After five
+failed scripted attempts (3dj) it is in, via the editor tool one site at a time - and it works.
+
+**What the VM has now.**  The `Locals` array is gone; `Context` holds a chunked pool:
+
+    Locals_Chunk_Shift/Len, Locals_Chunk(s)(_Access)   --  4096-word chunks, heap
+    Ensure_Locals (C, Up_To)                            --  materialise a range, zeroed
+    Get_Local / Set_Local / Addr_Of_Local               --  and the address, now stable
+
+Twenty-odd sites went from `Locals (i)` to `Get_Local (Ctx, i)`; `Push_Frame` grew an array on every
+deeper call and now only materialises chunks, which is the whole point: a chunk is allocated once and
+never freed or moved, so an address taken in one call is still valid in the next.  `LOAD_ADDR_L`
+(0x15, "VAR params, arrays" in the spec since the beginning) is now implemented - the constant, the
+verifier arm, and the interpreter arm that pushes `Addr_Of_Local` - which is the first time anything
+has emitted it.
+
+**One real bug found by the suites, and it was the interesting kind.**  With the chunks in place
+`run_bc` failed 21 fixtures: the OLD array was allocated for every slot up front, so frame 0 - the
+module body - could read a slot without any `Push_Frame`.  Chunks are materialised on demand, and
+nothing materialised frame 0's, so the very first `LOAD_L` dereferenced a null chunk.  `Execute`'s
+prologue now calls `Ensure_Locals (Ctx, Max_VM_Locals - 1)` - one chunk's worth, which is also what
+gives the otherwise-unused constant a use.
+
+**And a compile-time lesson worth keeping**: the aggregate `new Locals_Chunks (0 .. Cap - 1 => null)`
+needs its TYPE MARK - `Locals_Chunks'(...)` - exactly as the neighbouring `new Natural_Array'(...)`
+does.  Without it: `missing ","`.
+
+Verified: `make vm-host` with zero warnings, `run_vm` PASS, `run_bc` PASS, `run_stress` PASS.
+
+**What remains is parts 2 and 3 of 3df**: `Parse_Actual` must pass an ADDRESS for a by-ref scalar
+actual (it passes the value today), and the callee's store must go through it (`Load_Local` as the
+base, `Push_Int (0)`, the value, `Store_Idx (1 | 8)`).  Then `fres.ob2` prints `c=[h]` and `fall.ob2`
+prints `hello` - and Files' read surface is verified.
 
 ## 4. Method — what worked, and what did not
 
