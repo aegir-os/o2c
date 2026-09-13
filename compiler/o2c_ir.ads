@@ -184,7 +184,17 @@ package O2c_Ir is
                --  Src1 the label VALUE and Src2 a constant holding the STEP
                --  (which can be negative, so it is a value, not an immediate).
                Op_For_Enter,                 --  slot, step, limit, else-label
-               Op_For_Next);                 --  slot, step, limit, body-label
+               Op_For_Next,                  --  slot, step, limit, body-label
+               --  The mirror of Op_Discard: the value already on the stack goes
+               --  into local slot Imm_1 instead of being thrown away.  Appended
+               --  for the array-as-string loop, which must KEEP the address the
+               --  designator chain pushed - a field's own base - across the
+               --  loop's iterations.  The IR had no way to say "what is on the
+               --  stack becomes a local": Op_Store_Local wants a Value_Id for
+               --  its source, and a TEMP's home IS the stack, so Store_Value
+               --  emits nothing for one (3db).  No Srcs on purpose - the whole
+               --  point is that the value has no id.
+               Op_Store_Local_Pop);          --  local slot Imm_1 := the stack top
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

@@ -163,6 +163,10 @@ package O2c_Ir_Lower is
    --  Drop the top of the operand stack.  CASE keeps its selector there for the
    --  whole statement and drops it once at the end.
    procedure Discard;
+   --  The mirror: the stack top becomes local slot Slot.  A value that is
+   --  already on the operand stack has no Value_Id, which is why this is not
+   --  Op_Store_Local with a source.
+   procedure Store_Local_Pop (Slot : Natural);
 
    --  A UNARY operator whose opcode depends on the width - the sign, and the
    --  only one the parser emits.  Bin_Op's mirror, and the class is the same

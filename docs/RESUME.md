@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         408
-    fixtures        89 in tests/bc/
+    commits         409
+    fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -4588,6 +4588,53 @@ The verified pieces are worth keeping in the retry: the `Expr_Rec`/`Desig` carri
 extended to a non-symbol actual, the `Is_Ptr or else Base_On_Stack` discriminator, and the third
 local pair (`o2c_str_b` in both the frame and the IR).  Every one of them was built and compiled
 clean; only the final store is missing.
+
+### 3dc. FIXED — the IR got the primitive, and the Files blocker fell
+
+3db ended with two options and the user chose (b).  Both bugs that had been masking each other are
+now fixed, and the metric moved past Files for the first time.
+
+**The IR primitive.**  Appended to the op set (append-only, at the end, after `Op_For_Next`):
+
+    Op_Store_Local_Pop);          --  local slot Imm_1 := the stack top
+
+with a helper mirroring `Discard`, and an `Emit_Quad` arm that calls `O2c_BC.Store_Local (Q.Imm_1)` -
+STORE_L takes its value off the operand stack, which is the one thing the front end cannot name.
+`Emit_Quad` has no `others` arm *by design* ("adding an Op to the IR without deciding how it lowers
+is a compile error HERE"), so the op could not land without its lowering, and the selftest now counts
+it.
+
+**The front-end fix**, on top of 3db's verified pieces: the `Expr_Rec`/`Desig` carrier,
+`Arr_UT := (if Is_Ptr or else Base_On_Stack then UT else 0)` in the chain's `D_Str` branch, the guard
+extended to a non-symbol actual, `Store_Local_Pop` instead of the discard, and the loop's base loaded
+back from that local.
+
+**And the second bug, which the first had been hiding.**  With the crash gone, `arrfield.ob2` printed
+an EMPTY line - and the differential said it plainly: "the Ada side agrees with the golden, the VM
+does not".  The cause was 3cu's missing `Nested`: the field's offset was never added, so a field not
+at offset 0 read its neighbour (`pad`, an integer 0, i.e. a NUL) and the loop stopped at once.  **3cu
+was right and 3cv was wrong** - the crash that made the offset look irrelevant came from the
+pool-native fall-through, so two bugs were masking each other, and only fixing one made the other
+visible.
+
+**A reading error of mine, worth recording twice over.**  I checked `fldv3` by running it and printing
+line 2, saw a blank line, and called it a pass - when line 2 is blank *because line 1 is the string*.
+The same habit hid the runtime error in 3cv ("malformed code" is the second line).  Twice in this
+hunt the evidence was in line 1 and I read line 2; the differential caught what I did not.
+
+**The measurement, with a probe flip that then came back out:**
+
+    Files.WriteString end to end          out.txt  b'abc'      (was: a garbage name, b'(((')
+    samples/hello.ob2 refusal            Math.ln is not yet supported
+
+So Files is no longer the compile blocker - the metric has moved off it after twenty sessions - and
+its WRITE path is verified correct.  The flip stays OUT regardless: Files' read/seek surface is not
+yet verified, and this backend does not ship a library whose remaining half is unknown.  `Math.ln`
+is the next gap, and 3cr already established what it needs: natives and VM arms for the
+transcendentals, hand-rolled for a guest runtime with no elementary functions.
+
+Verified: run_bc PASS, bytecode_gaps PASS, differential PASS, all five field/array probes print ABC,
+and `out.txt` holds `abc`.
 
 ## 4. Method — what worked, and what did not
 

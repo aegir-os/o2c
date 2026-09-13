@@ -56,6 +56,8 @@ package body O2c_Compiler is
       Text   : Unbounded_String;
       Typ    : EType := T_Int;
       CStr   : Boolean := False;   --  whole ARRAY OF CHAR variable value
+      Arr_UT : Natural := 0;       --  ... and its array type, when that value is a FIELD,
+                                   --  which Find() cannot recognise by name (3cz)
       Ptr_UT : Natural := 0;       --  pointer user-type index when T_Ptr
       Lit    : Boolean := False;   --  a plain numeric literal (widening)
       --  A constant INTEGER value, folded as the expression is parsed.
@@ -1738,6 +1740,7 @@ package body O2c_Compiler is
       Off  : Natural := 0;        --  field byte offset when D_Field
       Ptr_Field : Boolean := False;  --  that field holds a pointer
       Base_On_Stack : Boolean := False;  --  the chain pushed its own base
+      Arr_UT : Natural := 0;      --  array type when the whole value is a CHAR array field
    end record;
 
    type VK_Kind is (V_Rec, V_Ptr, V_Arr);
@@ -2295,9 +2298,26 @@ package body O2c_Compiler is
          --  is why `f := s = t` compared nothing, and why discarding an
          --  address there underflowed: there was never one to discard.
          if O2c_BC.Bytecode_Mode then
-            O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT));
+            --  The SAME arithmetic as the indexed sibling (2142): a base POINTER's
+            --  value is on the stack and is the OBJECT's address, so the field
+            --  offset must be added to it, while anything else is a run in the
+            --  module's globals and carries its own slots.  3cu found this and 3cv
+            --  wrongly cleared it: the crash that made it look irrelevant came from
+            --  the pool-native fall-through, which MASKED a still-missing offset.
+            --  A field not at offset 0 is what tells the two apart.
+            O2c_Ir_Lower.Addr_Global
+              (Base_Name,
+               (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
+                then 0 else Total_Slots (Base_UT)),
+               Nested);
          end if;
          D.K := D_Str;
+         --  Only when the base came from the chain.  A module-level array also
+         --  reaches this branch; marking it too made the call site treat a
+         --  globals run as a field and cost seven fixtures (3db).  The indexed
+         --  sibling asks the same question for the same reason (2142).
+         D.Arr_UT :=
+           (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack then UT else 0);
          return D;
       end if;
       if VK = V_Arr then
@@ -3743,6 +3763,7 @@ package body O2c_Compiler is
                                     else
                                        R.Typ := T_Str;
                                        R.CStr := True;
+                                       R.Arr_UT := D.Arr_UT;
                                     end if;
                                     R.Text := D.Text;
                                  end;
@@ -4353,6 +4374,7 @@ package body O2c_Compiler is
                      else
                         R.Typ := T_Str;
                         R.CStr := True;
+                        R.Arr_UT := D.Arr_UT;
                      end if;
                      R.Text := D.Text;
                   end;
@@ -9338,7 +9360,8 @@ package body O2c_Compiler is
                               M := A.Text;
                               CArg := A.CStr;
                               if O2c_BC.Bytecode_Mode
-                                and then Find (To_String (A.Text)) > 0
+                                and then (Find (To_String (A.Text)) > 0
+                                          or else A.Arr_UT /= 0)
                               then
                                  declare
                                     ASym : constant Natural :=
@@ -9357,9 +9380,15 @@ package body O2c_Compiler is
                                     --  "operand-stack underflow" - a message
                                     --  about the stack for a problem with a
                                     --  string.
+                                    --  A field has no symbol, so every derivation below takes
+                                    --  its type from A.Arr_UT.  Ada's `if` EXPRESSIONS are
+                                    --  conditional, so Syms (0) is never read.
                                     Is_Open : constant Boolean :=
-                                      Syms (ASym).Open_Arr;
-                                    AU    : constant Natural := Syms (ASym).UT;
+                                      (if A.Arr_UT /= 0 then False
+                                       else Syms (ASym).Open_Arr);
+                                    AU    : constant Natural :=
+                                      (if A.Arr_UT /= 0 then A.Arr_UT
+                                       else Syms (ASym).UT);
                                     N     : constant Integer :=
                                       (if Is_Open then 0
                                        else UTypes (AU).Arr_Len);
@@ -9390,6 +9419,10 @@ package body O2c_Compiler is
                                           V_Cond : constant O2c_Ir.Value_Id := O2c_Ir.New_Temp (EType'Pos (T_Int));
                                           V_Zero : constant O2c_Ir.Value_Id := O2c_Ir.Const_Int (0, EType'Pos (T_Int));
                                           V_One : constant O2c_Ir.Value_Id := O2c_Ir.Const_Int (1, EType'Pos (T_Int));
+                                          --  A field's base is the address the chain already pushed, so it
+                                          --  is KEPT in a local across the loop rather than derived.
+                                          B_Sl  : constant Natural := O2c_BC.Local ("o2c_str_b");
+                                          V_B   : constant O2c_Ir.Value_Id := O2c_Ir.New_Local ("o2c_str_b", EType'Pos (T_Int));
                                        begin
                                           O2c_Ir_Lower.Reserve_Label (Ir_Top, L_Top);
                                           O2c_Ir_Lower.Reserve_Label (Ir_End, L_End);
@@ -9397,9 +9430,18 @@ package body O2c_Compiler is
                                           --  that one.  The pushes the loop still needs are emitted here, in place,
                                           --  because they are the front end's side of the bargain: these ops DECLARE
                                           --  their operands, they do not emit them - the rule Op_Arg set.
-                                          O2c_Ir.Emit (O2c_Ir.Op_Discard);
-                                          O2c_Ir_Lower.Emit_Quad
-                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          if A.Arr_UT /= 0 then
+                                             --  The chain pushed THIS field's address and it is the
+                                             --  base the loop wants, so keep it.  Discarding it here
+                                             --  is what forced the fall-through to the pool-string
+                                             --  native; the store has to come from the stack, which is
+                                             --  what Op_Store_Local_Pop exists for.
+                                             O2c_Ir_Lower.Store_Local_Pop (B_Sl);
+                                          else
+                                             O2c_Ir.Emit (O2c_Ir.Op_Discard);
+                                             O2c_Ir_Lower.Emit_Quad
+                                               (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          end if;
                                           O2c_Ir.Emit (O2c_Ir.Op_Store_Local, Src1 => V_Zero, Imm_1 => I_Sl);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
@@ -9428,9 +9470,14 @@ package body O2c_Compiler is
                                           O2c_Ir.Emit (O2c_Ir.Op_Jump_False, Src1 => V_End, Src2 => V_Cond);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
-                                          if Is_Open then
-                                             --  The caller's characters, addressed through the parameter's first
-                                             --  slot.
+                                          if A.Arr_UT /= 0 then
+                                             O2c_Ir_Lower.Load_Local (B_Sl);
+                                          elsif Is_Open then
+                                             --  The caller's characters, addressed through the parameter's
+                                             --  first slot - NOT the address on the stack.  A parameter's
+                                             --  own first slot holds the caller's, and using the pushed
+                                             --  address for every case would fix fields and break
+                                             --  arrparam.ob2.
                                              O2c_Ir_Lower.Load_Local (Natural (P_Sl));
                                           else
                                              O2c_Ir_Lower.Addr_Global

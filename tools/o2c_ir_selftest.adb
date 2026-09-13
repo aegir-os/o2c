@@ -720,6 +720,16 @@ begin
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));
          Check (O2c_BC.Insns = Before + 1, "a discard is one instruction");
+
+         --  The store-from-the-stack is the discard's mirror: one STORE_L, its slot an
+         --  immediate and no value named - the whole point being that the value it
+         --  stores has no Value_Id for the IR to carry.
+         O2c_BC.Push_Int (1);        --  the store CONSUMES what is on the stack, so
+         Before := O2c_BC.Insns;     --  without a value the emitter reports an underflow
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Store_Local_Pop, Imm_1 => 7, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "storing the stack top into a local is one instruction");
       end;
 
       --  and the same choice through the LOWERING, on a value whose class IS

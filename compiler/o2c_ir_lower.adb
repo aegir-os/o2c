@@ -318,6 +318,16 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Discard;
 
+   procedure Store_Local_Pop (Slot : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Store_Local_Pop, Imm_1 => Slot);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Store_Local_Pop;
+
    procedure Mark (L : O2c_Ir.Label_Id) is
    begin
       if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
@@ -702,6 +712,11 @@ package body O2c_Ir_Lower is
             --  The kind byte is an immediate because a bare Trap would
             --  desynchronise the VM, which reads it.
             O2c_BC.Trap (Q.Imm_1);
+
+         when Op_Store_Local_Pop =>
+            --  STORE_L takes its value off the operand stack, which is the one
+            --  thing the front end cannot name.  Nothing is pushed here.
+            O2c_BC.Store_Local (Q.Imm_1);
 
          when Op_Discard =>
             O2c_BC.Discard;
