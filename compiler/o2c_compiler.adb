@@ -4630,8 +4630,41 @@ package body O2c_Compiler is
                      --  An open array's address is in the parameter's own
                      --  slot, not in a global run, so the base is a local
                      --  load rather than a global address.
-                     O2c_Ir_Lower.Load_Local
-                       (Natural (O2c_BC.Local_Slot (Ada_Id (Nm))));
+                     --
+                     --  And when the name is NOT in this frame it is one level up:
+                     --  a nested procedure reading an ARRAY OF parameter of its
+                     --  enclosing one.  Local_Slot returns -1 there, and this site
+                     --  used to convert that straight to Natural - so the COMPILER
+                     --  died on a range check instead of either working or
+                     --  refusing.  Found by the fixture-first sweep for Reals, on
+                     --  its first run (3et).
+                     declare
+                        Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
+                     begin
+                        if Sl >= 0 then
+                           O2c_Ir_Lower.Load_Local (Natural (Sl));
+                        else
+                           declare
+                              Up : constant Integer :=
+                                O2c_BC.Up_Level_Slot (Ada_Id (Nm));
+                           begin
+                              if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
+                                 O2c_Ir_Lower.Load_Local
+                                   (Natural (O2c_BC.Link_Slot));
+                                 O2c_Ir_Lower.Push_Int (Up);
+                                 O2c_Ir_Lower.Load_Idx (8);
+                              elsif O2c_BC.Too_Deep_Up_Level (Ada_Id (Nm)) then
+                                 raise O2c_BC.Wrong_Construct with "bytecode "
+                                   & "backend: '" & Nm & "' is more than one level "
+                                   & "up, which is not supported yet";
+                              else
+                                 raise O2c_BC.Wrong_Construct with "bytecode "
+                                   & "backend: ARRAY OF parameter is not in the "
+                                   & "frame: " & Nm;
+                              end if;
+                           end;
+                        end if;
+                     end;
                   end if;
                   declare
                      Ix : Expr_Rec := Parse_Expr;
@@ -4648,8 +4681,15 @@ package body O2c_Compiler is
                         declare
                            L_Ok : constant O2c_Ir.Label_Id := New_Lbl;
                            L_In : constant O2c_Ir.Label_Id := New_Lbl;
+                           --  The LENGTH's slot: for an array-of it travels one
+                           --  slot above the address.  -1 when the name is not in
+                           --  this frame - an ARRAY OF parameter of the ENCLOSING
+                           --  procedure - and the conversion that used to happen
+                           --  here unchecked is the range check that crashed the
+                           --  COMPILER (3et).  Only read when Sl >= 0.
+                           Sl   : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
                            Len  : constant Natural :=
-                             Natural (O2c_BC.Local_Slot (Ada_Id (Nm))) + 1;
+                             (if Sl >= 0 then Natural (Sl) + 1 else 0);
                         begin
                            O2c_Ir_Lower.Dup;
                            O2c_Ir_Lower.Push_Int (0);
@@ -4658,7 +4698,25 @@ package body O2c_Compiler is
                            O2c_Ir_Lower.Trap (0);
                            O2c_Ir_Lower.Mark (L_In);
                            O2c_Ir_Lower.Dup;
-                           O2c_Ir_Lower.Load_Local (Len);
+                           if Sl >= 0 then
+                              O2c_Ir_Lower.Load_Local (Len);
+                           else
+                              declare
+                                 Up : constant Integer :=
+                                   O2c_BC.Up_Level_Slot (Ada_Id (Nm));
+                              begin
+                                 if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
+                                    O2c_Ir_Lower.Load_Local
+                                      (Natural (O2c_BC.Link_Slot));
+                                    O2c_Ir_Lower.Push_Int (Up + 1);
+                                    O2c_Ir_Lower.Load_Idx (8);
+                                 else
+                                    raise O2c_BC.Wrong_Construct with "bytecode "
+                                      & "backend: ARRAY OF parameter is not in the "
+                                      & "frame: " & Nm;
+                                 end if;
+                              end;
+                           end if;
                            O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Lt);
                            O2c_Ir_Lower.Jump_True (L_Ok);
                            O2c_Ir_Lower.Trap (0);

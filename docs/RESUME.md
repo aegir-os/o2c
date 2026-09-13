@@ -5994,6 +5994,46 @@ that no fixture does.
 
 Tree green (flip reverted), `run_bc` PASS, 452 commits.
 
+### 3et. Fixture-first paid off at once: the sweep found TWO compiler crashes, not a runtime bug
+
+The plan was to write the smallest program for each shape `Reals.Convert` uses and let the crash name
+itself.  It did, on the first run - and the fault was not in the routine at all:
+
+    A4: COMPILE -> raised CONSTRAINT_ERROR : o2c_compiler.adb:4634 range check failed
+    A7: COMPILE -> raised CONSTRAINT_ERROR : o2c_compiler.adb:4634 range check failed
+
+Both are an INDEXED READ of an ARRAY OF parameter from a NESTED procedure.  The cause is one expression,
+in two places:
+
+    Natural (O2c_BC.Local_Slot (Ada_Id (Nm)))
+
+`Local_Slot` returns -1 for a name that is not in this frame - which is exactly what "one level up" means -
+and converting -1 to `Natural` raises.  So the compiler CRASHED on a range check instead of working or
+refusing.  A5, the same read NOT nested, ran fine: `Local_Slot` finds it, and that is why every existing
+fixture was silent about this.
+
+Two sites, both now given the same up-level treatment the load and store paths already had:
+* 4634 - the BASE of the indexed read: through the link, `Load_Local (link)`, `Push_Int (Up)`, `Load_Idx (8)`.
+* 4685 - the BOUNDS CHECK's length slot: an array-of travels two slots, so the LENGTH is `Up + 1` from the
+  enclosing frame, loaded through the link the same way.
+
+**The grep mattered more than the fixes**: searching for the CONVERSION PATTERN found both sites at once,
+where fixing one crash at a time would have surfaced the second only on a re-run.  Fixture `tests/bc/aopidx.ob2`
+pins the shape (prints 65); the sweep of seven shapes is clean;
+
+    A1 s[0] := CHR(65) in a nested proc        65
+    A2 len(s) in a nested proc                  8
+    A3 while i < len(s) in the enclosing       66
+    A4/A5 indexed read (nested / not)           0   (legit: neither stores)
+    A6 for i := 1 to len(s)-1 do s[i] := ...   67
+    A7 g := s[0] in a nested proc               1
+
+Gate 7/7 PASS.
+
+**Still open**: `Reals`'s own RUNTIME `STORAGE_ERROR` (3es).  None of the seven swept shapes reproduces it,
+so it is elsewhere in `Convert` - the remaining constructs it uses that no fixture does are a `for` whose
+body calls a NESTED procedure, and the `e := 0 - e` / digit-emission sequence.  That is the next sweep.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
