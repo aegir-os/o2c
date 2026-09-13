@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         418
+    commits         419
     fixtures        91 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4955,6 +4955,42 @@ elementary functions.
 **One wart, recorded rather than hidden**: `fall.ob2` prints BASE-WRONG, and that is the PROBE's
 fault - it compares `Files.Base (r)` before any `Set`/`Open` has put `f` in the rider.  `Base` itself
 is fine (`Set` sets the field).  Worth fixing in the probe, not in the library.
+
+### 3dm. Math: 3cr's premise was WRONG — the guest has the elementary functions
+
+The metric is at `Math.ln`, so the transcendentals are next.  Before writing any of them, the guest
+runtime was checked - and 3cr's conclusion, reached from a grep that looked for "Numerics" rather than
+for the file's NAME, was wrong:
+
+    userspace/gnat-rts/gnat/a-nlelfu.ads      Ada.Numerics.Long_Elementary_Functions
+
+It IS there.  So this is ONE implementation for both platforms, exactly like `VM_IO.Read_File`, and
+nothing needed hand-rolling.  3cr would have had me write `ln`, `sin` and `cos` twice.
+
+**What is in**: `vm/vm_math.ads/.adb` (the eleven functions, `Ada.Numerics.Long_Elementary_Functions`
+renamed to `Elem`, with the domain behaviour left to Ada - a raise is reported rather than a wrong
+answer) and the natives in `obc_vm.adb`:
+
+    entries 26..36 -> ids 30..40   power exp ln log sin cos tan arcsin arccos arctan arctan2
+    Max_Foreign 32 -> 64           with the justification the project's rule asks for: the FFI
+                                   surface is a closed, enumerable set the table IS the list of
+    Native_Pops/Native_Pushes      the arities, and all eleven push a result
+    one dispatch arm               Max_Natives + 25 .. + 35, each case R64_To_U64 (VM_Math.X
+                                   (To_R64 (Args (k)))) - REAL and LONGREAL share the slot (M4e),
+                                   so Math and MathL are the same code with a different name
+
+`with VM_Math;` and a missing `with Ada.Numerics.Long_Elementary_Functions;` in the new body were the
+only two build errors, both caught immediately.
+
+Verified: `make vm-host` clean (0 warnings), `run_vm` PASS, `run_bc` PASS.
+
+**What remains, and it is the smaller half**: the COMPILER arms.  The qualified path refuses every
+Math member at the generic MARKER_EXPR_REFUSAL (3956), so the model to copy is `XYplane.IsDot`
+(3949-3979): an allowlist condition plus the emit - `Bc_Push_Arg (Arg_R (K))` per argument and
+`Call_Native (id, N_A)`.  The CONSTANT path (3985-3995) needs `Math.e` and `Math.pi` too, because
+`hello.ob2` line 439 is `Math.ln (Math.e)` and the ARGUMENT is evaluated first; `O2c_Ir.Const_Real`
+exists for that, and a `Push_Real` helper on `O2c_Ir_Lower` mirroring `Push_Int` is what it lacks.
+Then the metric moves past `Math.ln`.
 
 ## 4. Method — what worked, and what did not
 

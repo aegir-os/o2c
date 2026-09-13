@@ -11,6 +11,7 @@ with Ada.Text_IO;
 with Interfaces;
 with Ada.Unchecked_Conversion;
 with VM_IO;
+with VM_Math;
 with System.Storage_Elements;
 with VM_Platform;
 use type System.Storage_Elements.Integer_Address;
@@ -516,7 +517,14 @@ package body OBC_VM is
    --  wrong function and nobody would notice, where a wrong name is a build
    --  error with the name in it.  Ids continue after the builtins, so the
    --  two tables cannot collide and neither needs renumbering to grow.
-   Max_Foreign : constant := 32;
+   --  A static ceiling, and here is its justification, per the project's rule.
+   --  Every entry is a C symbol a stub module provides - a closed, enumerable set
+   --  that this table IS the list of - and the aggregate below spells out all of
+   --  them.  The array's bound must be a constant; 64 is the next power of two
+   --  past the 36 in use and leaves room for the rest of the Oakwood surface.
+   --  If the FFI surface ever becomes open-ended, this should become a growing
+   --  table like the rest of the VM's.
+   Max_Foreign : constant := 64;
    type Sym_Access is access constant String;
    type Foreign_Rec is record
       Sym  : Sym_Access := null;
@@ -557,6 +565,20 @@ package body OBC_VM is
       23 => (Sym => new String'("o2c_fread"), Pops => 3),
       24 => (Sym => new String'("o2c_fwrite"), Pops => 3),
       25 => (Sym => new String'("o2c_fclose"), Pops => 1),
+      --  The transcendentals Math and MathL stand on, appended after the file
+      --  group and never renumbered: 3cr found the module's own body calling
+      --  them bare, with nothing able to answer.
+      26 => (Sym => new String'("o2c_math_power"), Pops => 2),
+      27 => (Sym => new String'("o2c_math_exp"), Pops => 1),
+      28 => (Sym => new String'("o2c_math_ln"), Pops => 1),
+      29 => (Sym => new String'("o2c_math_log"), Pops => 2),
+      30 => (Sym => new String'("o2c_math_sin"), Pops => 1),
+      31 => (Sym => new String'("o2c_math_cos"), Pops => 1),
+      32 => (Sym => new String'("o2c_math_tan"), Pops => 1),
+      33 => (Sym => new String'("o2c_math_arcsin"), Pops => 1),
+      34 => (Sym => new String'("o2c_math_arccos"), Pops => 1),
+      35 => (Sym => new String'("o2c_math_arctan"), Pops => 1),
+      36 => (Sym => new String'("o2c_math_arctan2"), Pops => 2),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -591,6 +613,18 @@ package body OBC_VM is
       27 => 3,    --  o2c_fread: name, offset, buffer address
       28 => 3,    --  o2c_fwrite: name, offset, buffer address
       29 => 1,    --  o2c_fclose: the name address
+      --  Entries 26..36 are ids 30..40 (Max_Natives is 5).
+      30 => 2,    --  o2c_math_power
+      31 => 1,    --  o2c_math_exp
+      32 => 1,    --  o2c_math_ln
+      33 => 2,    --  o2c_math_log
+      34 => 1,    --  o2c_math_sin
+      35 => 1,    --  o2c_math_cos
+      36 => 1,    --  o2c_math_tan
+      37 => 1,    --  o2c_math_arcsin
+      38 => 1,    --  o2c_math_arccos
+      39 => 1,    --  o2c_math_arctan
+      40 => 2,    --  o2c_math_arctan2
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -610,6 +644,17 @@ package body OBC_VM is
       27 => True,
       28 => True,
       29 => True,
+      30 => True,
+      31 => True,
+      32 => True,
+      33 => True,
+      34 => True,
+      35 => True,
+      36 => True,
+      37 => True,
+      38 => True,
+      39 => True,
+      40 => True,
       others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
@@ -1585,6 +1630,50 @@ package body OBC_VM is
                end if;
                return Ok;
             end;
+         when Max_Natives + 25 .. Max_Natives + 35 =>
+            --  Math and MathL's transcendentals.  Every one of them RETURNS a
+            --  value, so each sets Result and the interpreter pushes it.  The
+            --  arguments are REALs in the slot the VM keeps a 64-bit double in,
+            --  and REAL and LONGREAL share that slot (M4e) - so Math and MathL
+            --  are the same three instructions with a different name.
+            Result := (Pushes => True, Value => R64_To_U64 (0.0));
+            case Idx is
+               when Max_Natives + 25 =>
+                  Result.Value :=
+                    R64_To_U64
+                      (VM_Math.Power (To_R64 (Args (0)), To_R64 (Args (1))));
+               when Max_Natives + 26 =>
+                  Result.Value := R64_To_U64 (VM_Math.Exp (To_R64 (Args (0))));
+               when Max_Natives + 27 =>
+                  Result.Value := R64_To_U64 (VM_Math.Ln (To_R64 (Args (0))));
+               when Max_Natives + 28 =>
+                  Result.Value :=
+                    R64_To_U64
+                      (VM_Math.Log (To_R64 (Args (0)), To_R64 (Args (1))));
+               when Max_Natives + 29 =>
+                  Result.Value := R64_To_U64 (VM_Math.Sin (To_R64 (Args (0))));
+               when Max_Natives + 30 =>
+                  Result.Value := R64_To_U64 (VM_Math.Cos (To_R64 (Args (0))));
+               when Max_Natives + 31 =>
+                  Result.Value := R64_To_U64 (VM_Math.Tan (To_R64 (Args (0))));
+               when Max_Natives + 32 =>
+                  Result.Value :=
+                    R64_To_U64 (VM_Math.ArcSin (To_R64 (Args (0))));
+               when Max_Natives + 33 =>
+                  Result.Value :=
+                    R64_To_U64 (VM_Math.ArcCos (To_R64 (Args (0))));
+               when Max_Natives + 34 =>
+                  Result.Value :=
+                    R64_To_U64 (VM_Math.ArcTan (To_R64 (Args (0))));
+               when Max_Natives + 35 =>
+                  Result.Value :=
+                    R64_To_U64
+                      (VM_Math.ArcTan2 (To_R64 (Args (0)), To_R64 (Args (1))));
+               when others =>
+                  return Bad_Native;
+            end case;
+            return Ok;
+
          when Max_Natives + 21 .. Max_Natives + 24 =>
             --  o2c_fstat (26), o2c_fread (27), o2c_fwrite (28), o2c_fclose (29):
             --  the positioned file primitives the Files module is built on.
