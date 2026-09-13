@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         437
+    commits         438
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5548,6 +5548,38 @@ text at the parameterless expression path, so the next probe is a print at that 
 
 Tree green, `run_bc` PASS; committed state is 3eb.  The fixture is at /tmp/nestproc.ob2 (expected 42,
 currently 0) and goes into tests/bc/ when it passes.
+
+### 3ef. The call traces fire only for Length — and the likely reason is a symbol dropped too early
+
+3ee left one question: is the parameterless call site reached for `Bump;`, and what does `Proc_Nested`
+say.  Instrumenting the two call sites answers the first half, and not in the way the question assumed:
+
+    C withargs Length params= 1     (x4, and nothing else)
+
+Four traces in the whole compile, all `Length` from inside a builtin's body.  The fixture's own calls -
+`Outer;` and `Bump;` - never reach the call sites at all, so they are emitted somewhere else, or the
+symbol they need is not there to be found.
+
+**And the second reading is the one the code supports.**  `Decl_Procedure` ends with
+
+    N_Sym := Param_Base;        --  drop parameters and locals
+
+and a NESTED procedure's symbol is declared inside the enclosing one, i.e. ABOVE that mark - so it is
+dropped, together with the parameters and locals, at the end of the enclosing procedure's declarations.
+`Bump` is therefore invisible to `Outer`'s own body, where `Bump;` is written.  That would explain both
+halves: the call sites for local procedures are never reached because the name does not resolve, and
+something else emitted the `CALL` that the disassembly showed.
+
+**The test is one print**: `Find ("Bump")` at the statement that calls it.  If it is 0, the fix is that
+`Param_Base` must not drop a nested PROCEDURE symbol - a procedure is not a parameter or a local, and it
+is visible for the whole enclosing scope, which is exactly what the nested-declaration syntax means.
+That is a one-line change with a fixture already written to prove it.
+
+**Where this leaves the piece**: the depth condition, the +1 parameter count and the link interning are
+right (3ee); the caller's push needs a call site that is actually reached; and the reachability is now
+the suspect rather than the emission.
+
+Tree green, `run_bc` PASS; committed state is 3eb; the fixture is at /tmp/nestproc.ob2.
 
 ## 4. Method — what worked, and what did not
 
