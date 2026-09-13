@@ -656,6 +656,53 @@ begin
          O2c_Ir_Lower.Discard;
          Check (O2c_BC.Insns = Before + 1, "a discard helper is one instruction");
 
+         --  FOR: the two opcodes that take their LABEL AS AN OPERAND.  Both are
+         --  one instruction, and For_Enter consumes the two bounds the front
+         --  end pushed (from and to) - which is the emitter's model, checked by
+         --  its own underflow guard rather than by a count.
+         declare
+            LFa : constant O2c_Ir.Label_Id := O2c_Ir.New_Label;
+            LFb : constant O2c_Ir.Label_Id := O2c_Ir.New_Label;
+         begin
+            O2c_Ir_Lower.Reserve_Label (LFa, 111);
+            O2c_Ir_Lower.Reserve_Label (LFb, 112);
+            O2c_BC.Push_Int (1);
+            O2c_BC.Push_Int (3);
+            Before := O2c_BC.Insns;
+            O2c_Ir_Lower.For_Enter (0, 1, 1, LFa);
+            Check (O2c_BC.Insns = Before + 1,
+                   "For_Enter is one instruction (got"
+                     & Natural'Image (O2c_BC.Insns - Before) & ")");
+            Before := O2c_BC.Insns;
+            O2c_Ir_Lower.For_Next (0, 1, 1, LFb);
+            Check (O2c_BC.Insns = Before + 1,
+                   "For_Next is one instruction (got"
+                     & Natural'Image (O2c_BC.Insns - Before) & ")");
+         end;
+
+         --  The unary sign, and the thing that made its arm wrong until now:
+         --  Un leaves the depth ALONE where Bin would pop.  With a zeroed depth
+         --  an op routed through Bin underflows loudly, so "it does not raise"
+         --  is the check that this op is unary - a count cannot see it.
+         O2c_BC.Begin_Mode;
+         declare
+            Reopen2 : constant Natural := O2c_BC.Begin_Proc (0, 0);
+            pragma Unreferenced (Reopen2);
+         begin
+            null;
+         end;
+         Raised2 := False;
+         Before := O2c_BC.Insns;
+         begin
+            O2c_Ir_Lower.Un_Op (Op_Neg, Tc_Real);
+         exception
+            when others => Raised2 := True;
+         end;
+         Check (not Raised2 and then O2c_BC.Insns = Before + 1,
+                "a unary sign is one instruction that does NOT pop");
+         Check (Value_At (Quad_At (Quad_Id (Quad_Count)).Src1).Class = Tc_Real,
+                "and its quad carries the operand class");
+
          O2c_BC.Push_Int (1);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));

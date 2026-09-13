@@ -175,7 +175,16 @@ package O2c_Ir is
                --  kind byte the VM READS (0 = index out of range), which is why
                --  the emitter's Trap takes one rather than emitting a bare op.
                Op_Dup,                       --  push a copy of the top
-               Op_Trap);                     --  trap, kind Imm_1
+               Op_Trap,                      --  trap, kind Imm_1
+               --  FOR's pair, appended because FOR is the ONE statement whose
+               --  labels are OPERANDS of the opcode (a fixup each) rather than
+               --  Mark/Jump pairs - so it needed an op where the others needed a
+               --  branch helper.  The quads carry what the opcodes take:
+               --  Imm_1 the loop variable's frame slot, Imm_2 the limit's slot,
+               --  Src1 the label VALUE and Src2 a constant holding the STEP
+               --  (which can be negative, so it is a value, not an immediate).
+               Op_For_Enter,                 --  slot, step, limit, else-label
+               Op_For_Next);                 --  slot, step, limit, body-label
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

@@ -163,6 +163,22 @@ package O2c_Ir_Lower is
    --  whole statement and drops it once at the end.
    procedure Discard;
 
+   --  A UNARY operator whose opcode depends on the width - the sign, and the
+   --  only one the parser emits.  Bin_Op's mirror, and the class is the same
+   --  kind of fact: the operand is already on the stack, so its width has to
+   --  travel on a value the quad names.
+   procedure Un_Op (O : O2c_Ir.Op; Class : O2c_Ir.Type_Class);
+
+   --  FOR.  The two opcodes take their target as an OPERAND (a fixup), so these
+   --  are shaped differently from the Jump helpers: everything the opcode needs
+   --  is an argument.  `L` is the else-target for For_Enter and the body's start
+   --  for For_Next, and the lowering resolves it through the reservation like
+   --  any other label.  from and to are on the operand stack for For_Enter.
+   procedure For_Enter (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                        L : O2c_Ir.Label_Id);
+   procedure For_Next (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                       L : O2c_Ir.Label_Id);
+
    procedure Mark (L : O2c_Ir.Label_Id);
    procedure Jump (L : O2c_Ir.Label_Id);
    procedure Jump_False (L : O2c_Ir.Label_Id);

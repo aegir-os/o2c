@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         377
+    commits         378
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3330,6 +3330,61 @@ Verified: gate35, all seven suites green, zero warnings.
     5 Bin           the string family (Str_Cmp, Copy_Str) and one variable opcode
     16 Push_Int, 5 Push_Str, 4 Global, 2 Store, 4 Discard, 2 Type_Test
                    literals and global access, mostly one-line helper calls away
+
+### 3bx. DONE — FOR and the unary sign, and a latent bug the migration exposed
+
+FOR was the one construct whose labels are **operands of the opcode** (a fixup each) rather
+than Mark/Jump pairs, so it needed ops where every other statement needed a branch helper:
+
+    Op_For_Enter, Op_For_Next
+    Imm_1 the loop variable's frame slot, Imm_2 the limit's slot,
+    Src1 the label VALUE (resolved through the reservation like any other),
+    Src2 a constant holding the STEP - a value, because a step can be NEGATIVE and
+    Quad_Info's immediates are Natural
+
+With `For_Enter`/`For_Next` helpers beside the Jump ones, the FOR site is five one-line calls
+(`Discard`, `For_Enter`, `Mark`, `For_Next`, `Mark`), and hiding the emitter's numbering now
+holds everywhere.
+
+**And the unary sign exposed a LATENT BUG in an arm of two commits earlier.**  `Op_Neg` sat in
+the arithmetic arm, which emits through `O2c_BC.Bin` — two operands in, one out.  A negate is
+UNARY: the emitter's `Un` leaves the depth alone, so routing it through `Bin` tells the stack
+model to pop a value nobody pushed - a wrong `stack_max` at best, "operand-stack underflow" at
+worst.  Nothing emitted `Op_Neg`, because the front end called the emitter's `Un` directly, so
+the bug was invisible from both sides: no site used it and no test covered it.  `Un_Op` now
+declares the operand's class the way `Bin_Op` does, and the arm is `O2c_BC.Un`.
+
+The self-test check for it is the interesting one, because a COUNT cannot see it: with a
+zeroed depth, an op routed through `Bin` underflows LOUDLY, so the check is "a unary sign is
+one instruction that does NOT pop" - the absence of the failure is the evidence.
+
+**The parser's control-flow surface is now fully quad-built:**
+
+    Mark 0, Jump 0, For_Enter/For_Next 0, Dup_Top 0, Trap 0, Un 0 - all through helpers
+    what is left is literals and global access: Push_Int 16, Push_Str 5, Bin 5
+    (Str_Cmp, Copy_Str, one variable opcode, and the designator chain's own Mul/Add),
+    Global 4, Store 2, Discard 3, Type_Test 2
+
+**Evidence, and one image changed — for the SECOND instance of a known class.**
+**71 of 72** fixtures are byte-identical; `fordown` is 1144 -> 1136.  The 8 bytes are one
+byte of CODE plus the padding that follows it, and the byte is `0x35` — `NEG`.  Which `NEG`,
+and why, was settled by a probe rather than by reading: a fixture containing ONLY
+
+    const STEP = -2;
+
+and no FOR at all loses exactly that one `NEG` too (`old=1 new=0`, code section the same
+size, and the use site pushes the folded constant).  So the cause is not FOR: it is the same
+wart 3bt found — a CONSTANT DECLARATION's expression emitted into the module prologue, where
+it is dead because the folded value is what every use site pushes — and `Un_Op`'s
+`Proc_Open` guard is what removed this instance, exactly as `Bin_Op`'s removed the first.
+
+That is the pattern worth carrying: **each helper that guards on `Proc_Open` removes one
+instance of prologue dead code**, and the instances that remain are the RAW pushes
+(`Push_Int` 16, `Push_Str` 5), which is why this was one byte and not more.  Migrating the
+literals is the next stage, and it will remove the rest — the identity net is what made the
+difference visible instead of silent.
+
+Verified: gate36, all seven suites green, zero warnings; self-test 81 -> 85 checks.
 
 ## 4. Method — what worked, and what did not
 

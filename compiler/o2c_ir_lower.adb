@@ -254,6 +254,48 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Trap;
 
+   procedure Un_Op (O : O2c_Ir.Op; Class : O2c_Ir.Type_Class) is
+      L : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      L := O2c_Ir.New_Temp (Typ => 0, Class => Class);
+      O2c_Ir.Emit (O, Src1 => L);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Un_Op;
+
+   procedure For_Enter (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                        L : O2c_Ir.Label_Id) is
+      S : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      --  The STEP is a value rather than an immediate because it can be
+      --  negative and Quad_Info's immediates are Natural.
+      S := O2c_Ir.Const_Int (Long_Integer (Step), Typ => 1);
+      O2c_Ir.Emit (O2c_Ir.Op_For_Enter, Src1 => O2c_Ir.Label_Value (L),
+                   Src2 => S, Imm_1 => Slot, Imm_2 => Limit_Slot);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end For_Enter;
+
+   procedure For_Next (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                       L : O2c_Ir.Label_Id) is
+      S : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      S := O2c_Ir.Const_Int (Long_Integer (Step), Typ => 1);
+      O2c_Ir.Emit (O2c_Ir.Op_For_Next, Src1 => O2c_Ir.Label_Value (L),
+                   Src2 => S, Imm_1 => Slot, Imm_2 => Limit_Slot);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end For_Next;
+
    procedure Discard is
    begin
       if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
@@ -668,8 +710,32 @@ package body O2c_Ir_Lower is
             --  applies to it too: these ops DECLARE their operands.
             O2c_BC.Jump (O2c_BC.Jz, Bc_Label_Of (Q.Src1));
 
+         when Op_For_Enter =>
+            --  Everything the opcode takes comes off the quad: the slot, the
+            --  step (a value, so it can be negative), the limit's slot and the
+            --  LABEL, which Bc_Label_Of resolves through the reservation.
+            O2c_BC.For_Enter (Q.Imm_1, Integer (Value_At (Q.Src2).Int),
+                              Q.Imm_2, Bc_Label_Of (Q.Src1));
+
+         when Op_For_Next =>
+            O2c_BC.For_Next (Q.Imm_1, Integer (Value_At (Q.Src2).Int),
+                             Q.Imm_2, Bc_Label_Of (Q.Src1));
+
+         when Op_Neg =>
+            --  UNARY, and that is not a detail.  The emitter's Un leaves the
+            --  depth alone while Bin counts two operands in and one out, so a
+            --  negate routed through Bin would tell the stack model to pop a
+            --  value nobody pushed - a wrong stack_max at best, "operand-stack
+            --  underflow" at worst.  Op_Neg sat in the arithmetic arm until
+            --  3bx and NOTHING emitted it, which is exactly why it was latent:
+            --  the front end used the emitter's Un directly.
+            O2c_BC.Un (Bc_Op (Q.Op, Value_At (Q.Src1).Class));
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
          when Op_Add | Op_Sub | Op_Mul | Op_Div | Op_Mod
-            | Op_Neg | Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge =>
+            | Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge =>
             --  The WIDTH comes from the OPERAND, not the destination: a
             --  comparison's destination is a boolean word while its operands may
             --  be reals, and the op family follows the operands.

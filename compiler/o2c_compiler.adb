@@ -2958,7 +2958,7 @@ package body O2c_Compiler is
                     & "LONGINT, REAL or LONGREAL (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
-               if Neg and then O2c_BC.Bytecode_Mode then
+               if Neg then
                   --  The operand is already on the stack - Push_Int or
                   --  Push_Real put it there when the factor was parsed - so
                   --  the sign is an opcode, not text.  Omitting it stored the
@@ -2973,9 +2973,9 @@ package body O2c_Compiler is
                   --  is the same 8-byte slot as an INTEGER, so NEG is
                   --  the LONGINT negation.
                   if R.Typ = T_Real or else R.Typ = T_LReal then
-                     O2c_BC.Un (O2c_BC.Rneg);
+                     O2c_Ir_Lower.Un_Op (O2c_Ir.Op_Neg, O2c_Ir.Tc_Real);
                   else
-                     O2c_BC.Un (O2c_BC.Neg);
+                     O2c_Ir_Lower.Un_Op (O2c_Ir.Op_Neg, O2c_Ir.Tc_Word);
                   end if;
                end if;
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
@@ -6775,8 +6775,8 @@ package body O2c_Compiler is
       Had_By : Boolean := False;
       Bc_Slot  : Natural := 0;
       Bc_Limit : Natural := 0;
-      Bc_Top   : Natural := 0;
-      Bc_Else  : Natural := 0;
+      Bc_Top   : O2c_Ir.Label_Id := 0;
+      Bc_Else  : O2c_Ir.Label_Id := 0;
    begin
       Next;                          --  FOR
       V_Len := Cur.Len;
@@ -6872,16 +6872,16 @@ package body O2c_Compiler is
             Bc_Limit := Lim;
          end;
          Bc_For_N := Bc_For_N + 1;
-         Bc_Top := New_Bc_Label;
-         Bc_Else := New_Bc_Label;
+         Bc_Top := New_Lbl;
+         Bc_Else := New_Lbl;
          --  BY's expression pushed a value on the operand stack; the step is
          --  a compile-time constant held in By_Val, so the pushed value goes.
          if Had_By then
-            O2c_BC.Discard;
+            O2c_Ir_Lower.Discard;
          end if;
          --  from and to are on the stack, to on top
-         O2c_BC.For_Enter (Bc_Slot, By_Val, Bc_Limit, Bc_Else);
-         O2c_BC.Mark (Bc_Top);
+         O2c_Ir_Lower.For_Enter (Bc_Slot, By_Val, Bc_Limit, Bc_Else);
+         O2c_Ir_Lower.Mark (Bc_Top);
       end if;
       Append_Body ("      " & V_Name (1 .. V_Len) & " := "
                    & To_String (Lo.Text) & ";");
@@ -6904,8 +6904,8 @@ package body O2c_Compiler is
                    & V_Name (1 .. V_Len) & " + " & To_String (By_Text) & ";");
       Append_Body ("      end loop;");
       if O2c_BC.Bytecode_Mode then
-         O2c_BC.For_Next (Bc_Slot, By_Val, Bc_Limit, Bc_Top);
-         O2c_BC.Mark (Bc_Else);
+         O2c_Ir_Lower.For_Next (Bc_Slot, By_Val, Bc_Limit, Bc_Top);
+         O2c_Ir_Lower.Mark (Bc_Else);
          --  The loop variable lived in a frame slot; a module variable has
          --  to carry the final value back to its global.
          if not In_Proc then
