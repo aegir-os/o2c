@@ -63,6 +63,29 @@ package body O2c_Ir_Lower is
       end case;
    end Bc_Op;
 
+   procedure Call_Native (Id : Natural; Arity : Natural) is
+      First : Natural;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      for K in 1 .. Arity loop
+         pragma Unreferenced (K);
+         O2c_Ir.Emit (O2c_Ir.Op_Arg);
+      end loop;
+      --  Quad ids are 1-based and Quad_Count is the LAST one emitted, so the
+      --  first argument is Quad_Count - Arity + 1.  One less than this lowers
+      --  the previous call - which fails loudly ("native N takes 0 arguments
+      --  but M were pushed") rather than silently, but it is still wrong.
+      First := O2c_Ir.Quad_Count - Arity + 1;
+      O2c_Ir.Emit (O2c_Ir.Op_Call_Native, Imm_1 => Id, Imm_2 => Arity);
+      --  the arguments, then the call
+      for K in 0 .. Arity loop
+         O2c_Ir_Lower.Emit_Quad
+           (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (First + K)));
+      end loop;
+   end Call_Native;
+
    procedure Reserve_Label (Ir_Label : O2c_Ir.Label_Id; Bc_Label : Natural) is
    begin
       if Natural (Ir_Label) = 0 or else Natural (Ir_Label) > Max_Ir_Labels then

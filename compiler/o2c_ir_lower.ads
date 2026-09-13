@@ -40,6 +40,16 @@ package O2c_Ir_Lower is
    --  instruction COUNT cannot tell Add from Radd, but this mapping can.
    function Bc_Op (Op : O2c_Ir.Op; C : O2c_Ir.Type_Class) return O2c_Bc.Op;
 
+   --  One native call: `Arity` declared arguments, the call itself, and the
+   --  lowering of exactly those quads.  The arguments were pushed by the front
+   --  end as it parsed them, which is what Op_Arg declares.
+   --
+   --  This exists so a migration is one line - and so the DYNAMIC call sites,
+   --  whose id and arity are computed at compile time, do not have to repeat
+   --  their expression to get the right number of Op_Arg quads.  It is a no-op
+   --  outside bytecode mode.
+   procedure Call_Native (Id : Natural; Arity : Natural);
+
    --  Emit the bytecode for one quad.  Called INSIDE an open emitter procedure
    --  (O2c_BC.Proc_Open must hold), because that is what the emitter's stores
    --  and loads address.

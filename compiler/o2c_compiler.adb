@@ -3386,7 +3386,7 @@ package body O2c_Compiler is
                      --  Id 26 (o2c_fstat): the name's address is on the stack,
                      --  and the native returns the size - or -1 for "no such
                      --  file", which is why the result type below is LONGINT.
-                     O2c_BC.Native_Call (26, 1);
+                     O2c_Ir_Lower.Call_Native (26, 1);
                   end if;
                   R.Text := To_Unbounded_String
                     ("O2c_FStat (" & To_String (A.Text) & ")");
@@ -3710,7 +3710,7 @@ package body O2c_Compiler is
                                     for K in 1 .. 2 loop
                                        Bc_Push_Arg (Arg_R (K));
                                     end loop;
-                                    O2c_BC.Native_Call (17, 2);
+                                    O2c_Ir_Lower.Call_Native (17, 2);
                                     R.Typ := T_Bool;
                                     R.Lit := False;
                                     R.Folds := False;
@@ -3740,7 +3740,7 @@ package body O2c_Compiler is
                                 and then Eq_No_Case (FNm, "XYplane")
                                 and then Eq_No_Case (MName, "Key")
                               then
-                                 O2c_BC.Native_Call (18, 0);
+                                 O2c_Ir_Lower.Call_Native (18, 0);
                                  R.Typ := T_Char;
                                  R.Lit := False;
                                  R.Folds := False;
@@ -7406,7 +7406,7 @@ package body O2c_Compiler is
                      --  the name.  Parse_Expr has already pushed it, because
                      --  an ARRAY OF parameter pushes its caller's address and
                      --  a module-level array pushes its globals address.
-                     O2c_BC.Native_Call (9, 1);
+                     O2c_Ir_Lower.Call_Native (9, 1);
                   end if;
                   Append_Body ("      O2c_FDel ("
                                & To_String (P1.Text) & ");");
@@ -7440,7 +7440,7 @@ package body O2c_Compiler is
                      --  Native id 10 (o2c_frename): two addresses, source
                      --  first - which is the order they were parsed and
                      --  pushed, and the order the native's Args reads.
-                     O2c_BC.Native_Call (10, 2);
+                     O2c_Ir_Lower.Call_Native (10, 2);
                   end if;
                   Append_Body ("      O2c_FRename ("
                                & To_String (P1.Text) & ", "
@@ -7736,7 +7736,7 @@ package body O2c_Compiler is
                                           Total_Slots (Syms (SId).UT)));
                                  end;
                                  --  Native id 7: the third foreign entry.
-                                 O2c_BC.Native_Call (7, 2);
+                                 O2c_Ir_Lower.Call_Native (7, 2);
                               elsif Eq_No_Case (MNm, "Files")
                                 and then Eq_No_Case
                                   (To_String (MName), "Delete")
@@ -7764,7 +7764,7 @@ package body O2c_Compiler is
                                           Total_Slots (Syms (SId).UT)));
                                  end;
                                  --  Native id 9: foreign entry 5.
-                                 O2c_BC.Native_Call (9, 1);
+                                 O2c_Ir_Lower.Call_Native (9, 1);
                               elsif Eq_No_Case (MNm, "Files")
                                 and then Eq_No_Case
                                   (To_String (MName), "Rename")
@@ -7794,7 +7794,7 @@ package body O2c_Compiler is
                                     end;
                                  end loop;
                                  --  Native id 10: foreign entry 6.
-                                 O2c_BC.Native_Call (10, 2);
+                                 O2c_Ir_Lower.Call_Native (10, 2);
                               elsif Eq_No_Case (MNm, "Env")
                                 and then (Eq_No_Case
                                             (To_String (MName), "Get")
@@ -7875,7 +7875,7 @@ package body O2c_Compiler is
                                     O2c_BC.Load_Addr_G
                                       (O2c_BC.Global (Ada_Id (RN)));
                                     --  Native id 13: foreign entry 9.
-                                    O2c_BC.Native_Call (13, 3);
+                                    O2c_Ir_Lower.Call_Native (13, 3);
                                  end;
                               elsif Eq_No_Case (MNm, "In")
                                 and then (Eq_No_Case
@@ -7953,7 +7953,7 @@ package body O2c_Compiler is
                                  for K in 1 .. 3 loop
                                     Bc_Push_Arg (Arg_R (K));
                                  end loop;
-                                 O2c_BC.Native_Call (16, 3);
+                                 O2c_Ir_Lower.Call_Native (16, 3);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."
@@ -7975,13 +7975,13 @@ package body O2c_Compiler is
                              and then Eq_No_Case
                                (To_String (MName), "Clear")
                            then
-                              O2c_BC.Native_Call (15, 0);
+                              O2c_Ir_Lower.Call_Native (15, 0);
                            elsif Eq_No_Case (MNm, "In")
                              and then Eq_No_Case
                                (To_String (MName), "Open")
                            then
                               --  In.Open resets the input stream.
-                              O2c_BC.Native_Call (19, 0);
+                              O2c_Ir_Lower.Call_Native (19, 0);
                            elsif Eq_No_Case (MNm, "XYplane")
                              and then Eq_No_Case
                                (To_String (MName), "Open")
@@ -7992,7 +7992,7 @@ package body O2c_Compiler is
                               --  are not needed at all.
                               O2c_BC.Push_Int (640);
                               O2c_BC.Push_Int (400);
-                              O2c_BC.Native_Call (14, 2);
+                              O2c_Ir_Lower.Call_Native (14, 2);
                            else
                               raise O2c_BC.Wrong_Construct with
                                 "bytecode backend: " & MNm & "."
@@ -9281,7 +9281,7 @@ package body O2c_Compiler is
                            end if;
                         elsif Member = "String" then
                            if not Str_Looped then
-                              O2c_BC.Native_Call (1, 1);
+                              O2c_Ir_Lower.Call_Native (1, 1);
                            end if;
                         elsif Member = "Real" or else Member = "LongReal"
                         then

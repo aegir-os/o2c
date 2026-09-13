@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         361
+    commits         362
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2524,6 +2524,47 @@ by member, starting with the loop that needed them.
 **Next**: M4g (ii) a RUN-net for the FFI families, whose probes only compile; then
 (iii) the mechanical members; then (iv) `Out.String`'s loop, which begins by marking
 its values' classes - now possible.
+
+### 3bh. M4g (ii) was unnecessary, and (iii) started with a loud off-by-one
+
+**The run-net already existed.**  `bytecode_gaps.sh` does not merely compile the FFI
+probes - it runs `vm_main` and ASSERTS the output: `Env.Set`/`Get` as a round trip
+*and* as a read of a variable the VM did not set (the two together are what show it
+reaches the real environment), both directions of `Args.Get`.  That suite is one of
+the seven and it is green.  So writing a fixture would have duplicated work, and the
+plan said to write one.  That is the third premise measurement has overturned in this
+session - M3b's "duplication", the M4f part 2 sizing, and now this.
+
+**M4g (iii) began: 14 of the 15 literal native sites migrated**, through a new
+`Call_Native (Id, Arity)` helper.  The helper exists for two reasons: a migration
+becomes one line, and the six DYNAMIC sites - whose id and arity are computed at
+compile time - do not have to repeat their expression to get the right number of
+`Op_Arg` quads.  The one site left is `(4, 1)`, which is the print LOOP, and belongs
+to M4f part 2.
+
+**And the helper had an off-by-one, which the run-net caught immediately.**  I wrote
+`First := Quad_Count - Arity`.  Quad ids are 1-based and `Quad_Count` is the LAST one
+emitted, so the first argument is `Quad_Count - Arity + 1`; one less lowers the
+PREVIOUS call, and the failure named itself:
+
+    O2c_Ir_Lower: native 2 takes 0 arguments but 2 were pushed
+
+Note which sites were right: M4d and M4e wrote the arithmetic out explicitly
+(`Quad_Count - 2`, `- 1`, `Quad_Count`) and worked.  GENERALISING it is what
+introduced the error, and a general helper needs the boundary re-derived rather than
+copied from the case it was factored out of.
+
+**And my own harness hid the diagnosis for a round.**  I had redirected both the
+compile's and the VM's output to /dev/null, so an EMPTY actual looked like "wrong
+output" instead of "nothing ran" - the difference between debugging a value and
+debugging a stage.  `AGENTS.md` says never suppress a build's output; the error was
+one visible line away.
+
+Verified: `ffi` prints 42 / 2.500 / 1234 matching its golden, plus `filesintr`,
+`lenopen`, `sum`, `arrparam`; all seven suites green, 52 corroborated.
+
+**Next**: the six remaining dynamic sites, one at a time - each needs its text read,
+since their id and arity are expressions rather than literals.
 
 ## 4. Method — what worked, and what did not
 
