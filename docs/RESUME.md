@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         385
+    commits         386
     fixtures        86 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3727,6 +3727,45 @@ inside a library body mis-resolves.  The next attempt at the lever starts there.
 
 Evidence: `run_bc` green including `litarg`; the identity net unchanged for every other fixture;
 gate42.
+
+### 3cf. CORRECTION — the third blocker is a RUNTIME wild access, not the builtin path
+
+3ce's entry ends with a hypothesis: `Strings.Pos` crashes because "an intra-module call inside a
+compiled library body resolves to the wrong procedure id".  **The hypothesis is wrong**, and the
+probe that disproves it took one command: the SAME body as a plain USER module (`b4`, and its
+three variants `w6a`/`w6b`/`w6c`) crashes identically, and a user module has no `Scoped`, no
+builtin and no library path at all.  The builtin is not implicated.
+
+**What the crash actually is.**  The VM's own phases say it:
+
+    Phase := 2;  Verify (...)              <- the verifier
+    Phase := 3;  return Run_Context (...)  <- the interpreter
+    exception when E : others => Note ("internal error in phase" ...)
+
+so `internal error in phase 3: STORAGE_ERROR (stack overflow or erroneous memory access)` happens
+**while the program is RUNNING**, and the catch-all then reports `Bad_Code` - which is the
+"malformed code" line that follows.  The image is fine; the run walks somewhere it must not.
+
+**And it was always there, masked by the verifier.**  Before 3ce, these four bodies failed
+*verification* ("depth -1") and never ran.  Fixing the literal-length bug made them verify - and
+then they crash.  So the verifier's complaint had been hiding a runtime defect, which is the
+opposite of the usual relationship between those two and worth noting: a failure report can mask
+a *different*, deeper failure.
+
+**The boundary, measured:**
+
+    S1    two sibling calls with open-array actuals, a simple body          runs, prints 32
+    z1    one open formal, a literal actual                                 runs, prints 3
+    b4/w6a/w6b/w6c   `Pos`'s body, or a variant of it                       CRASH in phase 3
+
+`w6a` is the smallest known failure at 648 bytes, and it is the thing to bisect next.
+
+**The diagnostic gap, named**: the handler that reports phase 3 lives OUTSIDE the interpreter, so
+it has no `PC` and cannot say which instruction walked off.  The verifier learned to report its
+depth, its limit and the causing opcode (3cd); the interpreter has not had the same treatment.
+The next diagnostic step is inside `Run_Context`: either report `Ctx.PC` on the catch-all, or -
+better, and matching the project's rule that a malformed image must be REJECTED rather than crash
+the VM - check the address before dereferencing it and return a status with the PC attached.
 
 ## 4. Method — what worked, and what did not
 
