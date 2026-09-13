@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         424
+    commits         425
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5137,6 +5137,29 @@ So the re-entry guard must move with the open, and it cannot be `Proc_Open` any 
 overwritten before the id is taken, so the flag has to be captured above that - a small, exact piece
 of work, and the next thing to do.  The revert is clean (`git checkout compiler/o2c_compiler.adb`,
 `run_bc` PASS) and the emitter half is committed.
+
+### 3ds. Nesting step 2 needs a MEASUREMENT, not a third guess
+
+Two attempts at "reserve the id at the declaration, open the body at the begin", and both broke the
+same 143 fixtures - which is worth reading carefully, because the identical count means at least one
+of them changed nothing.
+
+**Attempt 1** removed the `not Proc_Open` guard, on the reasoning that the front end's own comment
+("may reach a procedure declaration more than once ... this is how it tells") makes it the re-entry
+detector.  **Attempt 2** kept that reasoning and carried the flag across the re-parse in a new
+`Saved_Bc_Proc`, captured before the symbol is rebuilt.  **Neither moved the number**, and then a
+third hypothesis - that `Open_Proc` resetting `Next_Frame` wipes the parameter slots interned during
+the header, so the reset belongs in `Reserve_Proc` - moved it not at all either.
+
+**So the cause is not among the three things I reasoned about, and the next step is to find out which
+they are rather than to think of a fourth.**  The instrument this session keeps proving is the cheap
+one: print, at the declaration and at the begin, the procedure's name and the id `Reserve_Proc`
+returned, and the `Next_Frame`/`Local_Count` either side.  That says in one run whether a declaration
+is reached twice, whether an id is reserved twice, and where the frame goes wrong - all three of which
+I have now guessed at and none of which I have seen.
+
+Every reverted attempt was clean (`git checkout compiler/`, build 0 warnings, `run_bc` PASS,
+`run_vm` PASS) and the committed state is 3dr's emitter split, which is verified and green.
 
 ## 4. Method — what worked, and what did not
 
