@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         438
+    commits         439
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5580,6 +5580,46 @@ right (3ee); the caller's push needs a call site that is actually reached; and t
 the suspect rather than the emission.
 
 Tree green, `run_bc` PASS; committed state is 3eb; the fixture is at /tmp/nestproc.ob2.
+
+### 3eg. Both counts are RIGHT; the visibility fix is not local; the call targets are the next suspect
+
+Three measurements, in the order they narrowed it.
+
+**1. The reserve trace.  Both counts are correct:**
+
+    R Outer depth= 0 cnt= 0
+    R Bump  depth= 1 cnt= 1 NESTED
+
+`Outer`, top level, is reserved with no link; `Bump`, nested, with one.  So the +1 convention and the
+depth semantics are settled (with 3ee), and `3ed`'s "nparams = 1 for a top-level procedure" was indeed a
+misreading of the procedure table - whose field order I also cannot take on trust, since it is my own
+disassembler's reading of the doc.
+
+**2. The visibility fix works, and is not local.**  `3ef` was confirmed exactly:
+
+    P drop n    kind=S_VAR
+    P drop Bump kind=S_PROC
+
+so `N_Sym := Param_Base` does drop a nested procedure symbol.  Keeping those symbols (moving them down
+over the parameters and locals) is a small change in the right direction, and it is NOT local: with it,
+the compile produces **zero** call traces where it previously produced four.  A fix whose effect I cannot
+characterise does not land, so it is reverted.  The evidence for the diagnosis stands; the repair needs
+its own measurement of what else moves.
+
+**3. The call targets are not procedure starts.**  With every call site instrumented, the fixture's own
+calls never reach one - and the CALL operands in the image do not resolve to any procedure start (the
+disassembler shows `-> ?` for all of them, including the module body's `CALL [3098]` to `Outer`).  Since
+bodies are emitted nested-first and the call targets are patched at `Finish`, the offset table is the
+next thing to read: a target that is not a start offset is consistent with a patch applied to a stale
+offset, and that alone would produce the wild address.
+
+**So the remaining questions are two, both about ids and offsets rather than about frames**: where the
+fixture's statement call is emitted, and what the id -> offset patch table contains at `Finish`.  And the
+lesson from three reverted attempts in a row is that a repair to this front end needs a measurement
+first, not a diagnosis first - the diagnosis has been right four times (3ef included) and the repairs
+have been local three times out of three only when they were aimed at a value that had been printed.
+
+Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (expected 42, still 0).
 
 ## 4. Method — what worked, and what did not
 
