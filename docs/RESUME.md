@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         379
+    commits         380
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3429,6 +3429,75 @@ bytes (the frame setup that is always there).  Every one of the four images is S
 `run_bc` is green *including* all four.
 
 Verified: gate37, all seven suites green, zero warnings; self-test 85 -> 86 checks.
+
+### 3bz. THE METRIC LEVER — one line moves it past a whole library, and TWO blockers it exposes
+
+Nothing in code this round: a measurement, a reverted experiment, and two minimal reproducers.
+But it is the most useful measurement of the session, because it changes what "advance the
+metric" means.
+
+**The lever.**  `Compile_Builtin (Oak_Strings_Src, Scoped => False)` compiles the builtin with
+`O2c_BC.Bytecode_Mode := Scoped` — so `False` means its BODIES are not emitted and its members
+must be served by VM natives (the 20 wired procedures).  The bodies, however, are **right there
+in the compiler**, written in the language this backend compiles.  Flipping that one flag:
+
+    Scoped => False   hello.ob2 refuses at   bytecode backend: Strings.Pos is not yet supported
+    Scoped => True    hello.ob2 refuses at   bytecode backend: Texts.OpenWriter is an FFI
+                                             primitive and is not yet supported
+
+Past the WHOLE Strings module, and into Texts.  That is a far bigger step than wiring
+`Strings.Pos` as one more native, so the metric's next move is not a native at all.
+
+**Blocker A — the VM's verifier cannot verify an EARLY RETURN.**  Its own comment says it:
+
+    This walk is linear, and by construction the code after a return is the next procedure in
+    the payload, so the frame's depth is not carried across: reset it.
+
+The assumption is false as soon as a procedure returns from the MIDDLE - and every library body
+does.  Minimal reproducer (a function; a plain procedure with the same loops PASSES, which is
+why it stayed hidden):
+
+    module C2; import Out; var sl, sul: integer;
+    procedure P: integer; var i: integer;
+    begin for i := 0 to sl - sul do if i = 1 then return i end end; return -1 end P;
+    begin sl := 5; sul := 2; Out.Int(P, 0); Out.Ln end C2.
+
+    -> vm: operand-stack depth violation at code offset 1119
+
+The same with a WHILE (`while i < 3 do if i = 1 then return i end; i := i + 1 end`) fails too,
+and so does a FOR containing an `if` in a function even with NO return in the loop - so what
+the verifier objects to is the depth it computes after walking through a mid-procedure
+construct.  The emitter is not at fault: after a RET the verifier keeps walking the REST of the
+procedure with a reset depth, and the loop's tail then drives it below zero.  **No fixture
+returns early from inside a loop**, which is why a green corpus never said so.
+
+**Blocker B — `var ARRAY OF` write-back is silently lost.**  `Strings.Cap` is declared
+`Cap*(var s: array of char)` and its body writes `s[i] := CHR(...)`; called from a program it
+printed the array UNCHANGED (`abc`, not `ABC`).  A silent wrong answer, not a refusal - the
+class this backend exists to eliminate - and the corpus's ARRAY OF fixtures are all READS
+(`Out.String`, comparison), so nothing covered the write.  (A first probe of mine was refused
+correctly with "cannot assign elements of a value ARRAY OF parameter" - because I had left out
+the `var` - which is how the DECLARATION's form came to be part of the evidence: the parameter
+must be `var` to be assignable, and `Cap`'s is.)
+
+**And one parse-level finding**: grouped parameters (`sub, s2: array of char`) are refused -
+"expected ':' in a parameter".  Oberon-2 allows `a, b: T`, the Oakwood sources happen to write
+every type out, so nothing had noticed.
+
+**What this means for the plan.**  The metric's next step is NOT one VM native for `Strings.Pos`
+- it is these two blockers, because the whole builtin library family comes with them, and both
+are *backend/VM* defects rather than missing natives:
+
+    1. the verifier needs a walk that follows a procedure's REAL control flow (or, at the
+       least, one that does not reset at a mid-procedure RET) - and a fixture that returns from
+       inside a loop, which needs blocker 1 fixed to exist at all
+    2. `var ARRAY OF` write-back needs a fixture and a fix
+    3. then `Scoped => True` for the libraries becomes a one-line-per-module advance
+
+The experiment was REVERTED: a `Scoped => True` image is one the VM REFUSES to load, which is
+worse than a refusal at compile time, and it would also have silently fixed `Strings.Length`
+under `bytecode_gaps.sh`'s recorded gap.  Reverted to the documented state, and the metric is
+back at `Strings.Pos` - which is the honest place for it to be until the two blockers are fixed.
 
 ## 4. Method — what worked, and what did not
 
