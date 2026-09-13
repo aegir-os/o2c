@@ -104,7 +104,16 @@ package O2c_Ir is
                --  are append-only, and so is this list.
                Op_Call_Native,
                Op_Return,                    --  return s1
-               Op_Halt);
+               Op_Halt,
+
+               --  Added for the Out.String print loop, appended as the wire
+               --  bytes are.  Imm_1 carries the emitter's local SLOT for the
+               --  two slot ops - a front-end fact the lowering must not have to
+               --  derive - and the element size for the indexed load.
+               Op_Load_Local,                --  d := local slot Imm_1
+               Op_Store_Local,               --  local slot Imm_1 := s1
+               Op_Load_Idx,                  --  d := *(s1 + s2 * Imm_1) bytes
+               Op_Discard);                  --  drop the top of the stack
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

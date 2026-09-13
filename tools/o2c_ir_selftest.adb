@@ -131,7 +131,8 @@ begin
       O2c_Ir_Lower.Emit_Quad
         ((Op => Op_Copy, Dst => Lg, Src1 => C5, Src2 => No_Value, others => <>));
       Check (O2c_BC.Insns = Before + 2,
-             "a global store lowers to two instructions");
+             "a global store lowers to two instructions (got"
+               & Natural'Image (O2c_BC.Insns - Before) & ")");
 
       begin
          O2c_Ir_Lower.Emit_Quad
@@ -156,7 +157,8 @@ begin
       O2c_Ir_Lower.Emit_Quad
         ((Op => Op_Call_Native, Imm_1 => 1, Imm_2 => 2, others => <>));
       Check (O2c_BC.Insns = Before + 3,
-             "two pushed arguments and a native call are three instructions");
+             "two pushed arguments and a native call are three instructions (got"
+               & Natural'Image (O2c_BC.Insns - Before) & ")");
       Check (O2c_BC.Insns /= Before + 5,
              "Op_Arg does NOT push a second copy");
 
@@ -178,7 +180,8 @@ begin
       O2c_Ir_Lower.Emit_Quad
         ((Op => Op_Call_Native, Imm_1 => 2, Imm_2 => 0, others => <>));
       Check (O2c_BC.Insns = Before + 1,
-             "a no-argument native lowers to one instruction");
+             "a no-argument native lowers to one instruction (got"
+               & Natural'Image (O2c_BC.Insns - Before) & ")");
 
       Raised2 := False;
       begin
@@ -221,7 +224,8 @@ begin
          O2c_Ir_Lower.Emit_Quad
            ((Op => Op_Jump_False, Src1 => V2, others => <>));
          Check (O2c_BC.Insns = Before + 2,
-                "a pushed condition and a conditional jump are two instructions");
+                "a pushed condition and a conditional jump are two instructions (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
 
          --  an unreserved label is refused, rather than jumping somewhere
          Raised2 := False;
@@ -263,6 +267,61 @@ begin
       end;
       Check (Raised2, "an op with no byte form raises rather than guessing");
 
+      --  ---- the four ops added for the Out.String loop --------------------
+      declare
+         Sl : constant Natural := O2c_BC.Local ("ls");
+         Lt : Value_Id;
+         --  A local NAMED IN A QUAD must already be declared with O2c_BC.Local:
+         --  Local_Slot_Of looks the name up in the emitter's own table, and
+         --  rightly refuses - by name - when it is missing.  This is the front
+         --  end's side of the contract.
+         Lt_Sl : constant Natural := O2c_BC.Local ("lt");
+         pragma Unreferenced (Lt_Sl);
+      begin
+         Lt := New_Local ("lt", Typ => 1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Load_Local, Dst => Lt, Imm_1 => Sl, others => <>));
+         Check (O2c_BC.Insns = Before + 2,
+                "a local load and its store are two instructions (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         O2c_BC.Push_Int (7);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Store_Local, Src1 => C5, Imm_1 => Sl, others => <>));
+         Check (O2c_BC.Insns = Before + 2,
+                "a pushed value and a local store are two instructions (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         O2c_BC.Push_Int (0);
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Load_Idx, Dst => Lt, Src1 => C5, Src2 => C5,
+             Imm_1 => 1, others => <>));
+         Check (O2c_BC.Insns = Before + 2,
+                "an indexed byte load and its store are two instructions (got"
+                & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         Raised2 := False;
+         begin
+            O2c_BC.Push_Int (0);
+            O2c_BC.Push_Int (1);
+            O2c_Ir_Lower.Emit_Quad
+              ((Op => Op_Load_Idx, Dst => Lt, Src1 => C5, Src2 => C5,
+                Imm_1 => 4, others => <>));
+         exception
+            when Program_Error => Raised2 := True;
+         end;
+         Check (Raised2, "an indexed load of four bytes raises");
+
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));
+         Check (O2c_BC.Insns = Before + 1, "a discard is one instruction");
+      end;
+
       --  and the same choice through the LOWERING, on a value whose class IS
       --  real - the first version of this check said "a real add" while the
       --  class still defaulted to word, so it was exercising the word path.
@@ -282,7 +341,8 @@ begin
          O2c_Ir_Lower.Emit_Quad
            ((Op => Op_Add, Dst => Lr, Src1 => C5, Src2 => C5, others => <>));
          Check (O2c_BC.Insns = Before + 2,
-                "an add and a store are two instructions");
+                "an add and a store are two instructions (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
       end;
 
       O2c_BC.End_Proc;

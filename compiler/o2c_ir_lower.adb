@@ -230,6 +230,36 @@ package body O2c_Ir_Lower is
             N_Args := 0;
             O2c_BC.Native_Call (Q.Imm_1, Q.Imm_2);
 
+         when Op_Load_Local =>
+            O2c_BC.Load_Local (Q.Imm_1);
+            Store_Value (Q.Dst);
+
+         when Op_Store_Local =>
+            Push_Value (Q.Src1);
+            O2c_BC.Store_Local (Q.Imm_1);
+
+         when Op_Load_Idx =>
+            --  Src1 and Src2 are ALREADY on the stack - the designator chain
+            --  pushed the base and the index as it parsed them, exactly as the
+            --  front end pushes an Op_Arg's argument.  So this does not push
+            --  them again.  The rule, made explicit because the self-test caught
+            --  this arm breaking it: a STORE materialises its source (Op_Copy
+            --  pushes), a designator-shaped op takes its operands from the
+            --  stack.
+            if Q.Imm_1 = 1 then
+               --  Load_Idx_B is an op value, not a procedure: the emitter's
+               --  Bin takes it, and [base, index] come off the stack.
+               O2c_BC.Bin (O2c_BC.Load_Idx_B);
+            else
+               raise Program_Error with
+                 "O2c_Ir_Lower: no indexed load of " & Q.Imm_1'Image
+                 & " bytes";
+            end if;
+            Store_Value (Q.Dst);
+
+         when Op_Discard =>
+            O2c_BC.Discard;
+
          when Op_Label =>
             O2c_BC.Mark (Bc_Label_Of (Q.Dst));
 

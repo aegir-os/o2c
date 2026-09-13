@@ -40,6 +40,10 @@ package O2c_Ir_Lower is
    --  instruction COUNT cannot tell Add from Radd, but this mapping can.
    function Bc_Op (Op : O2c_Ir.Op; C : O2c_Ir.Type_Class) return O2c_Bc.Op;
 
+   --  CONTRACT: a local named in a quad must already have been declared to the
+   --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
+   --  emitter's table and refuses by name when it is absent.
+
    --  One native call: `Arity` declared arguments, the call itself, and the
    --  lowering of exactly those quads.  The arguments were pushed by the front
    --  end as it parsed them, which is what Op_Arg declares.

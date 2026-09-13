@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         363
+    commits         364
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2592,6 +2592,42 @@ from the member name.  All seven suites green, 52 corroborated.
 
 **What is left in the whole native surface is one loop.**  M4f part 2 now has every
 piece it was missing except two of its own: `Op_Discard` and the indexed byte load.
+
+### 3bj. M4f part 2, step 1 - the loop's four ops, and three things that failed loudly
+
+The `Out.String` loop needs four ops that did not exist: `Op_Load_Local`,
+`Op_Store_Local`, `Op_Load_Idx` and `Op_Discard`.  All four are appended (the enum is
+append-only, like the opcode bytes) and lowered.  Appending is SAFE precisely because
+the lowering's case has no `others` arm: an un-lowered op is a compile error, so
+nothing can silently fall through.
+
+All three problems in this step were reported by name rather than mis-executed:
+
+1. **`Load_Idx_B` is an op value, not a procedure** - the emitter's `Bin` takes it,
+   as the loop itself writes it.  A compile error, not a wrong answer.
+2. **A local named in a quad must already be declared to the emitter.**
+   `Local_Slot_Of` resolves the name through `O2c_BC.Local` and refused with
+   `local is not in the frame: lt`.  That is the front end's side of the contract, and
+   it is now written in the spec rather than left to be rediscovered.
+3. **The convention, made explicit:** a STORE materialises its source (`Op_Copy`
+   pushes), while a DESIGNATOR-SHAPED op takes its operands from the stack, already
+   pushed by the front end - exactly `Op_Arg`'s rule.  My `Op_Load_Idx` arm pushed
+   them again.
+
+**And the way the third one surfaced is worth keeping.**  I was one step from
+reasoning my way through the instruction counts, and instead made every count check
+report its own delta.  The failure then said exactly what it saw - `got 4` against an
+expected 2 - and the delta identified the double push immediately.  A check that
+reports only "expected 2, failed" costs a debugging round; one that reports what it
+measured costs nothing.  The self-test went from 31 checks to 36.
+
+Note what the test encodes: its two explicit pushes before the indexed load ARE the
+operands.  The test is asserting the contract, not working around it.
+
+**Step 2 is the loop's quads**, and they are nearly all one-liners now:
+`Op_Label`, `Op_Jump`, `Op_Jump_False`, `Op_Load_Local`, `Op_Load_Idx`,
+`Call_Native (4, 1)`, `Op_Add`, `Op_Store_Local`, `Op_Discard`.  The corpus is the net,
+since every fixture prints through it.
 
 ## 4. Method — what worked, and what did not
 
