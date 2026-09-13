@@ -116,6 +116,21 @@ package O2c_Ir_Lower is
    --  bytecode mode.
    procedure Apply (O : O2c_Ir.Op);
 
+   --  A BINARY operator whose OPCODE depends on the width - arithmetic and
+   --  comparison.  Same contract as Apply (the operands are already on the
+   --  operand stack), plus the one fact a quad cannot otherwise carry: the
+   --  CLASS.  A class lives on a VALUE and these operands were pushed without
+   --  one, so the helper declares the left operand as a temp that carries the
+   --  width - which is what lets the lowering call Bc_Op, the single place that
+   --  decides Add from Radd (3bg), instead of guessing.
+   --
+   --  Apply is NOT this helper with a defaulted class: the SET and BOOLEAN
+   --  families take their opcode from tables that already fix it, so a class
+   --  argument there would be read by nobody - and a parameter nobody reads is
+   --  how a wrong call goes unnoticed.
+   procedure Bin_Op (O : O2c_Ir.Op; Class : O2c_Ir.Type_Class
+                                          := O2c_Ir.Tc_Word);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.

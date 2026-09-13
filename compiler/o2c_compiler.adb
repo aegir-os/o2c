@@ -4503,12 +4503,12 @@ package body O2c_Compiler is
                         --  LONGINT is the same 8-byte slot as INTEGER, so this
                         --  integer opcode IS the LONGINT opcode.  It used to be
                         --  refused here as a precaution never revisited.
-                        O2c_BC.Bin (O2c_BC.Mul);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mul);
                      elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                         --  REAL and LONGREAL share the ops; both operands must be
                         --  non-integer, or an implicit I2R would be needed and the wrong
                         --  opcode would be silent.
-                        O2c_BC.Bin (O2c_BC.Rmul);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mul, O2c_Ir.Tc_Real);
                      else
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "a mixed INTEGER/REAL operation is not yet supported";
@@ -4539,7 +4539,7 @@ package body O2c_Compiler is
                           & "a mixed INTEGER/REAL operation is not yet "
                           & "supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Rmul);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mul, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " * " & X.Text;
                   R.Typ := Res;
@@ -4569,12 +4569,12 @@ package body O2c_Compiler is
                      --  LONGINT is the same 8-byte slot as INTEGER, so this
                      --  integer opcode IS the LONGINT opcode.  It used to be
                      --  refused here as a precaution never revisited.
-                     O2c_BC.Bin (O2c_BC.IDiv);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Div);
                   elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                      --  REAL and LONGREAL share the ops; both operands must be
                      --  non-integer, or an implicit I2R would be needed and the wrong
                      --  opcode would be silent.
-                     O2c_BC.Bin (O2c_BC.Rdiv);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Div, O2c_Ir.Tc_Real);
                   else
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "a mixed INTEGER/REAL operation is not yet supported";
@@ -4599,7 +4599,7 @@ package body O2c_Compiler is
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "MOD needs INTEGER or LONGINT operands";
                   end if;
-                  O2c_BC.Bin (O2c_BC.IMod);
+                  O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mod);
                end if;
             end;
          elsif Cur.Kind = Lex.Tok_Slash then
@@ -4641,7 +4641,7 @@ package body O2c_Compiler is
                           & "a mixed INTEGER/REAL operation is not yet "
                           & "supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Rdiv);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Div, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " / " & X.Text;
                   R.Typ := Res;
@@ -4702,12 +4702,12 @@ package body O2c_Compiler is
                         --  LONGINT is the same 8-byte slot as INTEGER, so this
                         --  integer opcode IS the LONGINT opcode.  It used to be
                         --  refused here as a precaution never revisited.
-                        O2c_BC.Bin (O2c_BC.Add);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add);
                      elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                         --  REAL and LONGREAL share the ops; both operands must be
                         --  non-integer, or an implicit I2R would be needed and the wrong
                         --  opcode would be silent.
-                        O2c_BC.Bin (O2c_BC.Radd);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add, O2c_Ir.Tc_Real);
                      else
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "a mixed INTEGER/REAL operation is not yet supported";
@@ -4738,7 +4738,7 @@ package body O2c_Compiler is
                           & "a mixed INTEGER/REAL operation is not yet "
                           & "supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Radd);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " + " & X.Text;
                   R.Typ := Res;
@@ -4772,12 +4772,12 @@ package body O2c_Compiler is
                         --  LONGINT is the same 8-byte slot as INTEGER, so this
                         --  integer opcode IS the LONGINT opcode.  It used to be
                         --  refused here as a precaution never revisited.
-                        O2c_BC.Bin (O2c_BC.Sub);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Sub);
                      elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                         --  REAL and LONGREAL share the ops; both operands must be
                         --  non-integer, or an implicit I2R would be needed and the wrong
                         --  opcode would be silent.
-                        O2c_BC.Bin (O2c_BC.Rsub);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Sub, O2c_Ir.Tc_Real);
                      else
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "a mixed INTEGER/REAL operation is not yet supported";
@@ -4808,7 +4808,7 @@ package body O2c_Compiler is
                           & "a mixed INTEGER/REAL operation is not yet "
                           & "supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Rsub);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Sub, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " - " & X.Text;
                   R.Typ := Res;
@@ -5077,18 +5077,34 @@ package body O2c_Compiler is
                           & "only INTEGER/CHAR/REAL comparisons are supported, "
                           & "and pointers compare only with NIL";
                      end if;
+                     --  Two opcode NAMES per comparison became one name plus
+                     --  the operands' CLASS, with the opcode following from
+                     --  Bc_Op.  That is the rule 3bg put in ONE table, stated
+                     --  here the way the arithmetic sites now state it.
                      if Op = " = " then
-                        O2c_BC.Bin ((if Rl then O2c_BC.Req else O2c_BC.Eq));
+                        O2c_Ir_Lower.Bin_Op
+                          (O2c_Ir.Op_Eq, (if Rl then O2c_Ir.Tc_Real
+                                          else O2c_Ir.Tc_Word));
                      elsif Op = " /= " then
-                        O2c_BC.Bin ((if Rl then O2c_BC.Rne else O2c_BC.Ne));
+                        O2c_Ir_Lower.Bin_Op
+                          (O2c_Ir.Op_Ne, (if Rl then O2c_Ir.Tc_Real
+                                          else O2c_Ir.Tc_Word));
                      elsif Op = " < " then
-                        O2c_BC.Bin ((if Rl then O2c_BC.Rlt else O2c_BC.Lt));
+                        O2c_Ir_Lower.Bin_Op
+                          (O2c_Ir.Op_Lt, (if Rl then O2c_Ir.Tc_Real
+                                          else O2c_Ir.Tc_Word));
                      elsif Op = " <= " then
-                        O2c_BC.Bin ((if Rl then O2c_BC.Rle else O2c_BC.Le));
+                        O2c_Ir_Lower.Bin_Op
+                          (O2c_Ir.Op_Le, (if Rl then O2c_Ir.Tc_Real
+                                          else O2c_Ir.Tc_Word));
                      elsif Op = " > " then
-                        O2c_BC.Bin ((if Rl then O2c_BC.Rgt else O2c_BC.Gt));
+                        O2c_Ir_Lower.Bin_Op
+                          (O2c_Ir.Op_Gt, (if Rl then O2c_Ir.Tc_Real
+                                          else O2c_Ir.Tc_Word));
                      else
-                        O2c_BC.Bin ((if Rl then O2c_BC.Rge else O2c_BC.Ge));
+                        O2c_Ir_Lower.Bin_Op
+                          (O2c_Ir.Op_Ge, (if Rl then O2c_Ir.Tc_Real
+                                          else O2c_Ir.Tc_Word));
                      end if;
                   end;
                end if;

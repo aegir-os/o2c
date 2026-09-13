@@ -104,6 +104,7 @@ begin
    declare
       Lx, Lg, C5 : Value_Id;
       Tp : Value_Id;
+      Lw : Natural;
       Sl, P, Before : Natural;
       Raised2 : Boolean := False;
    begin
@@ -532,6 +533,65 @@ begin
          O2c_Ir_Lower.Apply (Op_And);
          Check (O2c_BC.Insns = Before + 1,
                 "a BOOLEAN and is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         --  An ARITHMETIC operator, where the class has to reach the lowering.
+         --  A count cannot see it - Add and Radd are one instruction each - so
+         --  the check is on the QUAD: Bin_Op must declare the left operand as a
+         --  value that CARRIES the class, because that is the only place the
+         --  width can live for an operand that was pushed without a value id.
+         --  And OUTSIDE a procedure an operator is a no-op rather than a
+         --  failure, because that is exactly where a CONSTANT declaration's
+         --  expression is parsed and folded: its arithmetic is never needed (the
+         --  use sites push the folded value) and a quad could not hold it, since
+         --  a quad's operands live in a frame.
+         O2c_BC.End_Proc;
+         Raised2 := False;
+         begin
+            O2c_BC.Push_Int (1);
+            Before := O2c_BC.Insns;
+            Lw := O2c_Ir_Lower.Lowered;
+            O2c_Ir_Lower.Bin_Op (Op_Add);
+            O2c_Ir_Lower.Apply (Op_Set_Union);
+            Check (O2c_BC.Insns = Before
+                   and then O2c_Ir_Lower.Lowered = Lw,
+                   "an operator outside a procedure emits nothing and lowers "
+                     & "nothing");
+         exception
+            when others => Raised2 := True;
+         end;
+         Check (not Raised2, "and it does not raise either (a folded constant's "
+                  & "expression reaches it)");
+         O2c_BC.Begin_Mode;
+         declare
+            Reopen : constant Natural := O2c_BC.Begin_Proc (1, 0);
+            pragma Unreferenced (Reopen);
+         begin
+            null;
+         end;
+
+         O2c_BC.Push_Int (1);
+         O2c_BC.Push_Int (2);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Bin_Op (Op_Sub, Tc_Real);
+         Check (O2c_BC.Insns = Before + 1,
+                "a real subtraction is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+         Check (Quad_At (Quad_Id (Quad_Count)).Op = Op_Sub
+                and then Quad_At (Quad_Id (Quad_Count)).Src1 /= No_Value
+                and then Value_At (Quad_At (Quad_Id (Quad_Count)).Src1).Class
+                  = Tc_Real,
+                "the operator quad carries the operand CLASS, which is what the "
+                  & "lowering picks Rsub from");
+
+         O2c_BC.Push_Int (1);
+         O2c_BC.Push_Int (2);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Bin_Op (Op_Sub);
+         Check (O2c_BC.Insns = Before + 1
+                and then Value_At (Quad_At (Quad_Id (Quad_Count)).Src1).Class
+                  = Tc_Word,
+                "and with no class argument it is a WORD operator (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
          O2c_BC.Push_Int (1);

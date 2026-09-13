@@ -185,13 +185,42 @@ package body O2c_Ir_Lower is
 
    procedure Apply (O : O2c_Ir.Op) is
    begin
-      if not O2c_BC.Bytecode_Mode then
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
          return;
       end if;
       O2c_Ir.Emit (O);
       O2c_Ir_Lower.Emit_Quad
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Apply;
+
+   procedure Bin_Op (O : O2c_Ir.Op;
+                     Class : O2c_Ir.Type_Class := O2c_Ir.Tc_Word) is
+      L : Value_Id;
+   begin
+      --  NOT inside a procedure is a real case, and it is not a bug: a
+      --  CONSTANT declaration's expression is parsed and folded BEFORE any
+      --  procedure is open, and its arithmetic never needs to be emitted at all
+      --  - every use site pushes the folded value.  A quad cannot hold it in any
+      --  case, because a quad's operands live in a frame.  The old direct
+      --  emission DID fire here and appended dead bytes ahead of the first
+      --  procedure's code, which is why this guard is a fix and not a
+      --  workaround: the IR says "where there is no frame, there is no quad",
+      --  and says it here instead of three frames down as a failed
+      --  procedure-open check.
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      --  Src1 declares the LEFT operand - already on the stack, pushed by the
+      --  sub-expression the parser had just read - and its only payload is the
+      --  WIDTH.  That is the whole reason a temp is minted: a class lives on a
+      --  value, an operand pushed without a value id has none, and the lowering
+      --  must not guess Add from Radd (the choice 3bg put in Bc_Op's table
+      --  precisely so it happens in ONE place).
+      L := O2c_Ir.New_Temp (Typ => 0, Class => Class);
+      O2c_Ir.Emit (O, Src1 => L);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Bin_Op;
 
    procedure Load_Local (Slot : Natural) is
    begin
@@ -548,7 +577,16 @@ package body O2c_Ir_Lower is
             --  be reals, and the op family follows the operands.
             O2c_BC.Bin
               (Bc_Op (Q.Op, Value_At (Q.Src1).Class));
-            Store_Value (Q.Dst);
+            --  A Dst only when the result is to LAND somewhere.  With none it
+            --  stays on the operand stack, which is the shape every EXPRESSION
+            --  has - and this arm never saw one until Bin_Op sent it, because
+            --  its only users were the print loop's conditions, all of which
+            --  store their result.  Store_Value (No_Value) is what that
+            --  assumption cost: an "O2c_Ir: no such value" from a value id of
+            --  zero, two frames away from the operator that omitted it.
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
 
          when Op_Call =>
             --  A call into a procedure in THIS image.  Same arity contract as

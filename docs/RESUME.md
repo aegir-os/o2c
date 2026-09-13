@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         373
+    commits         374
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3133,6 +3133,68 @@ saying it is reserved and why nothing needs it.
     Store 2, Global 4             two global stores: Op_Copy with a V_Global Dst, which
                                   is exactly what Bc_Store already does
     Op_Return, Op_Halt            un-lowered, and nothing emits them yet
+
+### 3bt. M5 STARTS — the expression operators, and the first image change that is a FIX
+
+The measurement said the expression builder is M5.  It also said the first thing it needs
+is not a new op but a way to state a WIDTH for an operand that has no value id: the 32
+`Bin` sites choose the opcode INLINE, so every arithmetic operator is the same rule written
+twice (`if Res = T_Int ... then Bin (Add) else Bin (Radd)`) - the duplication `Bc_Op`'s
+table (3bg) exists to end.
+
+**`Bin_Op (O, Class)` is the helper, and its Src1 is the whole idea.**  It mints a temp
+that CARRIES the class and *declares* the left operand - already on the operand stack,
+pushed by the sub-expression the parser had just read.  That is the only way a quad can
+state a width, because a class lives on a VALUE and an operand pushed without one has none;
+the lowering then calls `Bc_Op` - ONE table - instead of guessing.
+
+    13 arithmetic emissions + 6 relational = 19 sites
+    the six relationals went from TWO opcode names each to ONE name plus a class
+
+**It found a real bug in EXISTING code, which is the part worth keeping.**  The arithmetic
+arm's `Store_Value (Q.Dst)` was UNGUARDED.  Every other op migrated so far got the optional
+Dst; this arm never needed one, because its only users were the print loop's conditions -
+all of which store their result.  `Bin_Op` sends a bare push, and `Store_Value (No_Value)`
+raised `O2c_Ir: no such value`: a value id of ZERO, reported two frames away from the
+operator that omitted it.  Two wrong guesses about which call it was were settled by one
+temporary `Put_Line` inside `Value_At`.  That is "put the diagnostic where the failure is"
+again, and it is the third time this file has had to say so.
+
+**And the first migration that changes an IMAGE - for a reason that is a fix.**  `constfold`
+stopped compiling, loudly: `O2c_Ir_Lower: no emitter procedure is open`.  A CONSTANT
+declaration's expression is parsed and folded BEFORE any procedure is open, and the old
+direct `O2c_BC.Bin` cheerfully appended its arithmetic into the code buffer ahead of the
+first procedure: dead bytes nothing ever jumped to, because every use site pushes the
+FOLDED value.  A quad cannot hold that code - a quad's operands live in a frame - so
+`Bin_Op`/`Apply` now return where there is no frame, and
+
+    constfold.ob2   552 -> 544 bytes, golden output unchanged
+    identity vs HEAD: 71 of 72 identical, 1 differing - constfold, by 8 bytes
+
+This is the second migration that is not byte-identical (3bk was the first), and unlike
+3bk's it is *explained* rather than merely behavioural: the code section got SMALLER by
+dead code, and a fixture that folds constants is exactly where that shows.  `run_bc` is
+green *including* constfold, which is the check that the fold still lands.
+
+Self-test 68 -> 71 checks: the operator quad carries the CLASS (`Op_Sub` with a temp Src1
+of class Tc_Real, and Tc_Word when no class is given - a count cannot see Add from Radd,
+so the check is on the quad), and an operator OUTSIDE a procedure emits and lowers nothing
+rather than failing, which is the folded-constant case above.
+
+Verified: gate32, all seven suites green, zero warnings.
+
+**What is left of M5, measured after this change:**
+
+    Bin 32 -> 13, and the 13 are NOT expressions:
+        Lt 3, Ge 3            the bounds checks the designator chain emits
+        Add 1, Mul 1          the chain's OWN arithmetic: a row scale, a base add
+        Eq 2                  CASE label matching, with its Dup_Top/Jump
+        Str_Cmp 1, Copy_Str 1 the string family
+        (one more whose op is a variable - the string compare - so 13)
+    Push_Int 23, Push_Str 5   literals feeding ops that already declare their operands
+    Mark 20, Jump 18, Dup_Top 8, Discard 5, Un 2, Trap 6
+                              control flow, the bounds trap and stack shuffles
+    Global 4, Store 2         two global stores and their interning
 
 ## 4. Method — what worked, and what did not
 
