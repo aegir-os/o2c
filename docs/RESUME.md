@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         376
+    commits         377
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3285,6 +3285,51 @@ Verified: gate34, all seven suites green, zero warnings.
      2 Un (Neg/Rneg), 5 Discard, 5 Push_Str, 23 Push_Int
                                 the unary sign needs a Un_Op helper (Bin_Op's mirror); the rest
                                 are pushes feeding ops that already declare their operands
+
+### 3bw. DONE — the BOUNDS REGIME and CASE, with Op_Dup and Op_Trap
+
+Two constructs landed together because they need the same two ops.  The bounds regime is 12
+Mark/Jump, 6 `Trap (0)`, 6 comparisons and 6 `Dup_Top`; CASE is 8 Mark/Jump and two label-match
+chains.  Two ops were appended and three helpers added:
+
+    Op_Dup     -> Dup_Top        a bounds compare must not consume the index it tests
+    Op_Trap    -> Trap (Imm_1)   the KIND byte the VM reads, hence an immediate
+    Push_Int (V)                 a constant as a push: Op_Copy with a constant source and no
+                                 Dst IS the push, so a site states the value and nothing else
+    Dup / Trap / Discard         the ops, one line at a site
+
+**The bounds clusters are the same twelve instructions written THREE times** — that is the
+finding here, and it is the same shape 3aw called "per-member boilerplate".  Two copies sit in
+the scalar-element path and one in the open-array path, differing only in how the length is
+obtained (an `Arr_Len` constant, or the slot beside an open array's address).  They are three
+identical call sequences now, and the shape is stated ONCE in the quad stream: dup, push 0,
+compare, jump-if-in-range, trap, mark.
+
+**CASE's own trap, recorded because it cost someone real time:** `Bc_L_Next` is where a failed
+alternative resumes, and it is marked at the start of the NEXT alternative, never at its own —
+marking it at its own made the failed comparisons re-run, which looped.  The comment was
+already there; the migration moved the calls without touching the rule, which is the point of
+having it written down.
+
+    the parser's raw emissions after this stage: Mark 2 (both FOR's), Jump 0, Dup_Top 0,
+    Trap 0, and the 5 remaining Bin sites are Str_Cmp, Copy_Str, one with a variable opcode,
+    and the designator chain's own Mul and Add — none of them expressions
+
+**Evidence**: **72 of 72** fixtures byte-identical against a front end built from `HEAD`
+(this stage is the identity case too), `run_bc` 123 goldens green, self-test 76 -> 81 checks.
+Verified: gate35, all seven suites green, zero warnings.
+
+**What is left — and the statement surface is now nearly all quads:**
+
+    FOR            2 Mark + For_Enter/For_Next: its labels are OPERANDS of the opcode (one
+                   fixup each) rather than Mark/Jump pairs, so FOR needs Op_For_Enter/
+                   Op_For_Next or an exposed mapping.  It is the one construct whose
+                   mechanism differs, and the one place where hiding the emitter's
+                   numbering cannot hold yet
+    2 Un (Neg/Rneg) the unary sign: needs a Un_Op helper, Bin_Op's mirror
+    5 Bin           the string family (Str_Cmp, Copy_Str) and one variable opcode
+    16 Push_Int, 5 Push_Str, 4 Global, 2 Store, 4 Discard, 2 Type_Test
+                   literals and global access, mostly one-line helper calls away
 
 ## 4. Method — what worked, and what did not
 

@@ -145,6 +145,24 @@ package O2c_Ir_Lower is
    --  ALLOCATION is not here: the emitter has no label allocator (its namespace
    --  belongs to its caller), so the front end's own counter allocates the id
    --  and RESERVES it here with Reserve_Label.  One counter, one mapping.
+   --  A CONSTANT as a push: `Op_Copy` with a constant source and no Dst IS the
+   --  push an expression wants (Push_Value emits it), so a site states the
+   --  value and nothing else.  The same helper covers an index bound, a literal
+   --  operand and a length, which is what the statement sites kept spelling out.
+   procedure Push_Int (V : Integer);
+
+   --  Duplicate the top of the operand stack.  Needed before a bounds compare,
+   --  which must not consume the index it is about to use, and by CASE's label
+   --  matching.
+   procedure Dup;
+
+   --  TRAP with its kind byte (spec: 0 = index out of range).
+   procedure Trap (Kind : Natural);
+
+   --  Drop the top of the operand stack.  CASE keeps its selector there for the
+   --  whole statement and drops it once at the end.
+   procedure Discard;
+
    procedure Mark (L : O2c_Ir.Label_Id);
    procedure Jump (L : O2c_Ir.Label_Id);
    procedure Jump_False (L : O2c_Ir.Label_Id);

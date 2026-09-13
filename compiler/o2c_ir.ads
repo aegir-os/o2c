@@ -167,7 +167,15 @@ package O2c_Ir is
                Op_Set_Diff,                  --  d := s1 - s2
                Op_Set_Symdiff,               --  d := s1 / s2
                Op_Set_In,                    --  d := s1 in s2  (an element in a set)
-               Op_Set_Single);               --  d := {s1}
+               Op_Set_Single,                --  d := {s1}
+               --  The two stack ops the BOUNDS regime needs, appended.  An
+               --  index check is `dup; push 0; ge; jnz in-range; trap`, and it
+               --  is written out at three sites - so it needs a duplicate and a
+               --  trap before any of it can be quads.  Imm_1 of Op_Trap is the
+               --  kind byte the VM READS (0 = index out of range), which is why
+               --  the emitter's Trap takes one rather than emitting a bare op.
+               Op_Dup,                       --  push a copy of the top
+               Op_Trap);                     --  trap, kind Imm_1
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

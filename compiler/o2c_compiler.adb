@@ -2168,21 +2168,25 @@ package body O2c_Compiler is
                      --  all, so Out.Char printed the index.
                      D.Text := D.Text & " (" & To_String (Ix.Text) & ")";
                      declare
-                        L_In : constant Natural := New_Bc_Label;
-                        L_Up : constant Natural := New_Bc_Label;
+                        L_In : constant O2c_Ir.Label_Id := New_Lbl;
+                        L_Up : constant O2c_Ir.Label_Id := New_Lbl;
                      begin
-                        O2c_BC.Dup_Top;
-                        O2c_BC.Push_Int (0);
-                        O2c_BC.Bin (O2c_BC.Ge);
-                        O2c_BC.Jump (O2c_BC.Jnz, L_In);
-                        O2c_BC.Trap (0);
-                        O2c_BC.Mark (L_In);
-                        O2c_BC.Dup_Top;
-                        O2c_BC.Push_Int (UTypes (UT).Arr_Len);
-                        O2c_BC.Bin (O2c_BC.Lt);
-                        O2c_BC.Jump (O2c_BC.Jnz, L_Up);
-                        O2c_BC.Trap (0);
-                        O2c_BC.Mark (L_Up);
+                        --  The index check, through the IR: dup so the
+                        --  compare does not consume the index, then the two
+                        --  compares and the trap.  The opcodes come from
+                        --  Bin_Op's table and the branches from Jump_True.
+                        O2c_Ir_Lower.Dup;
+                        O2c_Ir_Lower.Push_Int (0);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Ge);
+                        O2c_Ir_Lower.Jump_True (L_In);
+                        O2c_Ir_Lower.Trap (0);
+                        O2c_Ir_Lower.Mark (L_In);
+                        O2c_Ir_Lower.Dup;
+                        O2c_Ir_Lower.Push_Int (UTypes (UT).Arr_Len);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Lt);
+                        O2c_Ir_Lower.Jump_True (L_Up);
+                        O2c_Ir_Lower.Trap (0);
+                        O2c_Ir_Lower.Mark (L_Up);
                      end;
                      D.K := D_Index;
                      D.Sc := T_Char;
@@ -2201,21 +2205,25 @@ package body O2c_Compiler is
                      --  compares, because the opcodes are signed and an index
                      --  below zero has to fail as well.
                      declare
-                        L_In : constant Natural := New_Bc_Label;
-                        L_Up : constant Natural := New_Bc_Label;
+                        L_In : constant O2c_Ir.Label_Id := New_Lbl;
+                        L_Up : constant O2c_Ir.Label_Id := New_Lbl;
                         begin
-                        O2c_BC.Dup_Top;
-                        O2c_BC.Push_Int (0);
-                        O2c_BC.Bin (O2c_BC.Ge);
-                        O2c_BC.Jump (O2c_BC.Jnz, L_In);
-                        O2c_BC.Trap (0);
-                        O2c_BC.Mark (L_In);
-                        O2c_BC.Dup_Top;
-                        O2c_BC.Push_Int (UTypes (UT).Arr_Len);
-                        O2c_BC.Bin (O2c_BC.Lt);
-                        O2c_BC.Jump (O2c_BC.Jnz, L_Up);
-                        O2c_BC.Trap (0);
-                        O2c_BC.Mark (L_Up);
+                        --  The index check, through the IR: dup so the
+                        --  compare does not consume the index, then the two
+                        --  compares and the trap.  The opcodes come from
+                        --  Bin_Op's table and the branches from Jump_True.
+                        O2c_Ir_Lower.Dup;
+                        O2c_Ir_Lower.Push_Int (0);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Ge);
+                        O2c_Ir_Lower.Jump_True (L_In);
+                        O2c_Ir_Lower.Trap (0);
+                        O2c_Ir_Lower.Mark (L_In);
+                        O2c_Ir_Lower.Dup;
+                        O2c_Ir_Lower.Push_Int (UTypes (UT).Arr_Len);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Lt);
+                        O2c_Ir_Lower.Jump_True (L_Up);
+                        O2c_Ir_Lower.Trap (0);
+                        O2c_Ir_Lower.Mark (L_Up);
                         end;
                      D.K := D_Index;
                   else
@@ -4272,23 +4280,23 @@ package body O2c_Compiler is
                         --  which is why the spec calls LOAD_IDX bounds
                         --  checked rather than leaving it to the caller.
                         declare
-                           L_Ok : constant Natural := New_Bc_Label;
-                           L_In : constant Natural := New_Bc_Label;
+                           L_Ok : constant O2c_Ir.Label_Id := New_Lbl;
+                           L_In : constant O2c_Ir.Label_Id := New_Lbl;
                            Len  : constant Natural :=
                              Natural (O2c_BC.Local_Slot (Ada_Id (Nm))) + 1;
                         begin
-                           O2c_BC.Dup_Top;
-                           O2c_BC.Push_Int (0);
-                           O2c_BC.Bin (O2c_BC.Ge);
-                           O2c_BC.Jump (O2c_BC.Jnz, L_In);
-                           O2c_BC.Trap (0);
-                           O2c_BC.Mark (L_In);
-                           O2c_BC.Dup_Top;
+                           O2c_Ir_Lower.Dup;
+                           O2c_Ir_Lower.Push_Int (0);
+                           O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Ge);
+                           O2c_Ir_Lower.Jump_True (L_In);
+                           O2c_Ir_Lower.Trap (0);
+                           O2c_Ir_Lower.Mark (L_In);
+                           O2c_Ir_Lower.Dup;
                            O2c_Ir_Lower.Load_Local (Len);
-                           O2c_BC.Bin (O2c_BC.Lt);
-                           O2c_BC.Jump (O2c_BC.Jnz, L_Ok);
-                           O2c_BC.Trap (0);
-                           O2c_BC.Mark (L_Ok);
+                           O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Lt);
+                           O2c_Ir_Lower.Jump_True (L_Ok);
+                           O2c_Ir_Lower.Trap (0);
+                           O2c_Ir_Lower.Mark (L_Ok);
                            --  An open array's element type comes from the
                            --  parameter, not from a designator.
                            O2c_Ir_Lower.Load_Idx
@@ -6910,9 +6918,9 @@ package body O2c_Compiler is
    procedure Parse_Case is
       Sel : Expr_Rec;
       Used_Else : Boolean := False;
-      Bc_L_End  : Natural := 0;
-      Bc_L_Next : Natural := 0;   --  where a failed alternative resumes
-      Bc_L_Body : Natural := 0;
+      Bc_L_End  : O2c_Ir.Label_Id := 0;
+      Bc_L_Next : O2c_Ir.Label_Id := 0;   --  where a failed alternative resumes
+      Bc_L_Body : O2c_Ir.Label_Id := 0;
    begin
       Next;                       --  CASE
       Sel := Parse_Expr;
@@ -6922,25 +6930,20 @@ package body O2c_Compiler is
       end if;
       Expect (Lex.Tok_Of, "'OF'");
       Next;
-      if O2c_BC.Bytecode_Mode then
-         --  A CASE is a comparison chain over the selector, which stays on
-         --  the stack for the whole statement and is dropped once at the
-         --  end.  Bc_L_Next is where a failed alternative resumes: it is
-         --  allocated here and marked at the start of the next alternative,
-         --  never at its own - marking it at its own made the failed
-         --  comparisons re-run, which looped.
-         Bc_L_End := New_Bc_Label;
-         Bc_L_Next := New_Bc_Label;
-      end if;
+      --  A CASE is a comparison chain over the selector, which stays on the
+      --  stack for the whole statement and is dropped once at the end.
+      --  Bc_L_Next is where a failed alternative resumes: it is allocated here
+      --  and marked at the start of the NEXT alternative, never at its own -
+      --  marking it at its own made the failed comparisons re-run, which looped.
+      Bc_L_End := New_Lbl;
+      Bc_L_Next := New_Lbl;
       Append_Body ("      case " & To_String (Sel.Text) & " is");
 
       --  alternatives: label {"," label} ":" seq  separated by "|",
       --  optional ELSE, closed by END
       loop
-         if O2c_BC.Bytecode_Mode then
-            O2c_BC.Mark (Bc_L_Next);
-            Bc_L_Next := New_Bc_Label;
-         end if;
+         O2c_Ir_Lower.Mark (Bc_L_Next);
+         Bc_L_Next := New_Lbl;
          if Cur.Kind = Lex.Tok_Else then
             if Used_Else then
                raise O2c_Error with "duplicate CASE ELSE";
@@ -6964,16 +6967,14 @@ package body O2c_Compiler is
                      else
                         Labels := Labels & " | -" & Cur.Text (1 .. Cur.Len);
                      end if;
-                     if O2c_BC.Bytecode_Mode then
-                        if First then
-                           Bc_L_Body := New_Bc_Label;
-                        end if;
-                        O2c_BC.Dup_Top;
-                        O2c_BC.Push_Int
-                          (-Integer'Value (Cur.Text (1 .. Cur.Len)));
-                        O2c_BC.Bin (O2c_BC.Eq);
-                        O2c_BC.Jump (O2c_BC.Jnz, Bc_L_Body);
+                     if First then
+                        Bc_L_Body := New_Lbl;
                      end if;
+                     O2c_Ir_Lower.Dup;
+                     O2c_Ir_Lower.Push_Int
+                       (-Integer'Value (Cur.Text (1 .. Cur.Len)));
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Eq);
+                     O2c_Ir_Lower.Jump_True (Bc_L_Body);
                      Next;
                   elsif Cur.Kind = Lex.Tok_Number then
                      if First then
@@ -6981,15 +6982,14 @@ package body O2c_Compiler is
                      else
                         Labels := Labels & " | " & Cur.Text (1 .. Cur.Len);
                      end if;
-                     if O2c_BC.Bytecode_Mode then
-                        if First then
-                           Bc_L_Body := New_Bc_Label;
-                        end if;
-                        O2c_BC.Dup_Top;
-                        O2c_BC.Push_Int (Integer'Value (Cur.Text (1 .. Cur.Len)));
-                        O2c_BC.Bin (O2c_BC.Eq);
-                        O2c_BC.Jump (O2c_BC.Jnz, Bc_L_Body);
+                     if First then
+                        Bc_L_Body := New_Lbl;
                      end if;
+                     O2c_Ir_Lower.Dup;
+                     O2c_Ir_Lower.Push_Int
+                       (Integer'Value (Cur.Text (1 .. Cur.Len)));
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Eq);
+                     O2c_Ir_Lower.Jump_True (Bc_L_Body);
                      Next;
                   else
                      raise O2c_Error with "CASE label expected (line "
@@ -7001,15 +7001,13 @@ package body O2c_Compiler is
                end loop;
                Expect (Lex.Tok_Colon, "':' after the CASE labels");
                Next;
-               if O2c_BC.Bytecode_Mode then
-                  O2c_BC.Jump (O2c_BC.Jmp, Bc_L_Next);
-               end if;
+               O2c_Ir_Lower.Jump (Bc_L_Next);
                Append_Body ("      when " & To_String (Labels) & " =>");
             end;
          end if;
 
-         if O2c_BC.Bytecode_Mode and then not Used_Else then
-            O2c_BC.Mark (Bc_L_Body);
+         if not Used_Else then
+            O2c_Ir_Lower.Mark (Bc_L_Body);
          end if;
          --  this alternative's statement sequence
          declare
@@ -7023,9 +7021,7 @@ package body O2c_Compiler is
             end if;
          end;
 
-         if O2c_BC.Bytecode_Mode then
-            O2c_BC.Jump (O2c_BC.Jmp, Bc_L_End);
-         end if;
+         O2c_Ir_Lower.Jump (Bc_L_End);
 
          if Cur.Kind = Lex.Tok_Bar then
             Next;
@@ -7041,11 +7037,9 @@ package body O2c_Compiler is
 
       Expect (Lex.Tok_End, "'END' closing the CASE");
       Next;
-      if O2c_BC.Bytecode_Mode then
-         O2c_BC.Mark (Bc_L_Next);     --  the last alternative's skip lands here
-         O2c_BC.Mark (Bc_L_End);
-         O2c_BC.Discard;
-      end if;
+      O2c_Ir_Lower.Mark (Bc_L_Next);  --  the last alternative's skip lands here
+      O2c_Ir_Lower.Mark (Bc_L_End);
+      O2c_Ir_Lower.Discard;
       if not Used_Else then
          Append_Body ("      when others => null;");
       end if;

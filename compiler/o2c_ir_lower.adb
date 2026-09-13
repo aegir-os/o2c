@@ -222,6 +222,48 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Bin_Op;
 
+   procedure Push_Int (V : Integer) is
+      C : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      C := O2c_Ir.Const_Int (Long_Integer (V), Typ => 1);
+      O2c_Ir.Emit (O2c_Ir.Op_Copy, Src1 => C);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Push_Int;
+
+   procedure Dup is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Dup);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Dup;
+
+   procedure Trap (Kind : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Trap, Imm_1 => Kind);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Trap;
+
+   procedure Discard is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Discard);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Discard;
+
    procedure Mark (L : O2c_Ir.Label_Id) is
    begin
       if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
@@ -594,6 +636,14 @@ package body O2c_Ir_Lower is
             --  there is nothing to push and no Dst - the store consumes the
             --  value, exactly as the hand-written sites did.
             O2c_BC.Field (Bc_Fld (Fld_Kind_Of (Q.Imm_2), True), Q.Imm_1);
+
+         when Op_Dup =>
+            O2c_BC.Dup_Top;
+
+         when Op_Trap =>
+            --  The kind byte is an immediate because a bare Trap would
+            --  desynchronise the VM, which reads it.
+            O2c_BC.Trap (Q.Imm_1);
 
          when Op_Discard =>
             O2c_BC.Discard;

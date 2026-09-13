@@ -627,6 +627,35 @@ begin
                 "and with no class argument it is a WORD operator (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
+         --  The two ops the BOUNDS regime needed, plus the constant push and the
+         --  discard it uses: all one instruction each, and the trap carries its
+         --  KIND as an immediate because a bare Trap desynchronises a VM that
+         --  reads the byte.
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Dup;
+         Check (O2c_BC.Insns = Before + 1, "a duplicate is one instruction");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Push_Int (7);
+         Check (O2c_BC.Insns = Before + 1,
+                "the constant push helper is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Bin_Op (Op_Ge);
+         Check (O2c_BC.Insns = Before + 1,
+                "a word comparison is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Trap (0);
+         Check (O2c_BC.Insns = Before + 1, "a trap is one instruction");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Discard;
+         Check (O2c_BC.Insns = Before + 1, "a discard helper is one instruction");
+
          O2c_BC.Push_Int (1);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));
