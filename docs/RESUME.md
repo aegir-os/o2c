@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         431
+    commits         432
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5356,6 +5356,33 @@ that the `var` section then re-uses.  The trace above cannot distinguish them; t
 and is saved as a script (`/tmp/nest_recipe.py`) so applying it is mechanical rather than retyped.
 
 Instrument and recipe reverted; tree green (`run_bc` PASS) and the committed state is 3dv's leak fix.
+
+### 3dz. The mutex failure is MY comparison, not a missing intern — isolated by running the clean tree
+
+3dy concluded a pre-existing table entry was defeating the intern.  Running the SAME instrument on the
+CLEAN tree (no recipe) separates the two possibilities in one line, and it is the recipe:
+
+    clean tree:   S clean-slot m cur= 30 nloc= 92      and the check FIRES
+                  o2c error: a mutex must be a module-level variable, not a local
+    with recipe:  the table is 74 entries, no L INTERN for m, the check does not fire
+
+So `m` IS interned on the clean tree, the check works, and the recipe breaks the interning - by making
+`Local`'s lookup MATCH something it should not, so the real intern never happens.
+
+**And the mechanism is now visible in the two counts**: entries are interned at the DECLARATION, which
+on the clean tree is when `Begin_Proc` runs - so intern and use both see the same `Cur_Proc`.  The
+recipe opens the body at the BEGIN instead, so a header-time intern sees `Cur_Proc = 0` while a
+use-time lookup sees `Cur_Proc = 30`: the comparisons no longer agree, and the `Frame_Proc` change I
+made to compensate shifts the mismatch rather than removing it (92 -> 74 entries is exactly that).
+
+**So the next attempt's fix is specific**: the locals table's ownership field and BOTH comparisons must
+agree on a single value that is the same at intern time and at use time.  `Frame_Proc` is that value in
+principle - it is set at the declaration and lives until End_Proc - and the 92/74 difference says my
+application of it was not uniform (one of the two loops still compared `Cur_Proc`).  That is a
+one-place check rather than a redesign.
+
+The instrument and the recipe are reverted; the tree is green (`run_bc` PASS) and the committed state is
+3dv's leak fix.  The recipe script is /tmp/nest_recipe.py.
 
 ## 4. Method — what worked, and what did not
 
