@@ -493,6 +493,13 @@ package body O2c_Compiler is
    begin
       if A.Folds and then A.Typ = T_Int then
          O2c_Ir_Lower.Push_Int (A.Val);
+      elsif A.Lit and then (A.Typ = T_Real or else A.Typ = T_LReal) then
+         --  A real literal has no folded INTEGER to push, so it is read from
+         --  its own text - which is exactly what a literal is.  Bc_Load alone
+         --  is wrong for it in the way the comment above says it is wrong for
+         --  1: it would look up a global called "2.0" and push garbage, which
+         --  is how Math.ln (2.0) first reached Ada as a domain error.
+         O2c_Ir_Lower.Push_Real (Long_Float'Value (To_String (A.Text)));
       else
          Bc_Load (Ada_Id (Nm), BR, Sz);
       end if;
@@ -2428,6 +2435,56 @@ package body O2c_Compiler is
       return R;
    end Parse_Ptr_Value;
 
+   --  Math and MathL's transcendentals, by member name, as the native ids they
+   --  are (3dm): entries 26..36, ids 30..40.  0 means "not one of ours".  Both
+   --  modules share the ids because REAL and LONGREAL share the slot (M4e).
+   function Math_Native (Mod_Nm : String; Member : String) return Natural is
+   begin
+      if not (Eq_No_Case (Mod_Nm, "Math")
+              or else Eq_No_Case (Mod_Nm, "MathL"))
+      then
+         return 0;
+      elsif Eq_No_Case (Member, "power") then return 30;
+      elsif Eq_No_Case (Member, "exp") then return 31;
+      elsif Eq_No_Case (Member, "ln") then return 32;
+      elsif Eq_No_Case (Member, "log") then return 33;
+      elsif Eq_No_Case (Member, "sin") then return 34;
+      elsif Eq_No_Case (Member, "cos") then return 35;
+      elsif Eq_No_Case (Member, "tan") then return 36;
+      elsif Eq_No_Case (Member, "arcsin") then return 37;
+      elsif Eq_No_Case (Member, "arccos") then return 38;
+      elsif Eq_No_Case (Member, "arctan") then return 39;
+      elsif Eq_No_Case (Member, "arctan2") then return 40;
+      else
+         return 0;
+      end if;
+   end Math_Native;
+
+   --  The three that take two arguments; the rest take one.
+   function Math_Arity (Member : String) return Natural is
+     (if Eq_No_Case (Member, "power") or else Eq_No_Case (Member, "log")
+        or else Eq_No_Case (Member, "arctan2")
+      then 2 else 1);
+
+   --  Math's two exported constants.  True when Value is one of them.
+   function Math_Const (Mod_Nm : String; Member : String;
+                        Value : out Long_Float) return Boolean is
+   begin
+      if not (Eq_No_Case (Mod_Nm, "Math")
+              or else Eq_No_Case (Mod_Nm, "MathL"))
+      then
+         return False;
+      elsif Eq_No_Case (Member, "pi") then
+         Value := 3.14159265358979323846;
+         return True;
+      elsif Eq_No_Case (Member, "e") then
+         Value := 2.71828182845904523536;
+         return True;
+      else
+         return False;
+      end if;
+   end Math_Const;
+
    --  Parse one actual argument against a formal parameter (M11).
    --  Record/array formals are VAR-only, so their actual is a whole
    --  variable of exactly that type; pointer formals take a pointer
@@ -3950,6 +4007,9 @@ package body O2c_Compiler is
                                                and then Eq_No_Case (MName,
                                                                     "IsDot")
                                                and then N_A = 2)
+                                      and then not (Math_Native (FNm, MName) > 0
+                                                    and then N_A =
+                                                      Math_Arity (MName))
                                     then
                                        --  MARKER_EXPR_REFUSAL: default
                                        --  refusal, as on the statement paths.
@@ -3974,6 +4034,23 @@ package body O2c_Compiler is
                                     end loop;
                                     O2c_Ir_Lower.Call_Native (17, 2);
                                     R.Typ := T_Bool;
+                                    R.Lit := False;
+                                    R.Folds := False;
+                                 end if;
+                                 if O2c_BC.Bytecode_Mode
+                                   and then Math_Native (FNm, MName) > 0
+                                 then
+                                    --  The transcendentals: push each argument,
+                                    --  then call the native whose arity the
+                                    --  verifier checks against Native_Pops.
+                                    --  The result is REAL for both modules - a
+                                    --  LONGREAL is the same 64-bit slot (M4e).
+                                    for K in 1 .. N_A loop
+                                       Bc_Push_Arg (Arg_R (K));
+                                    end loop;
+                                    O2c_Ir_Lower.Call_Native
+                                      (Math_Native (FNm, MName), N_A);
+                                    R.Typ := T_Real;
                                     R.Lit := False;
                                     R.Folds := False;
                                  end if;

@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         419
-    fixtures        91 in tests/bc/
+    commits         420
+    fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -4991,6 +4991,43 @@ Math member at the generic MARKER_EXPR_REFUSAL (3956), so the model to copy is `
 `hello.ob2` line 439 is `Math.ln (Math.e)` and the ARGUMENT is evaluated first; `O2c_Ir.Const_Real`
 exists for that, and a `Push_Real` helper on `O2c_Ir_Lower` mirroring `Push_Int` is what it lacks.
 Then the metric moves past `Math.ln`.
+
+### 3dn. The Math arms are in, the metric is past Math, and two gaps closed on the way
+
+3dm wired the natives; this wires the compiler, and the metric moved out of Math altogether.
+
+**The compiler arms.**  A member map (`Math_Native (Mod, Member) -> id 30..40`, 0 for "not ours"),
+`Math_Arity` for the three two-argument ones, and an emit block modelled on `XYplane.IsDot`: push each
+argument, `Call_Native (id, N_A)`, result REAL - the same code for Math and MathL, as the natives are.
+The allowlist condition at 3949 says which members may pass.
+
+**Two gaps closed that nothing had noticed, both found by the feature rather than by reading:**
+
+    V_CONST_REAL had NO LOWERING       Const_Real existed from the start and this is its first
+                                       consumer; Push_Value raised
+                                       "value kind V_CONST_REAL has no lowering yet" - the closed
+                                       op set naming its own hole.  Push_Value now calls
+                                       O2c_BC.Push_Real, which interns the bits and emits LOAD_CONST_R.
+    a real LITERAL was loaded by NAME  Bc_Push_Arg's comment warns that Bc_Load is wrong for a
+                                       literal - "it would look up a global called 1" - and for
+                                       reals it was TRUE: Math.ln (2.0) reached Ada as a domain error
+                                       because the argument was a global called "2.0".  Real
+                                       literals now push their own value, read from their own text.
+
+**The measurement:**
+
+    Math.ln (2.0)                       0.693          exactly right
+    tests/bc/mathln.ob2                 0.693 1.000 3.000 0.785   (arithmetic, not a recording)
+
+and `samples/hello.ob2` now refuses at `Reals.Convert` - PAST every Math and MathL call it makes,
+including the two-argument `MathL.power`.  Verified: `run_bc` PASS with the new fixture.
+
+**One thing left open, and it is named rather than hidden**: `Math.pi` and `Math.e` work as a BARE
+expression but double-count as an ARGUMENT - a probe doing `Out.Real (Math.pi, 0)` fails verification
+with a depth violation, because the module's own emission pushes the value AND the argument machinery
+expects to push it itself.  The arm for the constant path is therefore reverted, the fixture uses the
+literal instead, and 3dn's follow-up is to find where the argument machinery expects to own that push
+(the same question `XYplane.IsDot` would face if its result were ever passed as an argument).
 
 ## 4. Method — what worked, and what did not
 

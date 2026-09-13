@@ -234,6 +234,20 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Push_Int;
 
+   procedure Push_Real (V : Long_Float) is
+      C : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      --  The default type marker: Const_Real knows it is a real, and EType
+      --  belongs to the front end, not here.
+      C := O2c_Ir.Const_Real (V);
+      O2c_Ir.Emit (O2c_Ir.Op_Copy, Src1 => C);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Push_Real;
+
    procedure Push_Str (Text : String) is
       C : Value_Id;
    begin
@@ -547,6 +561,13 @@ package body O2c_Ir_Lower is
          --  A string constant: its pool word holds the offset of the text inside
          --  the CONST payload, which is what the VM's string ops consume.
          O2c_BC.Push_Str (To_String (I.Name));
+      elsif I.Kind = V_Const_Real then
+         --  A real constant.  Push_Real interns its bits in the pool and emits
+         --  LOAD_CONST_R, which is how a real literal - and so the argument of
+         --  every Math call - reaches the image at all.  Const_Real existed from
+         --  the start and this is its first consumer, which is why nothing had
+         --  noticed that the kind had no lowering (3dn).
+         O2c_BC.Push_Real (I.Real);
       elsif I.Kind = V_Global then
          O2c_BC.Load (O2c_BC.Global (To_String (I.Name)));
       else

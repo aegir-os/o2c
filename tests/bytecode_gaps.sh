@@ -309,20 +309,19 @@ fi
 #  whose own body the backend compiles (Compile_Builtin ... Scoped => True), so
 #  a call to it is an ordinary CALL to code in the image.  tests/bc/strlib.ob2
 #  runs Length, Pos and Cap, and hello.ob2's refusal moved past the whole module
-#  to Texts (3cg).  Math is still served by natives, so Math.cos still refuses -
-#  which is what keeps this check alive rather than empty.
-for probe in 'Math.cos (0.0)|var x: real; begin x := Math.cos(0.0) end'; do
-   label="${probe%%|*}"; body="${probe#*|}"
-   mod="${label%%.*}"
-   printf 'module GapT; import %s, Out; %s GapT.\n' "$mod" "$body" > "$WORK/gap.ob2"
-   if timeout 60 "$FRONT" "$WORK/gap.ob2" "$WORK/gap.obc" >"$WORK/gap.log" 2>&1; then
-      bad "$label compiled - it has no bytecode emission and must refuse"
-   elif grep -q "is not yet supported" "$WORK/gap.log"; then
-      note "  ok  $label refuses rather than silently yielding nothing"
-   else
-      bad "$label failed for the wrong reason: $(tail -1 "$WORK/gap.log")"
-   fi
-done
+#  to Texts (3cg).
+#
+#  Math.cos (0.0) was the last entry here, and its gap closed the same way in
+#  3dn: the module is served by natives now (VM_Math, ids 30..40), so the call
+#  COMPILES and RUNS.  The list is therefore EMPTY of probes, which is why this
+#  is a positive check rather than a loop over refusals - the assertion that
+#  matters is that the thing which used to print 0.000 now prints the cosine.
+printf 'module GapT; import Math, Out; var x: real; begin x := Math.cos(0.0); Out.Real (x, 0) end GapT.\n' > "$WORK/gap.ob2"
+if timeout 60 "$FRONT" "$WORK/gap.ob2" "$WORK/gap.obc" >"$WORK/gap.log" 2>&1; then
+   note "  ok  Math.cos compiles: its gap closed in 3dn and it is now a native"
+else
+   bad "Math.cos must compile now: $(tail -1 "$WORK/gap.log")"
+fi
 
 #  Unary operators - the gap that was NOT in this list, and why.
 #
