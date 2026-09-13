@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         426
+    commits         427
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5193,6 +5193,43 @@ declaration text.  That is a design question to settle deliberately, not by patc
 The trace itself is the win here: two lines replaced three failed attempts, and the second line
 reframed the problem.  Nothing is committed from this attempt - `git checkout compiler/`, build 0
 warnings, `run_bc` PASS, `run_vm` PASS - and the committed state is still 3dr's emitter split.
+
+### 3du. Measured: 97 declarations, each ONCE — so 3dt's two-pass reading was wrong, and
+the guard skips far more than nested procedures
+
+3dt concluded from a comment that a procedure declaration is parsed twice and rested a plan on it.
+Before building on that, the claim was measured - a counter at the declaration site and a full run
+over one fixture.  The measurement says:
+
+    97 declarations, every one reached exactly ONCE
+    existing_id = 0 for all 97          (so nothing stale is being reused)
+    69 of the 97 see open=TRUE          (so the not-Proc_Open guard skips 69 of them)
+
+**So the two-pass reading is wrong** - that is the third of my inferences about this front end that a
+measurement has overturned, and it is the reason the plan is now grounded rather than reasoned.
+
+**And the third line is the finding.**  The declarations that see `open=TRUE` are not only the nested
+ones.  They start at `Math`'s first exported member:
+
+    TRACE decl#  1 Length open=FALSE
+    ...
+    TRACE decl# 27 power open=TRUE      --  Math's FIRST top-level member
+    TRACE decl# 28 exp open=TRUE
+    ...
+    TRACE decl# 96 Bump open=FALSE      --  the fixture's own, declared last
+
+`power` is a top-level member of a builtin module, and something is already open when it is declared -
+so the guard `not Proc_Open` withholds an id from it.  That is much wider than "nested procedures":
+ANY declaration reached while something is open is skipped, and inside a builtin, whose module is
+compiled as one unit ahead of the user's own, that is most of them.
+
+**So the next probe is one line, and it is not the id**: print `Proc_Open` when each MODULE starts and
+ends.  Something is open across Math's declarations that should not be - the likeliest candidate is a
+preceding module's body frame outliving its `End_Body` (which the emitter's own comment says used to
+leak), and the trace above is the first evidence pointing at it.  Until that is known, every
+explanation of the 143 fixtures is a guess - and this turn is the argument for not making one.
+
+The instrument is reverted, the tree is green (`run_bc` PASS), and the committed state is unchanged.
 
 ## 4. Method — what worked, and what did not
 
