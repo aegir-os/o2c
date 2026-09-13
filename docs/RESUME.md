@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         405
+    commits         406
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4483,6 +4483,44 @@ array** - the working path - rather than to invent a third lowering for it, and 
 `onlystr.ob2` / `globstr.ob2` are the fixtures, two of which already pass and are the reference.
 That is a code change for a fresh session with the evidence in hand, not a guess, and it is the last
 step between here and flipping Files.
+
+### 3cz. The mechanism, and the fix is the THIRD instance of one mistake
+
+3cy's trace said a field array reaches the pool-string native while a module array takes the
+per-character loop.  The reason is three lines of recognition.
+
+**`Out.String`'s argument is classified by looking its TEXT up as a symbol** (9340):
+
+    if O2c_BC.Bytecode_Mode and then Find (To_String (A.Text)) > 0 then
+       ASym := Find (...);  Is_Open := Syms (ASym).Open_Arr;  AU := Syms (ASym).UT;
+       N := (if Is_Open then 0 else UTypes (AU).Arr_Len);
+       ...
+       if Is_Open or else (AU > 0 and then UTypes (AU).Elem = T_Char) then
+          --  the per-character loop, ending in Str_Looped := True
+
+A named variable is found; an ARRAY OF parameter is found; a FIELD'S Ada text (`fp.all.name`) is
+not a symbol at all, so `Find` returns 0, the loop is skipped, and the member dispatch below emits
+`Call_Native (1, 1)` - the pool-string native - with whatever the designator left on the stack.
+
+**And the comment there records that this exact mistake has already been made once:**
+
+    "Recognising only the first is why Out.String (s) inside a procedure fell through to the
+     pool-string native and died as 'operand-stack underflow' - a message about the stack for a
+     problem with a string."
+
+So the field case is the THIRD instance of "recognise the shapes by name, and a shape that is not a
+name silently falls through".  Global, then open parameter, now field - each found by a program
+dying somewhere far from the cause.  That is the durable finding of this whole Files hunt: the
+recognition is by TEXT where it should be by TYPE.
+
+**The fix, precisely.**  The loop is already written to be independent of where the array lives: it
+derives the base itself, and its first act is `Op_Discard` - "The chain pushed the array's address;
+this loop derives its own, so drop that one".  For a field that push IS the right base (the chain's
+`D_Str` branch pushes the field's own address), so the fix is to KEEP it instead of discarding it:
+store it into the loop's temp local and load the base from there, exactly as the two existing cases
+load it from a global or from a parameter slot.  The bound is the field's static length, which the
+designator knows and `A` does not - so the front end has to carry it through, and that is the whole
+of the change.  `onlystr.ob2` and `globstr.ob2` (failing and passing today) are the test pair.
 
 ## 4. Method — what worked, and what did not
 
