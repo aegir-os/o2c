@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         422
+    commits         423
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5078,6 +5078,41 @@ is a small change to this IR, whose frame model is one flat run of slots per pro
 up-level access.  Everything else about the module is ordinary code this backend already compiles -
 real arithmetic, `CHR`, `len`, an open-array formal, `var` out-parameters (which is 3dl's fix, and
 `Convert (x, str)` is exactly its shape).
+
+### 3dq. Nested procedures: the design is settled, and the load-bearing fact is one refusal
+
+3dp located the missing id; this settles how to get it.  The decisive fact is in the emitter:
+
+    function Begin_Proc ... is
+       if Cur_Proc /= 0 then
+          raise Wrong_Construct with "bytecode backend: a procedure is already open";
+
+ONE open procedure, no stack, and `Procs (Cur_Proc).Buf_Off := Length (Code)` - so a body is a
+contiguous run of the single code buffer, and a nested body cannot be emitted inside its enclosing
+one: the loader takes each procedure's extent as `Buf_Off .. the next one's`, so bytes in between
+would be EXECUTED by the enclosing procedure.  That, and not the id, is the real work.
+
+**The design, in four pieces, three of which use what already exists:**
+
+    the static link    an ORDINARY slot: the caller passes `LOAD_ADDR_L (0)` - the address of its own
+                       frame - and the callee reads it like any local.  An up-level access is
+                       `Load_Local (link slot)`, `Push_Int (outer slot)`, `Load_Idx (8)`.  NO NEW
+                       VM OPCODES: stable slot addresses are what made a static link expressible at
+                       all, so 3dk's chunked pool pays for itself twice.
+    the ordering       a nested body must be emitted BEFORE its enclosing one, and Oberon already
+                       puts nested declarations ahead of the enclosing `begin`.  So the fix is to
+                       DEFER the enclosing `Begin_Proc` from its declaration to its `begin`.
+    the ids            `Begin_Proc` both allocates the id and starts the body; splitting those two -
+                       reserve at the declaration, open at the `begin` - is what lets a nested body
+                       be emitted first while its parent is already declared and callable.
+    the level          a symbol needs the nesting depth it was declared at, and a use needs the
+                       difference: 0 = this frame, 1 = up one (the link), >1 = REFUSE loudly.  The
+                       front end already has `Nested_Depth`; what it lacks is the field on the symbol.
+
+**And the limit stated up front**: one level up is what `Reals` needs (`Put` and `Digit` reach
+`Convert`'s locals), and deeper nesting should REFUSE rather than be approximated - which is this
+backend's rule everywhere else.  Recursion in a nested procedure wants a real id at its declaration,
+so it is the one case the deferred-open must be careful with.
 
 ## 4. Method — what worked, and what did not
 
