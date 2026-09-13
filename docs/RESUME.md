@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         402
+    commits         403
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4368,6 +4368,50 @@ The next instrument is already in hand and has a known gap: `tools/bc_disasm.py`
 `0x39` (the comparison group is a RANGE row in the spec's table, which the extractor does not parse),
 so it breaks before reaching the CALL_NATIVE in `fldv.obc` and cannot show the extra or missing
 push.  Fixing that gap is a few lines, and it is what turns this from deduction into a diff.
+
+### 3cw. The spec had DRIFTED, and the disassembler was the thing that noticed
+
+3cv named the instrument gap: `tools/bc_disasm.py` stopped at opcode `0x39`.  Fixing it found
+something better than the fix.
+
+**The first cause was mine.**  The spec's tables are space-ALIGNED, and my extractor required exactly
+one space after the mnemonic's closing backtick - so the whole arithmetic and comparison group
+(0x30-0x5F) was silently dropped and the tool "stopped at the first ILT".  Then my first repair
+dropped the cell boundary instead (`(.*?)` with no trailing `|`), over-counting operands from the
+stack-effect and notes cells and misaligning everything after; on the LIB image that showed
+`LOAD_CONST / STR_EQ` where the truth was `LOAD_CONST / ILT`.  Two wrong decoders in a row, each
+producing confident nonsense - which is exactly what the tool exists to prevent.  The tool now takes
+widths from ONE cell (`[^|]*`), has a real CLI, and guards its main.
+
+**The second cause was the repo's.**  With the alignment fixed the tool stopped at `0xEC` in a Files
+body - an opcode `docs/obc-image.md` declares **reserved** (`0xE4-0xEF`, "fused guard+branch, inline
+caches").  The VM implements it: `Op_Store_Idx_B = 16#EC#`, beside `Op_Load_Idx_B` (0xEB),
+`Op_Copy_Str` (0xED), `Op_Str_Cmp` (0xEE), and the threading band `YIELD`/`CALL_INDIRECT`/`SPAWN`/
+`JOIN`/`MUTEX_LOCK`/`MUTEX_UNLOCK`/`THREAD_ID` (0xE4-0xEA).  The compiler EMITS them.  The page that
+the project treats as normative for the container had drifted from the implementation, and nothing
+noticed until a tool built *from that page* refused to read a body the compiler had just written.
+
+**They are all operand-free** - every verifier arm does `PC := PC + 1`, no inline operands - which is
+how eleven opcodes fit between `DESC_OF` and the 0xF0 escape.  That is now in the spec, with the
+stack effects.  One trap worth recording there: `SPAWN`'s declaration comment says "the procedure id
+is an OPERAND", but its verifier arm accounts pops-and-pushes as net zero, which is only possible if
+the id is POPPED from the stack.  The arm is the truth; the comment is not.
+
+**And the disassembler immediately earned its keep on the original question.**  `fldv.obc`'s body now
+decodes end to end:
+
+    178: LOAD_G        [1]        the pointer's value = the object's address
+    183: CALL_NATIVE   [1, 1]
+    187: CALL_NATIVE   [2, 0]
+    191: HALT
+
+which looks RIGHT - one address on the stack, one argument.  So the runtime CONSTRAINT_ERROR 3cv
+reported is NOT a missing push in the body, and the next measurement is to identify the call the VM
+actually made: the raise locates at `obc_vm.adb:2067`, inside `when 0` (`Args (1)` of a two-argument
+native), and this body contains no id-0 call at all.  Either the operand ORDER is `(id, argc)` rather
+than `(argc, id)` - `agg.obc` emits `[0,2]` then `[2,0]` and runs, which is consistent with either
+reading and is why the ambiguity went unnoticed - or the failing call is in a procedure the body
+calls.  One measurement, and the tool can now print every procedure in the image.
 
 ## 4. Method — what worked, and what did not
 

@@ -373,7 +373,24 @@ it as a root through the VM API (none currently needs to).
 | 0xE1 | `TYPE_TEST` | u32 desc ref | `[ptr] -> [bool]` | descriptor-chain walk |
 | 0xE2 | `DISPATCH` | u16 method idx, u8 arg count, u8 result count | `[self,args...] -> [rets...]` | resolve through `self`'s descriptor method table.  Both counts are needed and both are known statically - an override must repeat its base method's signature - because `self` sits *under* the arguments, so the arity is what locates it, and the result count is what the verifier tracks the depth with |
 | 0xE3 | `DESC_OF` | — | `[ptr] -> [desc_addr]` | for native bookkeeping / debugging |
-| 0xE4–0xEF | reserved | | | fused guard+branch, inline caches |
+| 0xE4 | `YIELD` | — | `[] -> []` | voluntary yield; preemption needs no opcode of its own |
+| 0xE5 | `CALL_INDIRECT` | — | `[id] -> []` | callee only known at run time; the type is parameterless and resultless |
+| 0xE6 | `SPAWN` | — | `[id] -> [handle]` | the procedure id is POPPED, not an operand - the verifier's net-zero accounting is what says so |
+| 0xE7 | `JOIN` | — | `[handle] -> []` | parks the caller rather than spinning |
+| 0xE8 | `MUTEX_LOCK` | — | `[m] -> []` | a mutex is an INTEGER: 0 free, otherwise the holder's thread id |
+| 0xE9 | `MUTEX_UNLOCK` | — | `[m] -> []` | |
+| 0xEA | `THREAD_ID` | — | `[] -> [id]` | the caller's own handle |
+| 0xEB | `LOAD_IDX_B` | — | `[base,idx] -> [v]` | packed CHAR element load |
+| 0xEC | `STORE_IDX_B` | — | `[base,idx,v] -> []` | packed CHAR element store |
+| 0xED | `COPY_STR` | — | `[src,dst] -> []` | pool string into a packed CHAR array, NUL-terminating |
+| 0xEE | `STR_CMP` | — | `[a,b] -> [-1\|0\|1]` | three-way compare; Eq/Ne/Lt/Le/Gt/Ge against zero give every relational |
+| 0xEF | reserved | | | one slot left before the reserved 0xF0 escape |
+
+**Every opcode in this band is operand-free** - one byte, no inline operands - which is why the
+whole block fits between DESC_OF and the 0xF0 escape.  This section was written after the fact:
+the band was documented as `reserved` long after the emitter and the VM had agreed on it, and
+the only thing that noticed was a disassembler built from this page, stopping at the first
+STORE_IDX_B in a Files body (3cw).
 
 ### `0xF0–0xFF` — escape
 

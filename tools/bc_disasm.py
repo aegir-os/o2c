@@ -1,66 +1,112 @@
 #!/usr/bin/env python3
 """Disassemble an .obc image's procedure bodies.
 
-Built because 3co-3cr needed to compare two compiled bodies - `Files.New` in a builtin image
+Built because 3co-3cu needed to compare two compiled bodies - `Files.New` in a builtin image
 against `Lib2.New` in a user-library image - and the image carries no name map (sections 3/4/5/6
-only, no EXPORT and no DEBUG), so there was no way to ask it which procedure was which.
+only, no EXPORT and no DEBUG), so there was no way to ask it which procedure was which.  Every
+conclusion 3co-3cu reached was checked against this tool's output rather than inferred.
 
 The opcode table is read from docs/obc-image.md rather than copied, so this cannot drift from the
-spec: the spec's table is the table.
+spec: the spec's tables are the table.  Two traps in parsing them, both hit while building this:
+
+  * the tables are space-ALIGNED, so the mnemonic cell is padded.  Requiring a single space after
+    the closing backtick silently dropped the whole arithmetic and comparison group (0x30-0x5F),
+    and the tool then stopped at the first ILT in a body;
+  * the cell after the mnemonic is the OPERANDS when the table has an operand column (the typed
+    opcodes) and the STACK EFFECT when it does not (arithmetic, comparisons, sets).  Taking widths
+    from that one cell - `[^|]*` - is right in both cases; taking them from the rest of the line
+    over-counts and misaligns every instruction after it.
 
 Usage:  python3 tools/bc_disasm.py IMAGE.obc [PROC_INDEX ...]
-        (no indices: list the procedure table and disassemble each candidate that has an open
-         formal and a result, i.e. the shape Files.New and Files.Old have)
+        1-based procedure indices.  With none, the table is listed and the procedures shaped like
+        one open formal and one result are disassembled - which is what Files.New and Files.Old
+        are.  The module body's offset is printed either way (`entry`), since a program's own code
+        is usually what is wanted and is not in the procedure candidates.
 """
-import io
-import re, struct, sys
-#  Build the opcode table from the spec itself, so the tool cannot drift from it.
-rows = re.findall(r'^\| (0x[0-9A-Fa-f]{2}) \| `([A-Z0-9_]+)` \| (.*?) \|', open('docs/obc-image.md',encoding='utf-8').read(), re.M)
-OPS = {}
-for hx, nm, operands in rows:
-    widths = [w for w in re.findall(r'\b(u8|u16|u32|i32)\b', operands)]
-    OPS[int(hx,16)] = (nm, [{'u8':1,'u16':2,'u32':4,'i32':4}[w] for w in widths])
-print("opcodes from the spec: %d" % len(OPS))
+import re
+import struct
+import sys
 
-def code_payload(d):
-    sc = struct.unpack_from('<H', d, 12)[0]; stab = struct.unpack_from('<Q', d, 0x10)[0]
-    for i in range(sc):
-        o = stab + i*24
-        sid, _ = struct.unpack_from('<II', d, o); off, sz = struct.unpack_from('<QQ', d, o+8)
-        if sid == 6: return d[off:off+sz]
-    raise SystemExit("no CODE section")
+WIDTHS = {'u8': 1, 'u16': 2, 'u32': 4, 'i32': 4}
+_rows = re.findall(r'^\|\s*(0x[0-9A-Fa-f]{2})\s*\|\s*`([A-Z0-9_]+)`\s*\|([^|]*)',
+                   open('docs/obc-image.md', encoding='utf-8').read(), re.M)
+OPS = {int(hx, 16): (nm, [WIDTHS[w] for w in re.findall(r'\b(u8|u16|u32|i32)\b', operands)])
+       for hx, nm, operands in _rows}
+assert len(OPS) > 110, "the spec's opcode table did not parse"
 
-def procs(pay):
-    n = struct.unpack_from('<I', pay, 0)[0]
-    out = []
-    for i in range(n):
-        r = 4 + i*24
-        co, fs, np = struct.unpack_from('<II H', pay, r)[0], struct.unpack_from('<I', pay, r+4)[0], struct.unpack_from('<H', pay, r+8)[0]
-        nr = struct.unpack_from('<H', pay, r+10)[0]
-        out.append((co, fs, np, nr))
+
+def sections(data):
+    count = struct.unpack_from('<H', data, 12)[0]
+    table = struct.unpack_from('<Q', data, 0x10)[0]
+    out = {}
+    for i in range(count):
+        at = table + i * 24
+        sid, _flags = struct.unpack_from('<II', data, at)
+        off, size = struct.unpack_from('<QQ', data, at + 8)
+        out[sid] = data[off:off + size]
     return out
 
-def body(pay, ps, i):
-    lo = ps[i][0]
-    hi = min([ps[k][0] for k in range(len(ps)) if ps[k][0] > lo] or [len(pay)])
-    return pay[lo:hi]
 
-def dis(pay, ps, i, limit=60):
-    code = body(pay, ps, i); print("  proc %d: code_off=%d len=%d frame=%d params=%d results=%d"
-          % (i+1, ps[i][0], len(code), ps[i][1], ps[i][2], ps[i][3]))
-    pc = 0; shown = 0
-    while pc < len(code) and shown < limit:
-        op = code[pc]; nm, ws = OPS.get(op, ('?', []))
-        if nm == '?': print("   %5d: %02x  [?]" % (pc, op)); return
-        pc += 1; args = []
-        for w in ws:
-            v = int.from_bytes(code[pc:pc+w], 'little'); args.append(v); pc += w
-        print("   %5d: %-14s %s" % (pc-1, nm, args if args else ''))
-        shown += 1
+def procs(code):
+    """(code_off, frame_slots, n_params, n_results) per procedure, 1-based."""
+    n = struct.unpack_from('<I', code, 0)[0]
+    out = []
+    for i in range(n):
+        at = 4 + i * 24
+        out.append((struct.unpack_from('<I', code, at)[0],
+                    struct.unpack_from('<I', code, at + 4)[0],
+                    struct.unpack_from('<H', code, at + 8)[0],
+                    struct.unpack_from('<H', code, at + 10)[0]))
+    return out
 
-for name, path in (('FILES(image with Files flipped)','/tmp/fn3.obc'), ('LIB(the Lib2 image)','/tmp/xm2.obc')):
-    pay = code_payload(open(path,'rb').read()); ps = procs(pay)
-    print("== %s: %d procs" % (name, len(ps)))
-    for i,(co,fs,np,nr) in enumerate(ps):
-        if (np,nr)==(2,1) and fs==4:
-            print("  candidate: proc %d" % (i+1)); dis(pay, ps, i, 26)
+
+def body(code, table, index):
+    starts = sorted(t[0] for t in table)
+    low = table[index - 1][0]
+    highs = [s for s in starts if s > low]
+    return code[low:(highs[0] if highs else len(code))]
+
+
+def disassemble(code, table, index):
+    off, frame, npar, nres = table[index - 1]
+    chunk = body(code, table, index)
+    print("  proc %d: code_off=%d len=%d frame=%d params=%d results=%d"
+          % (index, off, len(chunk), frame, npar, nres))
+    pc = 0
+    while pc < len(chunk):
+        op = chunk[pc]
+        if op not in OPS:
+            print("   %5d: %02x  [?] - not in the spec's table" % (pc, op))
+            return
+        name, widths = OPS[op]
+        start = pc
+        pc += 1
+        args = []
+        for width in widths:
+            args.append(int.from_bytes(chunk[pc:pc + width], 'little'))
+            pc += width
+        print("   %5d: %-16s %s" % (start, name, args if args else ''))
+
+
+def main(argv):
+    if not argv:
+        print(__doc__)
+        return 1
+    data = open(argv[0], 'rb').read()
+    code = sections(data)[6]
+    table = procs(code)
+    want = [int(a) for a in argv[1:]]
+    print("opcodes from the spec: %d   procedures: %d" % (len(OPS), len(table)))
+    print("entry (module body) at code offset %d"
+          % struct.unpack_from('<Q', data, 0x38)[0])
+    if not want:
+        for i, (off, frame, npar, nres) in enumerate(table, 1):
+            if (npar, nres) == (2, 1):
+                want.append(i)
+    for i in want:
+        disassemble(code, table, i)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
