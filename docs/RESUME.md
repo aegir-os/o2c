@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         404
+    commits         405
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4449,6 +4449,40 @@ arm (`Args (1)`), while this body contains no `Out.Int` call at all.  Either the
 procedure the body calls and the tool has not been pointed at, or the raise's line is being read
 against the wrong arm; a printed `Idx` settles both in one run, and `tools/bc_disasm.py IMAGE 1 2 3
 ...` can now print every procedure in the image to say which.
+
+### 3cy. THE ANSWER — a field array takes the string native; a module array takes Out.Char
+
+3cx said the remaining question was one line of runtime evidence and named the instrument.  The
+instrument produced it on the first run.  A temporary trace in the interpreter, just before
+`Call_Native`, printing the id, the arity and the first argument:
+
+    Out.String (fp^.name)   ->  TRACE native 1 argc 1 a0= 94344714588232
+    Out.String (a)          ->  TRACE native 4 argc 1 a0= 65      (then 66, 67 - one per character)
+
+So the two cases are not the same lowering at all:
+
+    a MODULE-LEVEL array  ->  per-character Out.Char (native 4), the character as the VALUE   WORKS
+    an ARRAY-VALUED FIELD ->  the string/pool native (native 1) with the OBJECT'S ADDRESS     dies
+
+and native 1 is the one the LITERAL path reaches through `Resolve_Str` (3cg), i.e. the one whose
+argument is a resolved pool address.  Handing it a heap address is the bug, and it is the last
+thread of 3ct: the `D_Str` branch's ad-hoc "push the whole array as a string" is not how this
+compiler lowers an array, and only a builtin's own body could ever reach it - which is why Files.Read
+and Write passed a wrong address to FRead/FWrite while every user-visible path was correct.
+
+**A second correction, and it matters for the shape of the fix.**  `Arg_Block` is
+`array (0 .. Max_Native_Args - 1) of U64` - FIXED size - so `Args (0)` and `Args (1)` can never be
+out of range.  3cx's reading of the constraint error as "an argument list that is too short" was
+wrong: with a fixed array the stale `Args (1)` is simply whatever the last two-argument call left
+there, and the range check that fires is a CONVERSION (`Natural` of a value whose high bit is set)
+inside the native's own body.  That is what makes the failure reproducible and not a stack underflow:
+the native is entered correctly with argc 1 and then interprets its argument as a pool index.
+
+**So the fix is to lower an array-valued field the way this compiler already lowers a module-level
+array** - the working path - rather than to invent a third lowering for it, and `fldv.ob2` /
+`onlystr.ob2` / `globstr.ob2` are the fixtures, two of which already pass and are the reference.
+That is a code change for a fresh session with the evidence in hand, not a guess, and it is the last
+step between here and flipping Files.
 
 ## 4. Method — what worked, and what did not
 
