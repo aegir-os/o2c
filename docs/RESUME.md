@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         347
+    commits         348
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2197,6 +2197,41 @@ having guessed it.
 **Next, M3**: designators and subscripts, first on purpose - that is where the
 duplicated base derivation and the calling convention live, and where one fix
 took three attempts because the same rule was written in three places.
+
+### 3at. M3a DONE - the base arithmetic has one home, and it is measurable
+
+The base-derivation block existed in TWO copies in the parser.  Both now call
+`O2c_Ir_Lower.Push_Base`, and the claim is checkable rather than rhetorical:
+
+    Nested / 8   in compiler/o2c_compiler.adb ....... 0
+    Nested / 8   in compiler/o2c_ir_lower.adb ....... 1
+
+Those copies had disagreed, which is the whole reason this is worth doing: one
+used a POINTER's `Total_Slots` - zero - so `ptr^.a[i]` refused outright with "an
+array needs a non-zero length", and their shared ancestor had sized a record field
+as one slot, so a field aliased the array before it.  One rule written three times,
+each copy with its own idea of what a slot is.  Now: one rule, one place, with the
+LOWERER owning it - so when designators do migrate, the lowering reuses this
+rather than growing a fourth copy.
+
+`Push_Base`'s signature is the interesting part: it takes `Global_Slots` (0 meaning
+"the address is already on the stack"), `Nested` and the name.  The type model
+stays where it belongs - the CALLER computes `Total_Slots`, because the lowerer
+must not grow a dependency on `UTypes`.
+
+**Verified** by the six guards that exercise both branches - `nestedarr` (the
+standalone, user-typed element case), `recarr` (the pointer-field case),
+`longfield`, `strconst`, `lenopen`, `filesintr` - all unchanged, plus the suites.
+The change emits the same instructions; it moves them, it does not alter them.
+
+**Process note, because it cost two attempts**: I twice wrote a replacement
+expecting the two copies to be textually identical, and they were not - one had
+comments inside the block, the other a different indentation.  The `assert` on the
+occurrence count caught both BEFORE anything was written, so the tree never held a
+half-applied patch.  "Measure, do not assume" applies to my own edits as much as to
+the compiler's behaviour.
+
+Next in M3: the calling convention, the other half of what is duplicated.
 
 ## 4. Method — what worked, and what did not
 

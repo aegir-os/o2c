@@ -59,6 +59,23 @@ package body O2c_Ir_Lower is
       end if;
    end Store_Value;
 
+   procedure Push_Base (Global_Slots : Natural;
+                        Nested : Natural;
+                        Base_Name : String) is
+   begin
+      if Global_Slots /= 0 then
+         --  The variable's whole run, at the slot the chain has walked to:
+         --  offsets are byte counts and the run is slots, and every offset
+         --  here is a multiple of eight.
+         O2c_BC.Load_Addr_G
+           (O2c_BC.Global_Array (Base_Name, Global_Slots) + Nested / 8);
+      elsif Nested > 0 then
+         --  Already the object's address; step into it.
+         O2c_BC.Push_Int (Nested);
+         O2c_BC.Bin (O2c_BC.Add);
+      end if;
+   end Push_Base;
+
    procedure Emit_Quad (Q : O2c_Ir.Quad_Info) is
    begin
       if not O2c_BC.Bytecode_Mode then

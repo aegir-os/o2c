@@ -2073,21 +2073,17 @@ package body O2c_Compiler is
                --  class of programs was refused by a message that pointed at
                --  the wrong thing, which is how it survived: it looked like a
                --  type limitation rather than a missing address.
-               if not UTypes (Base_UT).Is_Ptr and then not D.Base_On_Stack
-               then
-                  --  The variable's whole run, at the slot the chain has
-                  --  walked to: offsets are byte counts and the run is slots,
-                  --  and every offset here is a multiple of eight.
-                  O2c_BC.Load_Addr_G
-                    (O2c_BC.Global_Array
-                       (Base_Name, Total_Slots (Base_UT))
-                     + Nested / 8);
-               elsif Nested > 0 then
-                  --  Already the object's address; step into it.  Byte
-                  --  arithmetic, like every other offset here.
-                  O2c_BC.Push_Int (Nested);
-                  O2c_BC.Bin (O2c_BC.Add);
-               end if;
+               --  One rule, one place (M3): this arithmetic lives in O2c_Ir_Lower,
+               --  where the lowering will own it.  Both branches - a scalar
+               --  element and a user-typed one - call it, so the copies that
+               --  disagreed (a pointer's Total_Slots is 0; a record field was
+               --  one slot) can no longer come back.
+               O2c_Ir_Lower.Push_Base
+                 (Global_Slots =>
+                    (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
+                     then 0 else Total_Slots (Base_UT)),
+                  Nested    => Nested,
+                  Base_Name => Base_Name);
             end if;
             declare
                Ix : Expr_Rec := Parse_Expr;
@@ -2116,16 +2112,17 @@ package body O2c_Compiler is
                      --  base_ptr=TRUE and Total_Slots=0 -> no Global_Array at
                      --  all (that refusal WAS the bug), and its address is what
                      --  the chain already has.
-                     if not UTypes (Base_UT).Is_Ptr and then not D.Base_On_Stack
-                     then
-                        O2c_BC.Load_Addr_G
-                          (O2c_BC.Global_Array
-                             (Base_Name, Total_Slots (Base_UT))
-                           + Nested / 8);
-                     elsif Nested > 0 then
-                        O2c_BC.Push_Int (Nested);
-                        O2c_BC.Bin (O2c_BC.Add);
-                     end if;
+                     --  One rule, one place (M3): this arithmetic lives in O2c_Ir_Lower,
+                     --  where the lowering will own it.  Both branches - a scalar
+                     --  element and a user-typed one - call it, so the copies that
+                     --  disagreed (a pointer's Total_Slots is 0; a record field was
+                     --  one slot) can no longer come back.
+                     O2c_Ir_Lower.Push_Base
+                       (Global_Slots =>
+                          (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
+                           then 0 else Total_Slots (Base_UT)),
+                        Nested    => Nested,
+                        Base_Name => Base_Name);
                      O2c_BC.Bin (O2c_BC.Add);
                      D.Base_On_Stack := True;
                   end if;
