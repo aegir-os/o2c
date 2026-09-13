@@ -422,7 +422,8 @@ package body O2c_BC is
         --  docs/obc-image.md: the reserved 0x72-0x7F block in the BOOLEAN
         --  group, taken from its start so that nothing is renumbered.
         when Band       => 16#72#,
-        when Bor        => 16#73#);
+        when Bor        => 16#73#,
+      when Str_Addr   => 16#74#);
 
    function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural;
                       Has_Ptrs : Boolean) return Natural is
@@ -604,6 +605,17 @@ package body O2c_BC is
          Pushed;
       end if;
    end Native_Call;
+
+   --  Named for what it does to the stack's top word, because `Str_Addr` is
+   --  already the OP's name: an enum literal and a subprogram that share one
+   --  identifier cannot both be named in a statement (GNAT: "expect procedure
+   --  name in procedure call").
+   procedure Resolve_Str is
+   begin
+      Put_Byte (16#74#);
+      N_Insns := N_Insns + 1;
+      --  One word in, one address out: the depth does not move.
+   end Resolve_Str;
 
    procedure Push_BC_Proc (Proc_Id : Natural) is
    begin

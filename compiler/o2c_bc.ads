@@ -49,7 +49,15 @@ package O2c_BC is
       --  BEQ/BNE/BTEST): this enum's order is fixed, so a new member goes at
       --  the end and Byte_Of decides where it lands.  Keeping the two orders
       --  independent is what makes the reserved block usable at all.
-      Band, Bor);
+      Band, Bor,
+   --  Resolve a STRING WORD - an offset into the CONST payload, which is what
+   --  Push_Str leaves and what Out.String and Copy_Str consume - into the
+   --  ADDRESS of its characters.  Appended for the usual reason, and its byte
+   --  comes from the reserved range beside Band/Bor.  An ARRAY OF CHAR formal
+   --  is passed as an ADDRESS, so a literal actual needs this: without it the
+   --  callee dereferenced the OFFSET itself and the VM walked off into memory
+   --  (3cg).
+   Str_Addr);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -176,6 +184,13 @@ package O2c_BC is
    --  Push a procedure id: what a PROCEDURE-typed value is.  One slot, and
    --  the VM already numbers procedures, so a procedure value needs no
    --  environment and nothing from the collector.
+   --  Resolve the string WORD on top of the stack - an offset into the CONST
+   --  payload, which is what Push_Str leaves and what Out.String and Copy_Str
+   --  consume - into the ADDRESS of its characters.  Depth-neutral: one word in,
+   --  one address out.  An ARRAY OF CHAR formal is passed as an address, so a
+   --  LITERAL actual needs this (3cg).
+   procedure Resolve_Str;
+
    procedure Push_BC_Proc (Proc_Id : Natural);
    procedure Halt_Program;
 

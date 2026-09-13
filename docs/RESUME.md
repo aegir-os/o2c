@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         386
-    fixtures        86 in tests/bc/
+    commits         387
+    fixtures        87 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -3766,6 +3766,59 @@ depth, its limit and the causing opcode (3cd); the interpreter has not had the s
 The next diagnostic step is inside `Run_Context`: either report `Ctx.PC` on the catch-all, or -
 better, and matching the project's rule that a malformed image must be REJECTED rather than crash
 the VM - check the address before dereferencing it and return a status with the PC attached.
+
+### 3cg. THE METRIC MOVES — `Strings` compiles its own body, and the lever is LANDED
+
+This is the milestone the last four stages were walking toward.  `Compile_Builtin
+(Oak_Strings_Src, Scoped => True)` - one flag - and
+
+    hello.ob2 refuses at   bytecode backend: Texts.OpenWriter is an FFI primitive ...
+
+**past the whole Strings module**, where it had refused at `Strings.Pos` for twenty sessions.
+`Length`, `Pos` and `Cap` all run, and they run *correctly*: `Pos ("world", s)` is 6, `Pos
+("zzz", s)` is -1, `Cap` uppercases.
+
+**And the crash that blocked it was the sixth defect on the path, with a one-line cause.**
+`Strings.Pos` had stopped failing *verification* and started SIGSEGV-ing *inside the interpreter*
+(`obc_vm.execute`), which `Run_Buffer`'s catch-all reports as `malformed code`.  The cause, once
+the diagnostic said "phase 3" and gdb said which function:
+
+    a string LITERAL actual pushed the literal's pool WORD - an OFFSET into the CONST
+    payload, which is what Copy_Str indexes with - where an ARRAY OF CHAR formal is
+    passed an ADDRESS.  The callee dereferenced offset 3.
+
+That is the *second* half of 3ce's bug, and 3ce's fix is what made it reachable: before, the
+image failed verification (loud) and never ran; after, it verified and crashed (silent).  A crash
+is worse than a refusal, so it was fixed in the same commit series rather than left.
+
+**The fix is a wire-format addition**, appended in the reserved range beside Band/Bor:
+
+    Op_Str_Addr / 16#74#   pop a string WORD, push the ADDRESS of its characters
+    emitter: Str_Addr op, Byte_Of 16#74#, and Resolve_Str (the PROCEDURE is named for
+             what it does to the stack, because an enum literal and a subprogram cannot
+             both be named in a statement - GNAT: "expect procedure name in procedure
+             call", one of two build errors this cost)
+    VM: the opcode, the interpreter arm (both bounds checked - a malformed image is
+             rejected, never allowed to dereference), the verifier arm
+    compiler: a literal actual resolves the word and then pushes its length
+
+`tests/bc/litarg.ob2` grew both halves - `Put ("xyz")` for the length and `Get ("Qrs")` for the
+dereference - so the bug that a literal actual used to be is now the fixture that holds it.
+
+**The ledger, all six, and where each is now:**
+
+    3cz  a parameterless function call emitted NOTHING                     fixed, parfn.ob2
+    3cc  a `var ARRAY OF` element write emitted NOTHING                    fixed, vararr.ob2
+    3ce  a literal actual passed no LENGTH                                 fixed, litarg.ob2
+    3cg  a literal actual passed an OFFSET where an address was needed     fixed, litarg.ob2
+         (two of these were SILENT wrong answers, one a verifier rejection, one a crash -
+          and none of the four could be written as a fixture before the others were fixed)
+
+**What the metric says now, and what is next.**  `Texts.OpenWriter` is the new refusal, so the
+next library is Texts - and `Scoped => True` for it is the same one-line change, gated on
+whatever its bodies need.  The corpus grew to 87 fixtures with `strlib.ob2` and `litarg.ob2`, and
+`bytecode_gaps.sh` lost its `Strings.Length` entry in the same commit, which is the rule it
+exists to enforce: "an entry that stops applying FAILS".
 
 ## 4. Method — what worked, and what did not
 

@@ -2350,6 +2350,14 @@ package body O2c_Compiler is
             begin
                A := Parse_Expr;
                if O2c_BC.Bytecode_Mode then
+                  --  The value Parse_Expr pushed is a string WORD - an offset
+                  --  into the CONST payload - and an ARRAY OF formal is passed
+                  --  as an ADDRESS, so it has to be resolved first.  Without
+                  --  this the callee dereferenced the offset itself and the VM
+                  --  walked off into memory: a SIGSEGV inside the interpreter,
+                  --  reported as "malformed code" (3cg).  The length travels
+                  --  with the address, as the variable case always has.
+                  O2c_BC.Resolve_Str;
                   O2c_Ir_Lower.Push_Int (Lit_Len);
                end if;
             end;
@@ -12334,7 +12342,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          O2c_BC.Begin_Mode;
       end if;
 
-      Compile_Builtin (Oak_Strings_Src, Scoped => False);
+      Compile_Builtin (Oak_Strings_Src, Scoped => True);
       if Emits ("Strings") then
          --  Strings: parsed above in every case, emitted
          --  only when something imports it (see Emits).

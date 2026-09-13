@@ -301,14 +301,17 @@ fi
 #  The default is refusal.  A module that is imported but has no bytecode
 #  emission must not compile: it used to build Ada text that bytecode
 #  discarded, so the call ran and quietly yielded nothing - Math.cos (0.0)
-#  printed 0.000 and Strings.Length ("abcd") printed 16.  Asserted for both an
-#  expression call and a statement call, since they are separate paths.
+#  printed 0.000.  Asserted for both an expression call and a statement call,
+#  since they are separate paths.
 #
-#  Strings.Length is still here because Strings is still served by natives: see
-#  3ce for how far the attempt to compile its own bodies got, and what stopped
-#  it (an intra-module call inside the library body).
-for probe in 'Math.cos (0.0)|var x: real; begin x := Math.cos(0.0) end' \
-             'Strings.Length|var s: array 16 of char; n: integer; begin s := "abcd"; n := Strings.Length(s) end'; do
+#  Strings.Length WAS in this list, for the same reason - it printed 16 for
+#  "abcd" - and it is gone because its gap CLOSED: Strings is the first builtin
+#  whose own body the backend compiles (Compile_Builtin ... Scoped => True), so
+#  a call to it is an ordinary CALL to code in the image.  tests/bc/strlib.ob2
+#  runs Length, Pos and Cap, and hello.ob2's refusal moved past the whole module
+#  to Texts (3cg).  Math is still served by natives, so Math.cos still refuses -
+#  which is what keeps this check alive rather than empty.
+for probe in 'Math.cos (0.0)|var x: real; begin x := Math.cos(0.0) end'; do
    label="${probe%%|*}"; body="${probe#*|}"
    mod="${label%%.*}"
    printf 'module GapT; import %s, Out; %s GapT.\n' "$mod" "$body" > "$WORK/gap.ob2"

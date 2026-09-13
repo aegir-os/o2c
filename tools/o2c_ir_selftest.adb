@@ -651,6 +651,9 @@ begin
          Check (O2c_BC.Insns = Before + 1,
                 "a string constant is one push (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
+         Check (O2c_BC.Insns = Before + 1,
+                "a string constant is one push (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
 
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Bin_Op (Op_Ge);

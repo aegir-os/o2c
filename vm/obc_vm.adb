@@ -439,6 +439,7 @@ package body OBC_VM is
    --  value, not only for 0/1 - the result is canonical 0/1 either way.
    Op_Band        : constant := 16#72#;
    Op_Bor         : constant := 16#73#;
+   Op_Str_Addr    : constant := 16#74#;   --  a string WORD -> its characters' address
    Op_Jmp         : constant := 16#A0#;
    Op_Jz          : constant := 16#A1#;
    Op_Jnz         : constant := 16#A2#;
@@ -1127,6 +1128,12 @@ package body OBC_VM is
                end if;
                Depth := Depth + 1;
                PC := PC + 5;
+            when Op_Str_Addr =>
+               --  One word in, one address out.
+               if Depth < 1 then
+                  return Bad_Stack;
+               end if;
+               PC := PC + 1;
             when Op_Copy_Str =>
                if Depth < 2 then
                   return Bad_Stack;
@@ -2790,6 +2797,21 @@ package body OBC_VM is
                      K := K + 1;
                   end loop;
                   Push (Res);
+               end;
+               PC := PC + 1;
+            when Op_Str_Addr =>
+               --  The word is an OFFSET into the CONST payload (that is what
+               --  Copy_Str indexes with), and an ARRAY OF CHAR formal needs the
+               --  ADDRESS of those characters.  Both bounds are checked: a
+               --  malformed image is rejected, never allowed to dereference.
+               declare
+                  W : constant Natural := Natural (Pop);
+               begin
+                  if W > Consts'Length then
+                     return Bad_Const;
+                  end if;
+                  Push (U64 (System.Storage_Elements.To_Integer
+                               (Consts (W)'Address)));
                end;
                PC := PC + 1;
             when Op_Copy_Str =>
