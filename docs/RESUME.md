@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         425
+    commits         426
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5160,6 +5160,39 @@ I have now guessed at and none of which I have seen.
 
 Every reverted attempt was clean (`git checkout compiler/`, build 0 warnings, `run_bc` PASS,
 `run_vm` PASS) and the committed state is 3dr's emitter split, which is verified and green.
+
+### 3dt. The trace answered the question, and the answer is a change of plan
+
+3ds said the next step was to measure rather than guess a fourth time.  The trace took two lines:
+
+    TRACE decl Length id= 0 locals= 0 open=FALSE
+    o2c error: bytecode backend: a local needs an open procedure
+
+which said, immediately, that the FIRST thing to break is not the id but the FRAME: the front end
+interns a declaration's parameter slots while parsing its header, and `Local` refuses when nothing is
+open.  Splitting the frame owner from the body owner - `Frame_Proc` set at the declaration, `Cur_Proc`
+at the begin - fixed exactly that, and the trace moved on:
+
+    TRACE begin Length id= 0 locals= 2 open=FALSE
+
+So the parameters are interned correctly now, and the id is 0 at the begin.  Chasing that produced the
+finding that matters, and it is about the front end's SHAPE rather than any one line:
+
+**A procedure declaration is parsed TWICE.**  The first pass opens the procedure; the second emits the
+body into it.  That is what `not Proc_Open` was really detecting - not a duplicate, but the second
+half of one declaration - and it is why the id must live across the two passes, and why the first
+pass's open must still be in force when the second pass runs.  Deferring the open to the `begin`
+attacks that structure head-on, which is why three variations on it all broke the same 143 fixtures
+while each fixed a different piece of what the trace showed.
+
+**So the plan changes**: leave `Begin_Proc` where it is, and give a NESTED procedure the ordering it
+needs some other way - the likeliest being to emit a nested body into the same buffer position but
+with the enclosing body's bytes placed after it, or to emit nested bodies in a separate pass over the
+declaration text.  That is a design question to settle deliberately, not by patching the open.
+
+The trace itself is the win here: two lines replaced three failed attempts, and the second line
+reframed the problem.  Nothing is committed from this attempt - `git checkout compiler/`, build 0
+warnings, `run_bc` PASS, `run_vm` PASS - and the committed state is still 3dr's emitter split.
 
 ## 4. Method — what worked, and what did not
 
