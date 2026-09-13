@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         428
+    commits         429
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5267,6 +5267,42 @@ nested case remains, now cleanly separated from it.
 frame must start there while the body starts at the begin), and 3dq's static link, which needs no new
 VM opcodes because slot addresses are stable since 3dk.  The remaining question is only the ORDER of
 the code buffer.
+
+### 3dw. Nesting works: 143 failures down to ONE — and the recipe is now exact
+
+3dv fixed the leak; that removed the thing masking everything else, and the nested-procedure work
+then went from impossible to nearly done in three measured steps.  The change is REVERTED (the one
+remaining failure makes the suite red, and this repo does not land red) but it is written down here
+in full, because the next attempt should be mechanical rather than exploratory.
+
+**The recipe, three pieces, every one of them measured rather than reasoned:**
+
+    the frame/body split    `Frame_Proc` (the frame owner, set at the declaration, where the header
+                            interns parameters) separate from `Cur_Proc` (the body owner, set at the
+                            begin).  `Local`/`Local_Slot`/the locals table key on `Frame_Proc`.
+    the id, carried         `Open_Proc (Decl_Bc_Proc)` - and NOT `Syms (N_Sym).Bc_Proc`: the local
+                            declarations between header and body move `N_Sym` (`:= Param_Base` drops
+                            them), so reading the symbol at the begin gives 0 and Open_Proc dies on
+                            an index check.  That single fact was behind every 143-failure attempt.
+    `Next_Frame` untouched  `Open_Proc` must NOT reset it: it belongs to the frame Reserve_Proc
+                            started.  Resetting gave the body's locals the parameters' slot numbers,
+                            which is the "local slot out of range" that 23 fixtures then showed.
+
+**And what it produced, measured at each step:**
+
+    144 failures  ->  the frame split + the id carried + no Next_Frame reset  ->  2
+    2             ->  End_Proc tolerates a declaration with no body (an EXTERN stub reserves a frame
+                      and opens none), and Return_Void only when a body was opened  ->  1
+
+**The one left is a negative test**: `threadmutex_bad.ob2` (a local mutex in `Worker`) now compiles,
+where it must be refused by the check at 9479, `O2c_BC.Local_Slot (Ada_Id (Arg)) >= 0`.  Reading has
+not explained it - `m` is a local of `Worker`, and at its statements `Frame_Proc` is `Worker`'s - so
+the next step is the same instrument that produced all of the above: print `Local_Slot ("m")` at that
+check, and `Frame_Proc` when `m` was interned.
+
+And `Reals`, with the flip, gets past the nested id entirely and fails at `LEN of an unknown
+parameter` - the UP-LEVEL access itself, which is 3dq's static link: the next piece, now reachable
+rather than hypothetical.
 
 ## 4. Method — what worked, and what did not
 
