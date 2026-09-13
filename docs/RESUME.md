@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         435
+    commits         436
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5487,6 +5487,42 @@ not land here.
 one level up from `Put`, which is exactly the case above.
 
 Tree green (`run_bc` PASS), committed state is 3eb's nested-procedure work.
+
+### 3ed. The link: measured, and two facts from the disassembly that must be reconciled first
+
+The three changes of 3ec were implemented, with a fixture written for exactly this (`nestproc.ob2`: a
+nested `Bump` incrementing `Outer`'s `n`, expected 42).  The baseline first, and it is the bug in one
+number: BEFORE any change the fixture compiles and prints **0** - `n` resolved to a fresh module
+global, which is the silent wrong answer 3ec predicts.
+
+With the changes it compiles and runs but dies on a wild address, and the disassembly says why.  Two
+facts, both from `bc_disasm`:
+
+    proc 31 = Outer:  nparams=1  frame=1        --  the link WAS counted
+       0: LOAD_CONST [115]   ; n := 40
+       5: STORE_L    [0]     ; at slot 0
+       8: CALL       [3123]  ; Bump   --  and NO link was pushed
+    proc 32 = the module body
+       0: CALL       [3098]  ; Outer    --  likewise
+
+So `Outer` - a TOP-LEVEL procedure with no parameters - is recorded with **nparams = 1**, meaning
+`Nested_Depth > 0` was true at its RESERVE; and its frame has one slot, with `n` at slot 0, meaning the
+link was NOT interned for it, i.e. the same condition was false a few lines later.  The two sites
+disagree, and on a top-level procedure both should be false.
+
+**And the parameterless call pushed no link at all**, which is why `Bump` ran with garbage in its link
+slot: the `LOAD_ADDR_L` for the 4208 path did not appear in the image even though the patch matched its
+text.  That is the second thing to reconcile - whether the emission landed on a path the fixture does
+not take, or whether `Proc_Nested` answered false for a callee that was marked nested.
+
+**So the next probe is a trace of `Nested_Depth` at those two sites** - the reserve and the link
+interning - for a nested and a top-level procedure.  One run distinguishes "the value differs between
+the two sites" from "the condition is right and the counting is not", and that is the same instrument
+that has answered every question in this stretch.
+
+Both the changes and the fixture are reverted (the fixture is kept at /tmp/nestproc.ob2, and it will go
+into tests/bc/ the moment it prints 42 rather than 0).  Tree green, `run_bc` PASS, committed state is
+3eb.
 
 ## 4. Method — what worked, and what did not
 
