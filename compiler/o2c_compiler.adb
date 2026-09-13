@@ -5653,7 +5653,14 @@ package body O2c_Compiler is
       --  before that, so the interning never ran for them and every local
       --  silently resolved to a global.  Proc_Open is true from Begin_Proc,
       --  which runs at the header, through End_Proc.
-      if O2c_BC.Bytecode_Mode and then O2c_BC.Proc_Open then
+      --  Gated on the emitter's FRAME state rather than on In_Proc, which is
+      --  set at the body's BEGIN: a procedure's declarations come before that,
+      --  so gating on it meant the interning never ran for them and every local
+      --  silently resolved to a global.  Proc_Open was the right answer while
+      --  the body opened at the header; once a nested procedure's body has to
+      --  open at its begin (3dq), the state that is true at the header is the
+      --  FRAME.  Same lesson as the first time, one level down.
+      if O2c_BC.Bytecode_Mode and then O2c_BC.Frame_Open then
          for I in 1 .. N loop
             declare
                Slot : constant Natural :=
@@ -6161,6 +6168,10 @@ package body O2c_Compiler is
       Spec_Decl := False;
    end Decl_Type;
 
+   --  The id of the declaration being parsed: it cannot be read back from the
+   --  symbol at the begin, because the local declarations move N_Sym.
+   Decl_Bc_Proc : Natural := 0;
+
    procedure Decl_Procedure is
       Name  : constant String := Ident_Text;
       PName : array (1 .. Max_Params) of Unbounded_String;
@@ -6379,7 +6390,7 @@ package body O2c_Compiler is
            (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I),
             UT => PUT (I), Open => POpen (I));
       end loop;
-         if O2c_BC.Bytecode_Mode and then not O2c_BC.Proc_Open then
+         if O2c_BC.Bytecode_Mode then
             declare
                --  Each open-array formal contributes two values at a call -
                --  the array's address and its length - so the count the
@@ -6392,8 +6403,10 @@ package body O2c_Compiler is
                   end if;
                end loop;
                Syms (N_Sym).Bc_Proc :=
-                 O2c_BC.Begin_Proc (N_Par + N_Open,
-                                    (if Is_Function then 1 else 0));
+                 O2c_BC.Reserve_Proc
+                   (N_Par + N_Open + (if Nested_Depth > 1 then 1 else 0),
+                    (if Is_Function then 1 else 0));
+               Decl_Bc_Proc := Syms (N_Sym).Bc_Proc;
             end;
          end if;
 
@@ -6699,6 +6712,9 @@ package body O2c_Compiler is
            & Natural'Image (Cur.Line) & ")";
       end if;
       if Cur.Kind = Lex.Tok_Begin then
+         if O2c_BC.Bytecode_Mode and then not O2c_BC.Proc_Open then
+            O2c_BC.Open_Proc (Decl_Bc_Proc);
+         end if;
          declare
             Saved : constant Unbounded_String := Body_Buf;
          begin
@@ -6725,10 +6741,7 @@ package body O2c_Compiler is
          end;
       end if;
       if O2c_BC.Bytecode_Mode then
-         --  A procedure that falls off its end returns no value.  A function
-         --  must end with RETURN (the front end enforces it above), and that
-         --  statement emits the return itself.
-         if not Is_Function then
+         if O2c_BC.Proc_Open and then not Is_Function then
             O2c_BC.Return_Void;
          end if;
          O2c_BC.End_Proc;

@@ -246,6 +246,10 @@ package O2c_BC is
    --  declaration more than once for one declaration, and Begin_Proc must
    --  run once: this is how it tells.
    function Proc_Open return Boolean;
+   --  True while a declaration owns a FRAME - true from the declaration, which is
+   --  what Proc_Open used to be.  A procedure's local variables are interned
+   --  during its header, so that is the state the interning must ask about.
+   function Frame_Open return Boolean;
 
    --  Stack shuffles with their real depth effects.  Un() is for unary
    --  value operators (NEG, ABS, ORD, CHR), which leave the depth alone;

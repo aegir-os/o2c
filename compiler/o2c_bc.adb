@@ -79,7 +79,13 @@ package body O2c_BC is
 
    Procs        : array (1 .. Max_Procs) of Proc_Entry;
    N_Procs_Used : Natural := 0;
-   Cur_Proc     : Natural := 0;   --  0 = no procedure open
+   --  TWO owners: the FRAME is started at the declaration (the header interns
+   --  parameter slots) while the BODY opens at the begin, so a nested body lands
+   --  before its enclosing one.  For a top-level procedure they are the same.
+   Cur_Proc     : Natural := 0;   --  0 = no procedure BODY open
+   Frame_Proc   : Natural := 0;   --  whose frame is being built
+   Saved_Frame_Proc : Natural := 0;
+   Saved_Next_Frame : Natural := 0;
    Body_Proc    : Natural := 0;   --  the module body, once opened
    Next_Frame   : Natural := 0;   --  next free frame slot of Cur_Proc
 
@@ -686,6 +692,10 @@ package body O2c_BC is
       end if;
       N_Procs_Used := N_Procs_Used + 1;
       Id := N_Procs_Used;
+      Saved_Frame_Proc := Frame_Proc;
+      Saved_Next_Frame := Next_Frame;
+      Frame_Proc := Id;
+      Next_Frame := 0;
       --  Buf_Off is provisional: Open_Proc puts it where the body really starts,
       --  which for a nested procedure is after its own nested ones.
       Procs (Id) := (Buf_Off    => Length (Code),
@@ -703,7 +713,7 @@ package body O2c_BC is
       end if;
       Procs (Id).Buf_Off := Length (Code);   --  the body starts HERE
       Cur_Proc := Id;
-      Next_Frame := 0;
+      --  Next_Frame is NOT reset: it belongs to the FRAME.
    end Open_Proc;
 
    function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
@@ -715,11 +725,15 @@ package body O2c_BC is
 
    procedure End_Proc is
    begin
-      if Cur_Proc = 0 then
+      --  The FRAME is what must be open: a declaration with no begin (an EXTERN
+      --  stub) reserves a frame and opens no body.
+      if Frame_Proc = 0 then
          raise Wrong_Construct with
            "bytecode backend: no procedure is open";
       end if;
-      Procs (Cur_Proc).Frame_Slots := Next_Frame;
+      Procs (Frame_Proc).Frame_Slots := Next_Frame;
+      Frame_Proc := Saved_Frame_Proc;
+      Next_Frame := Saved_Next_Frame;
       Cur_Proc := 0;
    end End_Proc;
 
@@ -739,12 +753,12 @@ package body O2c_BC is
 
    function Local (Ada_Name : String) return Natural is
    begin
-      if Cur_Proc = 0 then
+      if Frame_Proc = 0 then
          raise Wrong_Construct with
-           "bytecode backend: a local needs an open procedure";
+           "bytecode backend: a local needs a declared owner";
       end if;
       for I in 1 .. N_Locals loop
-         if Locals (I).Proc = Cur_Proc
+         if Locals (I).Proc = Frame_Proc
            and then To_String (Locals (I).Name) = Ada_Name
          then
             return Locals (I).Slot;
@@ -754,7 +768,7 @@ package body O2c_BC is
          raise Wrong_Construct with "bytecode backend: too many locals";
       end if;
       N_Locals := N_Locals + 1;
-      Locals (N_Locals) := (Proc => Cur_Proc,
+      Locals (N_Locals) := (Proc => Frame_Proc,
                             Slot => Next_Frame,
                             Name => To_Unbounded_String (Ada_Name));
       Next_Frame := Next_Frame + 1;
@@ -767,13 +781,16 @@ package body O2c_BC is
    function Proc_Open return Boolean is
      (Cur_Proc /= 0);
 
+   function Frame_Open return Boolean is
+     (Frame_Proc /= 0);
+
    function Local_Slot (Ada_Name : String) return Integer is
    begin
-      if Cur_Proc = 0 then
+      if Frame_Proc = 0 then
          return -1;
       end if;
       for I in 1 .. N_Locals loop
-         if Locals (I).Proc = Cur_Proc
+         if Locals (I).Proc = Frame_Proc
            and then To_String (Locals (I).Name) = Ada_Name
          then
             return Integer (Locals (I).Slot);

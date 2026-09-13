@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         433
+    commits         434
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5415,6 +5415,39 @@ declaration, Return_Void only for a real body) are part of it.
 
 Instrument and recipe reverted; tree green (`run_bc` PASS, `run_vm` PASS); committed state is 3dv's
 leak fix.
+
+### 3eb. LANDED — nested procedures get their ids, and run_bc/run_vm are GREEN
+
+`Reals.Convert` needed nested procedures, and this is the whole chain, now in and passing.  Five
+pieces, and the last one was found by the code's own comment:
+
+    the frame/body split      Frame_Proc (set at the declaration) vs Cur_Proc (set at the begin).
+                              Local/Local_Slot and the locals table key on Frame_Proc.
+    the id carried            Open_Proc (Decl_Bc_Proc): the local declarations move N_Sym, so the
+                              symbol cannot be read back at the begin.
+    Next_Frame untouched      Open_Proc must not reset it; it belongs to the frame.
+    End_Proc/Return_Void      a declaration with no begin (an EXTERN stub) reserves a frame and opens
+                              no body, so End_Proc keys on the frame and Return_Void on the body.
+    the interning GATE       a procedure's locals are interned during its HEADER, and that site was
+                              gated on Proc_Open - which the deferred body makes false there.  It is
+                              now gated on Frame_Open.  The comment at that site records the FIRST
+                              time this exact mistake was made ("gated on In_Proc, which is set at the
+                              body's BEGIN ... every local silently resolved to a global"); the
+                              lesson repeated one level down, and the comment is why it was quick.
+
+**The descent, all measured:** 144 failures with the first three pieces, 2 with End_Proc/Return_Void,
+1 with... and 0 once the gate moved to the frame.  `run_bc` PASS, `run_vm` PASS.
+
+**And the next piece is the up-level access, which is now the ONLY thing between `Reals` and a flip.**
+With the flip, `Reals` gets past the nested ids entirely and stops at `LEN of an unknown parameter`:
+`Put`/`Digit` reaching `Convert`'s `str`.  3dq's design applies unchanged - the static link is an
+ordinary slot the caller passes, and an up-level access is `Load_Local (link)`, `Push_Int (outer slot)`,
+`Load_Idx (8)`, all with NO new VM opcodes because slot addresses are stable (3dk).
+
+**And it must REFUSE rather than resolve silently**: an up-level name that is not in this frame
+currently falls back to a module global (`Local_Slot` = -1 -> `Load_Global`), which is a silent wrong
+answer - the thing this backend exists to refuse.  So the level field from 3dq comes with the access:
+a name whose declaration level is below this frame means the link, and anything deeper refuses.
 
 ## 4. Method — what worked, and what did not
 
