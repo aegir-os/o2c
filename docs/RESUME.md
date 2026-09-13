@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         393
+    commits         394
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4049,6 +4049,34 @@ the mismatch is the whole bug, and it is the same formal-versus-slot question 3c
 and never resolved for CALL_NATIVE.
 
 The flip is out; the metric is at `Files.Old`; the ledger stands at seven, with one correction.
+
+### 3cn. A DISPROOF — the native argument convention is consistent, so look in the VM
+
+3cm's "suspect" was the argument convention for a native taking an `array of char`: `FStat (name)`
+in the library body against `Out.String (s)`, which works.  Both sites were read, and they AGREE,
+so the hypothesis is dead:
+
+    region A (the builtin's own body, Mod_Name = "Files"):
+       FDel:  Parse_Expr pushes the address - "an ARRAY OF parameter pushes its caller's address
+              and a module-level array pushes its globals address" - then Call_Native (9, 1)
+    region B (user code):
+       Files.Delete:  Addr_Global (name, slots)  --  ONE slot, the address  --  Call_Native (9, 1)
+
+One argument, the address of the name, in both.  And that is right: a whole `array of char` used as
+a VALUE pushes one word in this VM - the address - which is the same thing `Out.String` receives.
+Two paths, same convention, and `Put ("xyz")`/`Get ("Qrs")` in `litarg.ob2` pin it from the other
+side.
+
+**So the disagreement is not in the compiler, and the next place to look is the VM's own file
+natives** - `O2c_FDel`/`O2c_FStat`/`O2c_FWrite` and what they do with a FileDesc whose `name` field
+the library just filled in 64 bytes of CHARACTERS, while `size: longint` sits at offset 64.  The
+measurable question, and it is one command: does a *name* written through the library survive to
+the host filesystem under THAT name?  The earlier probe's file turned up with garbage bytes in its
+name, which is the strongest single clue in this whole hunt, and it is a clue about what the native
+reads, not about what the compiler pushed.
+
+Nothing changed in code this round: a hypothesis tested and killed, which is the outcome the method
+section asks for.  The flip is out, the metric is at `Files.Old`, and the ledger stands at seven.
 
 ## 4. Method — what worked, and what did not
 
