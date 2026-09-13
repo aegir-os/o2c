@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         429
+    commits         430
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5303,6 +5303,32 @@ check, and `Frame_Proc` when `m` was interned.
 And `Reals`, with the flip, gets past the nested id entirely and fails at `LEN of an unknown
 parameter` - the UP-LEVEL access itself, which is 3dq's static link: the next piece, now reachable
 rather than hypothetical.
+
+### 3dx. The mutex check: two measured facts that do not fit — next probe, not next guess
+
+3dw's recipe reproduces exactly (144 -> 1 with the three pieces and the two small fixes), and the one
+remaining failure was instrumented.  It printed, for `threadmutex_bad.ob2`:
+
+    TRACE intern m frame_proc= 30 next_frame= 0      --  m interned into Worker's frame, slot 0
+    TRACE mutex arg=m slot=-1 nlocals= 0             --  and the check finds neither
+
+Two facts, and they do not fit.  `m` IS a local of `Worker`, interned with `Frame_Proc = 30` and
+`Next_Frame` incremented to 1.  At `Threads.Lock (m)` inside `Worker`'s statements, `Local_Slot`
+returns -1 and `Local_Count` - which returns `Next_Frame`, not `N_Locals` - returns 0.
+
+Checked before writing any of this down: `Open_Proc` no longer resets `Next_Frame` (the patch is in),
+and the only `Next_Frame := 0` left are the startup reset and `Reserve_Proc`'s own.  The module body's
+`Begin_Body` runs after the declared procedures are closed, so it cannot be the one that reset it
+mid-body.  So the reset is somewhere reading has not found, and the next step is one more print -
+`Frame_Proc` and `Cur_Proc` at that same check, which needs them exposed for the trace.
+
+**What is settled and does not need re-deriving**: the three-piece recipe (frame/body split; the id
+carried in `Decl_Bc_Proc`; `Next_Frame` not reset at the body) plus `End_Proc` tolerating a
+declaration with no body and `Return_Void` only for a real one takes 144 failures to 1.  That is
+written down in 3dw and reproduced twice.
+
+The instrument and the recipe are reverted; the tree is green (`run_bc` PASS, `run_vm` PASS) and the
+committed state is 3dv's leak fix.
 
 ## 4. Method — what worked, and what did not
 
