@@ -5842,6 +5842,37 @@ with a six-line reproduction at /tmp/minus_repro.ob2 that will become a fixture 
 The probe is reverted (it was instrumentation) and the flip with it; tree green, `run_bc` PASS, 447
 commits.
 
+### 3eo. FIXED: an M2 fast path that never checked the literal was the whole RHS
+
+3en reduced the last barrier before `Reals` to one shape; this is the cause and the fix.
+
+The shape was sharper than the minus: **a number on the LEFT of an arithmetic operator**, in an assignment
+to an integer.  `x := 0 - x`, `0 + x`, `0 * x`, `0 div x` all failed; `b := 0 = x` and `b := 0 < x` were
+fine.  That asymmetry is the whole clue, and it pointed straight at the statement dispatcher:
+
+    if O2c_BC.Bytecode_Mode
+      and then Cur.Kind = Lex.Tok_Number      --  the RHS IS a literal
+      and then Cur.Len <= 9
+      and then Syms (Idx).UT = 0
+      and then Syms (Idx).Typ = T_Int          --  ...and the target is an INTEGER
+    then
+
+a deliberately narrow M2 fast path for `x := <short integer literal>`.  It tests that the right-hand side
+IS a literal but never that the literal is the WHOLE right-hand side - and this parser has no lookahead,
+so it cannot check: it consumed the literal, left the operator, and the dispatcher reported "M3 statement
+expected" AT THE OPERATOR.  `Typ = T_Int` is exactly why the boolean comparisons survived.
+
+**Removed rather than narrowed**, because there is no way to narrow it without lookahead, and the general
+path below already parses the literal as an expression and stores it - correct for every shape, including
+the bare `x := 41` the fast path was written for.  Measured after: the reproduction prints **-5**, the bare
+form prints **41**, `nestproc` still prints **42**, and all seven suites PASS with a new fixture
+`tests/bc/minus2.ob2` pinning the shape.
+
+The lesson is now its fourth instance: the diagnostic that worked was the one that asked the code to state
+a fact - here the offending TOKEN - rather than one that modelled it.  "M3 statement expected at line 63"
+named nothing; `kind=TOK_MINUS text='-'` named the bug, and the four-way operator test above turned it
+into a guard to read.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

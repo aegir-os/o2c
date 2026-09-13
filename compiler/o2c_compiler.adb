@@ -10022,45 +10022,19 @@ package body O2c_Compiler is
                     & ")";
                end if;
                Next;
-               --  ---- M2: the first construct through the IR ----------------
-               --  `x := <short integer literal>` with x a scalar INTEGER
-               --  variable, and bytecode mode on.  The parse builds a quad and
-               --  the LOWERING emits its bytecode, instead of the inline
-               --  Push_Int + Bc_Store.  Deliberately narrow, and every other
-               --  shape still takes the path below unchanged:
-               --    * the literal must be short, so Integer'Value cannot raise
-               --      where the inline path refuses cleanly;
-               --    * x must be a scalar INTEGER (UT = 0), so nothing about
-               --      pointers, records or real conversion is in play yet.
-               if O2c_BC.Bytecode_Mode
-                 and then Cur.Kind = Lex.Tok_Number
-                 and then Cur.Len <= 9
-                 and then Syms (Idx).UT = 0
-                 and then Syms (Idx).Typ = T_Int
-               then
-                  declare
-                     Lit  : constant String := Cur.Text (1 .. Cur.Len);
-                     Val  : constant Integer := Integer'Value (Lit);
-                     Nm   : constant String := Ada_Id (Head (1 .. H_Len));
-                     Slot : constant Integer := O2c_BC.Local_Slot (Nm);
-                     Dst  : O2c_Ir.Value_Id;
-                     C    : O2c_Ir.Value_Id;
-                  begin
-                     if Slot >= 0 then
-                        Dst := O2c_Ir.New_Local (Nm, Typ => 1);
-                     else
-                        Dst := O2c_Ir.New_Global (Nm, Typ => 1);
-                     end if;
-                     C := O2c_Ir.Const_Int (Long_Integer (Val), Typ => 1);
-                     O2c_Ir.Emit (O2c_Ir.Op_Copy, Dst => Dst, Src1 => C);
-                     O2c_Ir_Lower.Emit_Quad
-                       (O2c_Ir.Quad_At
-                          (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
-                     Append_Body ("      " & Head (1 .. H_Len) & " := "
-                                  & Lit & ";");
-                     Next;
-                  end;
-               elsif Syms (Idx).Typ = T_Char
+               --  The M2 fast path for `x := <short integer literal>` sat here.
+               --  It tested Cur.Kind = Tok_Number and the target's type, but NOT
+               --  that the literal was the WHOLE right-hand side - and this parser
+               --  has no lookahead, so it could not: it consumed the literal, left
+               --  the operator, and the statement dispatcher reported "M3
+               --  statement expected" AT THE OPERATOR.  Every module that wrote a
+               --  number on the left of an arithmetic operator hit it, which is
+               --  why Reals - whose `e := 0 - e` is exactly that shape - was the
+               --  first to reach it (3eo).  Removed rather than narrowed: the
+               --  general path below parses the literal as an expression and
+               --  stores it, which is correct for every shape including the bare
+               --  one.
+               if Syms (Idx).Typ = T_Char
                  and then Cur.Kind = Lex.Tok_String and then Cur.Len = 1
                  and then not O2c_BC.Bytecode_Mode
                then
