@@ -5759,6 +5759,31 @@ can report its own state, ask it.
 
 Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (still 0; want 42).
 
+### 3el. LANDED: nested procedures print 42.  The metric moved one step, and its next site is named
+
+**Committed as `ee527b0`** - nested procedures work, with `tests/bc/nestproc.ob2` printing 42 where it
+used to print 0, and all seven suites PASS (the fixture runs as a positive check).  The five pieces are
+in 3ec-3ek; the one that mattered most was moving the link push into `O2c_Ir_Lower.Call_Proc`, the single
+place all six front-end call sites pass through.
+
+With `Reals` flipped on as a probe, the refusal advances from the MODULE (`Reals.Convert is an FFI
+primitive and is not yet supported`) to a CONSTRUCT INSIDE IT:
+
+    o2c error: bytecode backend: LEN of an unknown parameter
+
+and that message has exactly one site, at the `LEN` emission: an ARRAY-OF parameter whose name
+`O2c_BC.Local_Slot` cannot find.  `Local_Slot` searches `Proc = Frame_Proc` - the CURRENT frame - so a
+name one level up is not found, and the `LEN` path does not use the `Up_Level_Slot` machinery that
+`Bc_Load` and `Bc_Store` now do.
+
+**So the same up-level treatment is missing in a THIRD site**, and it is the same shape as the two that
+landed: `LEN` of an open-array parameter that lives in the enclosing frame needs `Load_Local (link)`,
+`Push_Int (outer slot + 1)`, `Load_Idx`.  That is the next step, and it is the reason the metric stops
+where it does.
+
+The probe is reverted (the rule stands: `Reals` goes in only with its own evidence), tree green,
+`run_bc` PASS, 445 commits.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
