@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         403
+    commits         404
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4412,6 +4412,43 @@ native), and this body contains no id-0 call at all.  Either the operand ORDER i
 than `(argc, id)` - `agg.obc` emits `[0,2]` then `[2,0]` and runs, which is consistent with either
 reading and is why the ambiguity went unnoticed - or the failing call is in a procedure the body
 calls.  One measurement, and the tool can now print every procedure in the image.
+
+### 3cx. Narrowed to one construct, and it is the one the corpus never tests
+
+3cw left an ambiguity about CALL_NATIVE's operand order and a constraint error to explain.  Both are
+settled, and the answer is smaller than the question.
+
+**The order is `(id, argc)`, and the VM's own decode says so** (obc_vm.adb:1059-1072):
+
+    Idx   := Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;   --  u16
+    NArgs := Natural (Code (PC + 3));                                   --  u8
+
+and it validates `Idx < Native_Count and then NArgs = Native_Pops (Idx)` - so a wrong arity is
+`Bad_Native`, never a constraint error.  The table agrees with the emission: `0 => 2, 1 => 1, 2 => 0,
+3 => 2, 4 => 1`, i.e. `Out.Int` 2, `Out.String` 1, `Out.Ln` 0.  The ambiguity that misled 3cw came
+from reading `agg.obc`'s `[0,2]`/`[2,0]` as (id, argc) when it is (argc, id) - a reminder that a
+two-element operand pair is only unambiguous once the decoder is checked against the interpreter.
+
+**Then three probes, and they cut the problem down to one construct:**
+
+    Out.String ("ABC")            ->  ABC      (a literal: Resolve_Str, the 3cg path)
+    Out.String (a)                ->  ABC      (a module-level array)
+    Out.Ln                        ->  fine      (so the failure is not the Ln that follows)
+    Out.String (fp^.name)         ->  CONSTRAINT_ERROR at obc_vm.adb:2067
+
+and the corpus prints arrays in `arrparam.ob2`, `charout.ob2`, `inlinearr.ob2` and `strconst.ob2`,
+all passing - through a parameter, a local, and a global.  **No fixture anywhere prints an
+array-valued FIELD**, which is why this survived: the construct is untested, and the disassembly of
+its body looks right (one address pushed, `CALL_NATIVE [1, 1]`), which is why it survived a reading
+too.
+
+**So the remaining question is one line of runtime evidence away**, and it should be obtained by
+instrument rather than by reading: a temporary trace in `Call_Native` printing `Idx`, `NArgs` and
+`Args (0)` when the `when 0` arm is entered - the raise locates at 2067, in `Out.Int`'s two-argument
+arm (`Args (1)`), while this body contains no `Out.Int` call at all.  Either the failing call is in a
+procedure the body calls and the tool has not been pointed at, or the raise's line is being read
+against the wrong arm; a printed `Idx` settles both in one run, and `tools/bc_disasm.py IMAGE 1 2 3
+...` can now print every procedure in the image to say which.
 
 ## 4. Method — what worked, and what did not
 
