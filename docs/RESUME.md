@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         387
+    commits         388
     fixtures        87 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3819,6 +3819,47 @@ next library is Texts - and `Scoped => True` for it is the same one-line change,
 whatever its bodies need.  The corpus grew to 87 fixtures with `strlib.ob2` and `litarg.ob2`, and
 `bytecode_gaps.sh` lost its `Strings.Length` entry in the same commit, which is the rule it
 exists to enforce: "an entry that stops applying FAILS".
+
+### 3ch. Texts — the lever moved again, and stopped on the ABI's OWN COUNT
+
+`Compile_Builtin (Oak_Texts_Src, Scoped => True)`, one more flag:
+
+    hello.ob2 refuses at   bytecode backend: Files.Old is not yet supported
+
+past the WHOLE Texts module this time.  But a probe that USES Texts fails verification -
+
+    Texts.OpenWriter (w); Texts.WriteString (w, "hi "); Texts.WriteInt (w, 42, 0); ...
+
+    vm: operand-stack depth violation at code offset 1540: depth -1, limit 20, opcode 192
+
+- and `192` is `Call`, the *causing* instruction.  So the flip is reverted again (metric back at
+`Texts.OpenWriter`), and this time the cause is not a missing emission: it is a COUNT.
+
+**What the VM's own code says.**  An `ARRAY OF` formal occupies TWO stack slots - the address and
+the length that travels with it - while `NParams` counts it as ONE.  And:
+
+    interpreter  when Op_Call:  if SP < Img.Procs (Callee).NParams then return Bad_Stack;
+                                Push_Frame (Callee, PC + 5)
+    verifier     when Op_Call:  Depth := Depth - NParams + NResults
+
+`Push_Frame` moves the callee's SLOTS - which is why every open-array call has worked at runtime
+all along - while the interpreter's *guard* and the verifier's *model* both use the FORMAL count.
+So the drift is one per open-array formal, in the models only.
+
+**Why the corpus never saw it.**  `Depth_Ok` is a BOUNDS check (`0 <= depth <= stack_max`), so a
+drift of one is invisible until it crosses zero or the limit - and no fixture calls a procedure
+with more than one open formal from a position deep enough for that.  `Texts.WriteString (var w;
+s: array of char)` is exactly such a call, and multiple `Write*` calls in one body accumulate.
+
+**And the fix has a shape, not a guess**: the procedure record needs the PARAMETER SLOT count
+(the emitter knows it; `Push_Frame` already behaves as if it existed), and the verifier's CALL arm
+and the interpreter's guard should both use it instead of `NParams`.  That is a record-format
+change rather than an appended opcode, which is why it is the next session's work and not this
+one's - and `Texts.WriteString`'s call, above, is its reproducer.
+
+**A correction to the last four entries' framing**: the "depth -1" family was read as several
+distinct causes, and two of them were real and fixed (3ce's missing length, 3cb's missing call).
+What remains after those is THIS ONE: a model that counts formals where the machine moves slots.
 
 ## 4. Method — what worked, and what did not
 
