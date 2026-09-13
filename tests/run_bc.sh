@@ -248,4 +248,13 @@ if [ "$fails" -gt 0 ]; then
    echo "run_bc: FAIL ($fails)" >&2
    exit 1
 fi
+#  The IR builders are self-checking: M1a's evidence ("nothing moved") is
+#  the right evidence for a seam and not enough for a builder.
+if [ -x "$ROOT/tools/bin/o2c_ir_selftest" ]; then
+   if ! "$ROOT/tools/bin/o2c_ir_selftest"; then
+      echo "run_bc: FAIL: the IR self-test failed"
+      exit 1
+   fi
+fi
+
 echo "run_bc: PASS"

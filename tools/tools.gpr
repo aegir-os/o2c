@@ -14,7 +14,8 @@ project Tools is
    --  coverage check drives.  Only the bytecode front end needs ../vm; all
    --  three link the same compiler core, so they live together rather than in
    --  projects of their own.
-   for Main use ("o2c_bc_host.adb", "o2c_ada_host.adb", "o2c_tokscan.adb");
+   for Main use ("o2c_bc_host.adb", "o2c_ada_host.adb", "o2c_tokscan.adb",
+                 "o2c_ir_selftest.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

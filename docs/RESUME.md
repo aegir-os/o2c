@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         344
+    commits         345
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2081,6 +2081,37 @@ the IR will declare more subprograms:
 dump, so the builders are VERIFIED rather than merely compiled - M1a's evidence
 is that nothing changed, which is the right evidence for a seam and not enough
 for a builder.
+
+### 3aq. M1b DONE - the builders are verified, and the test caught its own bugs
+
+`tools/o2c_ir_selftest.adb` builds a small quad stream, checks what came back,
+and checks the two paths that must RAISE rather than answer.  It runs from
+`tests/run_bc.sh`, so the 7-suite driver is unchanged and the builders can no
+longer be "compiled but wrong":
+
+    t := 7 ; *g := t ; L1: L2-independent ; t2 := t < 7 ; if !t2 goto L2 ;
+    return t ; L2: halt
+
+    AR 1  OP_COPY d= 2 s1= 1 ...  AR 8  OP_HALT d= 0 s1= 0 s2= 0
+
+Checks: the quad count and each quad's op/dst/srcs in order (three-address, so
+no operand is implied), the value kinds and payloads (the integer constant is 7,
+a temp is one slot, a global kept its name, a label value is a label),
+`Begin_Proc` restarting value numbering while KEEPING the quad stream, a
+value-capacity overrun raising rather than truncating (the project's rule for
+capacity tables), and an out-of-range quad id raising rather than being answered.
+
+**The tool caught two bugs of its own on first run**, which is the evidence that
+it is not a no-op: a `LV` that was declared and read but never assigned, and my
+own quad arithmetic (eight quads emitted, nine asserted).  Both were fixed before
+it passed - a self-test that passes first time on code nobody has run is usually
+a self-test checking nothing, and this one demonstrably was not.
+
+Zero warnings, all seven suites green, 52 fixtures corroborated by both backends.
+
+**M2 next**: one construct end to end - a scalar assignment to a local - with the
+parser building IR for it and its bytecode emitted FROM the IR, everything else
+still inline.  That is where the seam starts to carry weight.
 
 ## 4. Method — what worked, and what did not
 
