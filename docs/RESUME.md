@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         368
+    commits         369
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2827,6 +2827,62 @@ stage moves no construct, it moves WHERE the convention lives).
 trio, which waits on the AND/OR opcodes rather than on IR work; and
 `Push_BC_Proc`/`Call_Indirect` — procedure values are a call form, so they are the
 same convention from the other end.
+
+### 3bo. DONE — the indexed access goes through the IR, and 72 of 72 images are identical
+
+M3's target is the designator chain, and its smallest leaf is the indexed SCALAR
+element — the last designator shape with no IR op on its STORE side:
+
+    3 load sites, each a byte/word branch      O2c_BC.Bin (Load_Idx_B / _I)
+    2 store sites, each a byte/word branch     O2c_BC.Bin (Store_Idx_B / _I)
+
+`Op_Store_Idx` is appended (the enum's rule, and the case has no `others` arm so
+every consumer had to decide about it).  The pair is deliberately NOT
+`Op_Load`/`Op_Store`: those take an ADDRESS ("d := *s1"), while the emitter's
+indexed ops take a base and an index it SCALES by `Imm_1` — the one fact the front
+end has and the lowering must not have to re-derive.  `Load_Idx`/`Store_Idx
+(Elem_Bytes)` are one-line helpers in the pattern `Call_Native`/`Call_Proc` set:
+they no-op outside bytecode mode, emit the quad and lower it, so a site stays one
+line.
+
+**The size choice is a MAPPING, in one place, because a count cannot test it.**
+`Load_Idx_B` and `Load_Idx_I` are ONE instruction each — the problem 3bg found with
+`Add`/`Radd` — so `Bc_Load_Idx`/`Bc_Store_Idx` map 1 -> `_B` and 8 -> `_I` and
+RAISE on any other size rather than guessing at a scale the emitter lacks.  The
+self-test checks the TABLE, not a count (44 -> 48 checks), and the four-byte
+refusal that was already in the test now exercises the new function.
+
+`Op_Load_Idx` also gained the optional `Dst` that `Op_Call` has: a subscript INSIDE
+an expression leaves its element on the operand stack, while the print loop's
+`Dst => Lt` still stores.  Both boundaries are in the test.
+
+**Evidence, and this time it is total**: every fixture with a golden compiles
+byte-identically against a front end built from `HEAD` in a worktree —
+
+    72 of 72 IDENTICAL, 0 differing, 0 refused by the old binary
+
+which is the M4b-M4e class of proof, and it covers the CHAR-array and record
+fixtures that share these paths (`arr`, `nestedarr`, `arrparam`, `openarr`,
+`recarr`, `strch`, `gcloop`, `longfield`, ...).  Verified: gate27, all seven suites
+green, zero warnings.
+
+**What is left of M3, measured AFTER this change** (raw emissions still in the
+parser):
+
+    Load_Fld* / Store_Fld*   13   record fields — the same shape as this pair, but
+                                  the choice is a THREE-way class (I / P / R)
+                                  rather than a size, so it needs
+                                  Emit_Fld (Kind, Off) and a table like Bc_Op's
+    Load_Addr_G  17, Global_Array 12, Global 11
+                                  the base derivation itself: Push_Base already
+                                  owns the arithmetic (M3a), so these are its
+                                  call sites plus the interning calls
+    Load_Local   15               a local's slot, inline
+    Bin          42               arithmetic: IR-able through Op_Add/... once the
+                                  front end has an expression to build
+
+So **the field family is next** — mechanical, the same helper-plus-table pattern,
+with `rec`, `recmix`, `recreal`, `recarr`, `ptrfield` and `longfield` as the net.
 
 ## 4. Method — what worked, and what did not
 

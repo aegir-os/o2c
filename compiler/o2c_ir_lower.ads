@@ -40,6 +40,21 @@ package O2c_Ir_Lower is
    --  instruction COUNT cannot tell Add from Radd, but this mapping can.
    function Bc_Op (Op : O2c_Ir.Op; C : O2c_Ir.Type_Class) return O2c_Bc.Op;
 
+   --  The ELEMENT SIZE choice for an indexed access, in one place and testable
+   --  for the same reason Bc_Op is: Load_Idx_B and Load_Idx_I are each ONE
+   --  instruction, so an instruction count cannot tell them apart and only the
+   --  mapping can.  A size the emitter has no op for raises here rather than
+   --  being guessed at.
+   function Bc_Load_Idx (Elem_Bytes : Natural) return O2c_Bc.Op;
+   function Bc_Store_Idx (Elem_Bytes : Natural) return O2c_Bc.Op;
+
+   --  One indexed element access, the whole site in one line: the designator
+   --  chain has ALREADY pushed the base and the index - and, for a store, the
+   --  value as well - so these DECLARE the size and emit the op, like Op_Arg
+   --  declaring an argument it does not push.  A no-op outside bytecode mode.
+   procedure Load_Idx (Elem_Bytes : Natural);
+   procedure Store_Idx (Elem_Bytes : Natural);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.

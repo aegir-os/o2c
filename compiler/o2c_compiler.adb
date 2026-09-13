@@ -3571,11 +3571,10 @@ package body O2c_Compiler is
                                     if D.K = D_Index then
                                        --  [base, index]: load the element.
                                        R.Typ := D.Sc;
-                                       if D.Sc = T_Char or else D.Sc = T_Bool then
-                                          O2c_BC.Bin (O2c_BC.Load_Idx_B);
-                                       else
-                                          O2c_BC.Bin (O2c_BC.Load_Idx_I);
-                                       end if;
+                                       O2c_Ir_Lower.Load_Idx
+                                         ((if D.Sc = T_Char
+                                           or else D.Sc = T_Bool then 1
+                                           else 8));
                                     elsif D.K = D_Field then
                                        --  [record]: the field at a known offset.
                                        R.Typ := D.Sc;
@@ -4152,11 +4151,9 @@ package body O2c_Compiler is
                      if D.K = D_Index then
                         --  [base, index]: load the element.
                         R.Typ := D.Sc;
-                        if D.Sc = T_Char or else D.Sc = T_Bool then
-                           O2c_BC.Bin (O2c_BC.Load_Idx_B);
-                        else
-                           O2c_BC.Bin (O2c_BC.Load_Idx_I);
-                        end if;
+                        O2c_Ir_Lower.Load_Idx
+                          ((if D.Sc = T_Char or else D.Sc = T_Bool then 1
+                            else 8));
                      elsif D.K = D_Field then
                         --  [record]: the field at a known offset.
                         R.Typ := D.Sc;
@@ -4264,11 +4261,8 @@ package body O2c_Compiler is
                            O2c_BC.Mark (L_Ok);
                            --  An open array's element type comes from the
                            --  parameter, not from a designator.
-                           if Syms (Id).Typ = T_Char then
-                              O2c_BC.Bin (O2c_BC.Load_Idx_B);
-                           else
-                              O2c_BC.Bin (O2c_BC.Load_Idx_I);
-                           end if;
+                           O2c_Ir_Lower.Load_Idx
+                             ((if Syms (Id).Typ = T_Char then 1 else 8));
                         end;
                      end if;
                      R.Text := (if Syms (Id).Typ = T_Char
@@ -8139,11 +8133,10 @@ package body O2c_Compiler is
                                  declare
                                     V : Expr_Rec := Parse_Expr;
                                  begin
-                                    if D.Sc = T_Char or else D.Sc = T_Bool then
-                                       O2c_BC.Bin (O2c_BC.Store_Idx_B);
-                                    else
-                                       O2c_BC.Bin (O2c_BC.Store_Idx_I);
-                                    end if;
+                                    O2c_Ir_Lower.Store_Idx
+                                      ((if D.Sc = T_Char
+                                        or else D.Sc = T_Bool then 1
+                                        else 8));
                                  end;
                               elsif D.K = D_Field then
                                  --  [record]: evaluate the value, store it in the field.
@@ -8444,11 +8437,9 @@ package body O2c_Compiler is
                            declare
                               V : Expr_Rec := Parse_Expr;
                            begin
-                              if D.Sc = T_Char or else D.Sc = T_Bool then
-                                 O2c_BC.Bin (O2c_BC.Store_Idx_B);
-                              else
-                                 O2c_BC.Bin (O2c_BC.Store_Idx_I);
-                              end if;
+                              O2c_Ir_Lower.Store_Idx
+                                ((if D.Sc = T_Char or else D.Sc = T_Bool then 1
+                                  else 8));
                            end;
                         elsif D.K = D_Field then
                            --  [record]: evaluate the value, store it in the field.

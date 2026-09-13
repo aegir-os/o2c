@@ -113,7 +113,16 @@ package O2c_Ir is
                Op_Load_Local,                --  d := local slot Imm_1
                Op_Store_Local,               --  local slot Imm_1 := s1
                Op_Load_Idx,                  --  d := *(s1 + s2 * Imm_1) bytes
-               Op_Discard);                  --  drop the top of the stack
+               Op_Discard,                   --  drop the top of the stack
+               --  The STORE half of the indexed pair, appended rather than
+               --  inserted (the rule for every member here).  It is its own op
+               --  because the indexed access is not `Op_Load`/`Op_Store`: those
+               --  take an ADDRESS ("d := *s1"), while the emitter's indexed ops
+               --  take a base and an index that it SCALES by Imm_1 - which is
+               --  the one thing the front end knows and the lowering must not
+               --  have to re-derive.  The value comes off the stack, as it does
+               --  for the emitter's own STORE_IDX_*, so there is no Src.
+               Op_Store_Idx);                --  *(s1 + s2 * Imm_1) := value
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

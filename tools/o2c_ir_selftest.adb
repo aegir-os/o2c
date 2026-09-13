@@ -316,6 +316,39 @@ begin
          end;
          Check (Raised2, "an indexed load of four bytes raises");
 
+         --  The SIZE -> opcode choice is a MAPPING, not a count: Load_Idx_B and
+         --  Load_Idx_I are one instruction each, so a count cannot tell them
+         --  apart and only the table can.  (3bg settled Add/Radd the same way.)
+         Check (O2c_Ir_Lower.Bc_Load_Idx (1) = O2c_BC.Load_Idx_B
+                and then O2c_Ir_Lower.Bc_Load_Idx (8) = O2c_BC.Load_Idx_I,
+                "a byte element loads with Load_Idx_B, a word with Load_Idx_I");
+         Check (O2c_Ir_Lower.Bc_Store_Idx (1) = O2c_BC.Store_Idx_B
+                and then O2c_Ir_Lower.Bc_Store_Idx (8) = O2c_BC.Store_Idx_I,
+                "a byte element stores with Store_Idx_B, a word with Store_Idx_I");
+
+         --  A WORD element load with NO Dst: the element IS the result and the
+         --  surrounding expression consumes it from the operand stack, which is
+         --  the shape every expression-site subscript has - so the quad adds no
+         --  store.
+         O2c_BC.Push_Int (0);
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Load_Idx, Imm_1 => 8, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "a word element load with no Dst is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         --  And the store half: [base, index, value] are on the stack, and the
+         --  store itself is one instruction.
+         O2c_BC.Push_Int (0);
+         O2c_BC.Push_Int (1);
+         O2c_BC.Push_Int (7);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Store_Idx, Imm_1 => 8, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "an indexed word store is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
          O2c_BC.Push_Int (1);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));

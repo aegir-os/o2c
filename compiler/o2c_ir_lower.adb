@@ -63,6 +63,50 @@ package body O2c_Ir_Lower is
       end case;
    end Bc_Op;
 
+   function Bc_Load_Idx (Elem_Bytes : Natural) return O2c_Bc.Op is
+   begin
+      if Elem_Bytes = 1 then
+         return O2c_Bc.Load_Idx_B;
+      elsif Elem_Bytes = 8 then
+         return O2c_Bc.Load_Idx_I;
+      else
+         raise Program_Error with
+           "O2c_Ir_Lower: no indexed load of" & Elem_Bytes'Image & " bytes";
+      end if;
+   end Bc_Load_Idx;
+
+   function Bc_Store_Idx (Elem_Bytes : Natural) return O2c_Bc.Op is
+   begin
+      if Elem_Bytes = 1 then
+         return O2c_Bc.Store_Idx_B;
+      elsif Elem_Bytes = 8 then
+         return O2c_Bc.Store_Idx_I;
+      else
+         raise Program_Error with
+           "O2c_Ir_Lower: no indexed store of" & Elem_Bytes'Image & " bytes";
+      end if;
+   end Bc_Store_Idx;
+
+   procedure Load_Idx (Elem_Bytes : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Load_Idx, Imm_1 => Elem_Bytes);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Load_Idx;
+
+   procedure Store_Idx (Elem_Bytes : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Store_Idx, Imm_1 => Elem_Bytes);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Store_Idx;
+
    procedure Call_Native (Id : Natural; Arity : Natural) is
       First : Natural;
    begin
@@ -276,16 +320,25 @@ package body O2c_Ir_Lower is
             --  this arm breaking it: a STORE materialises its source (Op_Copy
             --  pushes), a designator-shaped op takes its operands from the
             --  stack.
-            if Q.Imm_1 = 1 then
-               --  Load_Idx_B is an op value, not a procedure: the emitter's
-               --  Bin takes it, and [base, index] come off the stack.
-               O2c_BC.Bin (O2c_BC.Load_Idx_B);
-            else
-               raise Program_Error with
-                 "O2c_Ir_Lower: no indexed load of " & Q.Imm_1'Image
-                 & " bytes";
+            --  The SIZE -> opcode choice is Bc_Load_Idx's, not this arm's, so
+            --  it can be tested directly: Load_Idx_B and Load_Idx_I are one
+            --  instruction each, and a count cannot tell them apart.
+            O2c_BC.Bin (Bc_Load_Idx (Q.Imm_1));
+            --  A Dst only when the caller wants the element somewhere other
+            --  than the operand stack.  A subscript INSIDE AN EXPRESSION leaves
+            --  it there, exactly as the hand-written sites did, and a temp's
+            --  home is the stack, so naming one adds no instruction either.
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
             end if;
-            Store_Value (Q.Dst);
+
+         when Op_Store_Idx =>
+            --  The store half of the same pair.  [base, index, value] are
+            --  ALREADY on the stack: the designator chain pushed the first two
+            --  and the front end the value, because a store's value is parsed
+            --  after its designator.  So nothing is pushed here, and there is no
+            --  Dst to store - the store CONSUMES the value.
+            O2c_BC.Bin (Bc_Store_Idx (Q.Imm_1));
 
          when Op_Discard =>
             O2c_BC.Discard;
