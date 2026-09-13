@@ -8,10 +8,37 @@ package body O2c_Ir_Lower is
    N_Lowered : Natural := 0;
    N_Args    : Natural := 0;   --  Op_Arg run since the last call
 
+   Max_Ir_Labels : constant := 4096;
+   Label_Map : array (1 .. Max_Ir_Labels) of Natural := (others => 0);
+
    function Lowered return Natural is
    begin
       return N_Lowered;
    end Lowered;
+
+   procedure Reserve_Label (Ir_Label : O2c_Ir.Label_Id; Bc_Label : Natural) is
+   begin
+      if Natural (Ir_Label) = 0 or else Natural (Ir_Label) > Max_Ir_Labels then
+         raise Program_Error with "O2c_Ir_Lower: no such IR label";
+      end if;
+      Label_Map (Natural (Ir_Label)) := Bc_Label;
+   end Reserve_Label;
+
+   function Bc_Label_Of (V : Value_Id) return Natural is
+      I : constant Value_Info := Value_At (V);
+   begin
+      if I.Kind /= V_Label then
+         raise Program_Error with
+           "O2c_Ir_Lower: a jump needs a label value";
+      end if;
+      if Natural (I.Int) = 0 or else Natural (I.Int) > Max_Ir_Labels
+        or else Label_Map (Natural (I.Int)) = 0
+      then
+         raise Program_Error with
+           "O2c_Ir_Lower: label was never reserved with the emitter";
+      end if;
+      return Label_Map (Natural (I.Int));
+   end Bc_Label_Of;
 
    function Local_Slot_Of (V : Value_Id) return Integer is
    begin
@@ -133,11 +160,26 @@ package body O2c_Ir_Lower is
             N_Args := 0;
             O2c_BC.Native_Call (Q.Imm_1, Q.Imm_2);
 
+         when Op_Label =>
+            O2c_BC.Mark (Bc_Label_Of (Q.Dst));
+
+         when Op_Jump =>
+            O2c_BC.Jump (O2c_BC.Jmp, Bc_Label_Of (Q.Src1));
+
+         when Op_Jump_False =>
+            --  Jz, not Jnz: the VM's Jnz jumps when the top is NOT zero, so
+            --  "jump when false" is the zero case.  Getting this backwards
+            --  produces a program that runs and is wrong, which is why the
+            --  polarity is settled from the VM's opcode table rather than from
+            --  the name.  The condition is already on the stack - Op_Arg's rule
+            --  applies to it too: these ops DECLARE their operands.
+            O2c_BC.Jump (O2c_BC.Jz, Bc_Label_Of (Q.Src1));
+
          when Op_Add | Op_Sub | Op_Mul | Op_Div | Op_Mod
             | Op_Neg | Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge
             | Op_Not | Op_And | Op_Or | Op_Load | Op_Store
-            | Op_Addr_Local | Op_Addr_Global | Op_Label | Op_Jump
-            | Op_Jump_False | Op_Call | Op_Return | Op_Halt =>
+            | Op_Addr_Local | Op_Addr_Global | Op_Call | Op_Return
+            | Op_Halt =>
             --  Each arrives with the construct that needs it, and until then
             --  says so loudly and says WHICH op - the next stage reads this
             --  message rather than guessing where to start.

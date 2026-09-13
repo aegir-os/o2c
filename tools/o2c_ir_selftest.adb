@@ -189,6 +189,55 @@ begin
       end;
       Check (Raised2, "an argument pushed at a no-argument native raises");
 
+      --  ---- control flow: a label, a jump, a conditional jump ------------
+      --  The emitter's label namespace belongs to the CALLER (the compiler has
+      --  its own counter and the emitter has no allocator), so the test reserves
+      --  the mapping itself - that IS the contract.
+      declare
+         L1, L2 : O2c_Ir.Label_Id;
+         V1, V2 : Value_Id;
+      begin
+         L1 := O2c_Ir.New_Label;
+         L2 := O2c_Ir.New_Label;
+         V1 := O2c_Ir.Label_Value (L1);
+         V2 := O2c_Ir.Label_Value (L2);
+         O2c_Ir_Lower.Reserve_Label (L1, 101);
+         O2c_Ir_Lower.Reserve_Label (L2, 102);
+
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Label, Dst => V1, others => <>));
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad ((Op => Op_Jump, Src1 => V2, others => <>));
+         Check (O2c_BC.Insns = Before + 1, "a jump is one instruction");
+
+         --  The CONDITION is the caller's push, like Op_Arg's argument: these
+         --  ops declare their operands rather than emitting them.  The
+         --  emitter's own depth check is what enforces that - it refused with
+         --  "operand-stack underflow" until this push was added, which is a
+         --  loud failure rather than a silent wrong jump.
+         Before := O2c_BC.Insns;
+         O2c_BC.Push_Int (1);
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Jump_False, Src1 => V2, others => <>));
+         Check (O2c_BC.Insns = Before + 2,
+                "a pushed condition and a conditional jump are two instructions");
+
+         --  an unreserved label is refused, rather than jumping somewhere
+         Raised2 := False;
+         declare
+            L3 : constant O2c_Ir.Label_Id := O2c_Ir.New_Label;
+         begin
+            begin
+               O2c_Ir_Lower.Emit_Quad
+                 ((Op => Op_Jump, Src1 => O2c_Ir.Label_Value (L3),
+                   others => <>));
+            exception
+               when Program_Error =>
+                  Raised2 := True;
+            end;
+         end;
+         Check (Raised2, "a jump to an unreserved label raises");
+      end;
+
       O2c_BC.End_Proc;
       O2c_BC.Finish;
    end;

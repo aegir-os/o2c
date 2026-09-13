@@ -25,6 +25,16 @@ package O2c_Ir_Lower is
                         Nested : Natural;
                         Base_Name : String);
 
+   --  Map an IR label onto the EMITTER's label namespace.
+   --
+   --  The compiler allocates emitter labels with its own counter, and the emitter
+   --  has only Mark and Jump - no allocator - so label ids are a compiler-side
+   --  namespace.  Using an IR id directly would collide with the labels the
+   --  parser already allocated, and a colliding jump target is a silent wrong
+   --  answer, not a refusal.  So the front end, which owns the counter, hands the
+   --  pair over here before any quad naming that label is lowered.
+   procedure Reserve_Label (Ir_Label : O2c_Ir.Label_Id; Bc_Label : Natural);
+
    --  Emit the bytecode for one quad.  Called INSIDE an open emitter procedure
    --  (O2c_BC.Proc_Open must hold), because that is what the emitter's stores
    --  and loads address.
