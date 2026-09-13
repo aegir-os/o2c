@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         349
+    commits         350
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2270,6 +2270,35 @@ deciding what a call site is, and that decision is exactly what the IR's `Op_Arg
 `Parse_Actual` is already the right shape (one home, six callers), so the argument
 convention needs consolidating INTO it rather than extracting from scratch - the
 cheapest piece of the whole area, and the first thing to look at when step 1 starts.
+
+### 3av. M3b step 1 - the duplication CONFIRMED, and the region count is the gap
+
+3au claimed the same intrinsic families are dispatched twice.  Confirmed with an
+instance rather than left as inference:
+
+    Native_Call (9, 1)     Files.Delete
+      at 7409
+      at 7767              <- the same call, the same arguments, two sites
+
+So the claim holds.  What 3au got wrong is the SHAPE of it: the ids at 7409, 7443,
+7706, 7739, 7767, 7797, 7832 and 7878 all sit BELOW the `Out` check at 9029, so
+those two `Out`-keyed regions are not the pair - there appear to be at least THREE
+places that dispatch module members:
+
+    the factor / expression path        (~3150-3800, where Files FRead/FWrite/FClose
+                                         live at the ids I added in 3l)
+    a statement region                  (~7400-7900)
+    the `Out`-headed statement dispatch (~9029-9220)
+
+**Which is why the next step is the MAP and not an extraction.**  Consolidating the
+pair I *thought* was the pair would extract the wrong thing, and this session has
+already shown what that costs: 3ak patched a branch three times because the branch
+that mattered was elsewhere.  Three short reads - the head of each region, to see
+what keys it and what it emits - turn that into a known set, and then step 1 (the
+`Out` family) is a pair with names rather than a guess.
+
+Nothing landed in code this round, and that is the deliberate part: the evidence
+said the target had moved.
 
 ## 4. Method — what worked, and what did not
 
