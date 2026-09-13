@@ -9292,7 +9292,21 @@ package body O2c_Compiler is
                            if not Had_Width then
                               O2c_BC.Push_Int (0);
                            end if;
-                           O2c_BC.Native_Call (3, 2);
+                           --  M4e: REAL and LONGREAL share this native and therefore this
+                           --  route - they differ only in the Ada formatting.  Two
+                           --  arguments, both already pushed above (the default width
+                           --  and the value); Op_Arg declares them.
+                           if O2c_BC.Bytecode_Mode then
+                              O2c_Ir.Emit (O2c_Ir.Op_Arg);
+                              O2c_Ir.Emit (O2c_Ir.Op_Arg);
+                              O2c_Ir.Emit (O2c_Ir.Op_Call_Native, Imm_1 => 3, Imm_2 => 2);
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count - 2)));
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count - 1)));
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                           end if;
                         elsif Member = "Char" then
                            --  The factor already pushed the character's
                            --  code and the native takes one argument, so
