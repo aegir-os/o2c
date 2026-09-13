@@ -90,6 +90,22 @@ for fcase in 'zero|by 0|must not be zero' \
       bad "$fl: FOR $fby failed for the wrong reason: $(cat "$WORK/fb.log")"
    fi
 done
+
+#  ---- a name more than one level up must be REFUSED, never silently global ----
+#  A nested procedure reaches its ENCLOSING frame through the static link.  A name
+#  TWO levels up has no link to travel - the emitter knows one enclosing frame - and
+#  it used to fall back to a module global: a fresh, zeroed variable, which is a
+#  wrong answer rather than a refusal.  Deep is written so C's read of A's x is
+#  exactly that case.
+printf 'module Deep;\nvar g: integer;\nprocedure A;\nvar x: integer;\n  procedure B;\n    procedure C;\n    begin\n      g := x\n    end C;\n  begin\n    C\n  end B;\nbegin\n  B\nend A;\nbegin\n  A\nend Deep.\n' > "$WORK/deep.ob2"
+if timeout 120 "$FRONT" "$WORK/deep.ob2" "$WORK/deep.obc" >"$WORK/deep.log" 2>&1
+then
+   bad "deep: a name two levels up compiled instead of being refused"
+elif grep -aq 'more than one level up' "$WORK/deep.log"; then
+   note "negative: a name two levels up refused (more than one level up)"
+else
+   bad "deep: refused for the wrong reason: $(cat "$WORK/deep.log")"
+fi
 #  The VM must report exhaustion rather than corrupt itself.  Before the
 #  collector was fixed it freed the live list and returned a wrong answer,
 #  which is indistinguishable from success without this check.

@@ -5928,6 +5928,35 @@ an exported record-typed variable whose type is not exported.
 
 Committed state, tree green, run_bc PASS, 450 commits.
 
+### 3er. The last silent wrong answer in the nested-procedure feature is now a refusal
+
+`Up_Level_Slot` searches exactly one frame - `Saved_Frame_Proc`, the single enclosing frame the static link
+reaches.  A name that is TWO levels up was therefore not found, and not found meant it fell through to a
+module global of the same name: a fresh, zeroed variable.  That is precisely the silent wrong answer this
+stretch opened with (3ec: `nestproc` printing 0), surviving one level higher - and nothing covered it.
+
+**Detecting it soundly needs the scope chain, which the emitter did not keep.**  `Reserve_Proc` saves only
+one enclosing frame, so a grandparent is not visible through that variable - but it IS visible through the
+record: every procedure now records the procedure that encloses it,
+
+    Parent : Natural := 0;    --  the enclosing procedure, 0 at module level
+
+set at reserve from `Saved_Frame_Proc`, which at that moment IS the enclosing procedure.  So the chain is
+recoverable: start at `Frame_Proc`, step past the ONE enclosing frame the link covers, then walk parents -
+and if the name is in any of them, it is more than one level up and the callers refuse.
+
+Both fall-through sites now do (`Bc_Load` and `Bc_Store`; the LEN and indexed-base sites already raised):
+
+    o2c error: bytecode backend: 'x' is more than one level up, which is not supported yet
+
+**Measured both ways**: one level up still prints **42** (`nestproc`), two levels up is refused by name, and
+the gate is 7/7 PASS with a new negative check in `run_bc.sh` that generates the three-level module and
+asserts the refusal ('negative: a name two levels up refused').
+
+*Implementing* deeper access is separate, and now well-defined: the link of the enclosing frame is itself
+in the enclosing frame, so a two-level access is `Load_Local (link)`, index the PARENT's link slot,
+`Load_Idx`, then the final index - a link walk.  Not done here; refused by name until it is.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

@@ -223,6 +223,11 @@ package O2c_BC is
    procedure Set_Link_Slot (Slot : Natural);
    function Link_Slot return Integer;
    function Up_Level_Slot (Ada_Name : String) return Integer;
+   --  True when the name belongs to a frame MORE than one level up - higher than
+   --  the single enclosing frame the link reaches.  Such a name used to fall back
+   --  to a module global: a fresh, zeroed variable, which is a wrong answer rather
+   --  than a refusal.  Callers refuse instead.
+   function Too_Deep_Up_Level (Ada_Name : String) return Boolean;
    procedure Open_Proc (Id : Natural);
    procedure End_Proc;
    --  Open the module body.  Called when the statement part begins, after

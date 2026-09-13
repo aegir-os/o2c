@@ -360,6 +360,13 @@ package body O2c_Compiler is
                O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
                O2c_Ir_Lower.Push_Int (Up);
                O2c_Ir_Lower.Load_Idx (Size);
+            elsif O2c_BC.Too_Deep_Up_Level (Ada_Name) then
+               --  Higher than the one enclosing frame the static link reaches.
+               --  Refusing beats reading a module global of the same name, which
+               --  is a fresh zeroed variable - the silent wrong answer of 3ec.
+               raise O2c_BC.Wrong_Construct with "bytecode backend: '"
+                 & Ada_Name & "' is more than one level up, which is not "
+                 & "supported yet";
             else
                O2c_Ir_Lower.Load_Global (Ada_Name);
             end if;
@@ -374,6 +381,9 @@ package body O2c_Compiler is
       --  the IR expresses as a source that IS the operand stack.
       if S >= 0 then
          O2c_Ir_Lower.Store_Local (Natural (S));
+      elsif O2c_BC.Too_Deep_Up_Level (Ada_Name) then
+         raise O2c_BC.Wrong_Construct with "bytecode backend: '"
+           & Ada_Name & "' is more than one level up, which is not supported yet";
       else
          O2c_Ir_Lower.Store_Global (Ada_Name);
       end if;

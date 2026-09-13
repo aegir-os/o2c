@@ -76,6 +76,7 @@ package body O2c_BC is
       NParams     : Natural := 0;
       NResults    : Natural := 0;
       Nested      : Boolean := False;
+      Parent      : Natural := 0;    --  the enclosing procedure, 0 at module level
    end record;
 
    Procs        : array (1 .. Max_Procs) of Proc_Entry;
@@ -708,7 +709,8 @@ package body O2c_BC is
                      Frame_Slots => 0,
                      NParams     => NParams,
                      NResults    => NResults,
-                     Nested      => Nested);
+                     Nested      => Nested,
+                     Parent      => Saved_Frame_Proc);
       return Id;
    end Reserve_Proc;
 
@@ -816,6 +818,45 @@ package body O2c_BC is
       end loop;
       return -1;
    end Up_Level_Slot;
+
+   function Frame_Has (P : Natural; Ada_Name : String) return Boolean is
+   begin
+      if P = 0 then
+         return False;
+      end if;
+      for I in 1 .. N_Locals loop
+         if Locals (I).Proc = P
+           and then To_String (Locals (I).Name) = Ada_Name
+         then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Frame_Has;
+
+   function Too_Deep_Up_Level (Ada_Name : String) return Boolean is
+      --  Walk the parents PAST the one enclosing frame this frame's link can
+      --  reach.  The chain is real because every recorded procedure names its own
+      --  enclosing procedure, so a grandparent is visible here even though the
+      --  emitter keeps only one saved frame.
+      P : Natural := Frame_Proc;
+   begin
+      if P = 0 then
+         return False;
+      end if;
+      P := Procs (P).Parent;         --  one level up: covered by the link
+      if P = 0 then
+         return False;
+      end if;
+      P := Procs (P).Parent;         --  two levels up: not expressible
+      while P /= 0 loop
+         if Frame_Has (P, Ada_Name) then
+            return True;
+         end if;
+         P := Procs (P).Parent;
+      end loop;
+      return False;
+   end Too_Deep_Up_Level;
 
    function Local_Slot (Ada_Name : String) return Integer is
    begin
