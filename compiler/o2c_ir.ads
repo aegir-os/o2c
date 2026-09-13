@@ -103,6 +103,15 @@ package O2c_Ir is
                Op_Label,                     --  d's label is defined here
                Op_Jump,                      --  to s1
                Op_Jump_False,                --  to s1 when s2 is false
+               --  The TRUE-side branch, appended.  The IR carried only
+               --  jump-when-false (3be settled its polarity from the VM's
+               --  opcode table), and the parser's conditions test in BOTH
+               --  directions - eight Jnz sites, four Jz.  Rewriting a Jnz site
+               --  as an inverted condition plus Jump_False would have changed
+               --  the emitted image of every IF that uses one, for no
+               --  behavioural gain; an appended op keeps the bytes identical
+               --  and says what the branch means.
+               Op_Jump_True,                 --  to s1 when s2 is TRUE
 
                --  calls.  Op_Arg quads immediately before an Op_Call are its
                --  arguments, in order - which keeps every quad three-address.

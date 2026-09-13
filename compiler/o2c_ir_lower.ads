@@ -131,6 +131,25 @@ package O2c_Ir_Lower is
    procedure Bin_Op (O : O2c_Ir.Op; Class : O2c_Ir.Type_Class
                                           := O2c_Ir.Tc_Word);
 
+   --  A LABEL, and the four ways to reach one.  The front end used to allocate
+   --  the EMITTER's label ids itself and hand them to O2c_BC.Mark/Jump; the IR
+   --  owns that namespace now, so a site names a label it got from here and
+   --  never sees the emitter's numbering.  This is the print loop's proven
+   --  Reserve_Label mechanism, with the ids no longer spelled out at each site.
+   --
+   --  Jump_False is Jz (jump when the top IS zero) and Jump_True is Jnz, and
+   --  the polarity is settled from the VM's table (3be) rather than from the
+   --  names - getting it backwards produces a program that runs and is wrong.
+   --  All four no-op outside bytecode mode.
+   --
+   --  ALLOCATION is not here: the emitter has no label allocator (its namespace
+   --  belongs to its caller), so the front end's own counter allocates the id
+   --  and RESERVES it here with Reserve_Label.  One counter, one mapping.
+   procedure Mark (L : O2c_Ir.Label_Id);
+   procedure Jump (L : O2c_Ir.Label_Id);
+   procedure Jump_False (L : O2c_Ir.Label_Id);
+   procedure Jump_True (L : O2c_Ir.Label_Id);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.

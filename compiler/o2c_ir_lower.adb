@@ -222,6 +222,49 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Bin_Op;
 
+   procedure Mark (L : O2c_Ir.Label_Id) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      --  The label is a VALUE in the quad (Dst), which is how the lowering
+      --  resolves it back to the emitter's number through the reservation
+      --  above - the same shape the print loop's Op_Label already uses.
+      O2c_Ir.Emit (O2c_Ir.Op_Label, Dst => O2c_Ir.Label_Value (L));
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Mark;
+
+   procedure Jump (L : O2c_Ir.Label_Id) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Jump, Src1 => O2c_Ir.Label_Value (L));
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Jump;
+
+   procedure Jump_False (L : O2c_Ir.Label_Id) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Jump_False, Src1 => O2c_Ir.Label_Value (L));
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Jump_False;
+
+   procedure Jump_True (L : O2c_Ir.Label_Id) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Jump_True, Src1 => O2c_Ir.Label_Value (L));
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Jump_True;
+
    procedure Load_Local (Slot : Natural) is
    begin
       if not O2c_BC.Bytecode_Mode then
@@ -560,6 +603,11 @@ package body O2c_Ir_Lower is
 
          when Op_Jump =>
             O2c_BC.Jump (O2c_BC.Jmp, Bc_Label_Of (Q.Src1));
+
+         when Op_Jump_True =>
+            --  JNZ: jump when the top is NOT zero - the mirror of the arm
+            --  below, and settled the same way, from the VM's opcode table.
+            O2c_BC.Jump (O2c_BC.Jnz, Bc_Label_Of (Q.Src1));
 
          when Op_Jump_False =>
             --  Jz, not Jnz: the VM's Jnz jumps when the top is NOT zero, so

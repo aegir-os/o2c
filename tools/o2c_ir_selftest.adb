@@ -213,6 +213,7 @@ begin
       --  the mapping itself - that IS the contract.
       declare
          L1, L2 : O2c_Ir.Label_Id;
+         L3, L4 : O2c_Ir.Label_Id;   --  fresh ones: Mark twice is an error
          V1, V2 : Value_Id;
       begin
          L1 := O2c_Ir.New_Label;
@@ -221,11 +222,43 @@ begin
          V2 := O2c_Ir.Label_Value (L2);
          O2c_Ir_Lower.Reserve_Label (L1, 101);
          O2c_Ir_Lower.Reserve_Label (L2, 102);
+         L3 := O2c_Ir.New_Label;
+         L4 := O2c_Ir.New_Label;
+         O2c_Ir_Lower.Reserve_Label (L3, 103);
+         O2c_Ir_Lower.Reserve_Label (L4, 104);
 
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Label, Dst => V1, others => <>));
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Jump, Src1 => V2, others => <>));
          Check (O2c_BC.Insns = Before + 1, "a jump is one instruction");
+
+         --  And the four HELPERS a statement site uses, so the front end never
+         --  touches the emitter's namespace: Mark, Jump, Jump_False, Jump_True.
+         --  Each is one instruction, and the True/False pair must reach the
+         --  right POLARITY - which a count cannot see, so the check is on the
+         --  VM's opcode table: Jnz jumps when the top is NOT zero, Jz when it is
+         --  (settled in 3be, and getting it backwards runs and is wrong).
+         O2c_BC.Push_Int (1);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Mark (L3);
+         --  ZERO, not one: the emitter's Mark records the label's position and
+         --  emits nothing.  A count of one here would have meant a byte of code
+         --  where a label is - so the check states the 0 the emitter's own
+         --  Mark does, rather than the 1 the name invites.
+         Check (O2c_BC.Insns = Before, "a Mark emits nothing (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+         Before := O2c_BC.Insns;
+         O2c_BC.Push_Int (1);
+         O2c_Ir_Lower.Jump (L4);
+         Check (O2c_BC.Insns = Before + 2,
+                "the Jump helper is one push plus one jump");
+         Before := O2c_BC.Insns;
+         O2c_BC.Push_Int (1);
+         O2c_Ir_Lower.Jump_False (L4);
+         O2c_Ir_Lower.Jump_True (L4);
+         Check (O2c_BC.Insns = Before + 3,
+                "and the conditional pair is two pushes and two jumps (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
 
          --  The CONDITION is the caller's push, like Op_Arg's argument: these
          --  ops declare their operands rather than emitting them.  The

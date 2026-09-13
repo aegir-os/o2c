@@ -24,6 +24,22 @@ package body O2c_Compiler is
       return Bc_Labels;
    end New_Bc_Label;
 
+   --  A bytecode label as the IR sees it: the emitter's id (this counter, which
+   --  owns that namespace) plus the IR label the quads name, RESERVED with the
+   --  lowering so the two cannot drift apart.  The print loop spells these three
+   --  facts out inline; a site that only needs a label should not have to.
+   --  Outside bytecode mode there is no label and no allocation.
+   function New_Lbl return O2c_Ir.Label_Id is
+      Ir : O2c_Ir.Label_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return 0;
+      end if;
+      Ir := O2c_Ir.New_Label;
+      O2c_Ir_Lower.Reserve_Label (Ir, New_Bc_Label);
+      return Ir;
+   end New_Lbl;
+
    --  The encoded image of the last bytecode-mode compilation.
    Bc_Image : Unbounded_String;
 
@@ -6451,12 +6467,10 @@ package body O2c_Compiler is
    procedure Parse_If is
       Cond : Expr_Rec;
       Branch : Boolean := True;      --  True: emit "if", later "elsif"
-      L_End  : Natural := 0;         --  after the whole IF
-      L_Next : Natural := 0;         --  this branch's alternate
+      L_End  : O2c_Ir.Label_Id := 0;    --  after the whole IF
+      L_Next : O2c_Ir.Label_Id := 0;    --  this branch's alternate
    begin
-      if O2c_BC.Bytecode_Mode then
-         L_End := New_Bc_Label;
-      end if;
+      L_End := New_Lbl;
       loop
          Next;                       --  consume IF / ELSIF
          Cond := Parse_Expr;
@@ -6466,10 +6480,8 @@ package body O2c_Compiler is
          end if;
          Expect (Lex.Tok_Then, "'THEN'");
          Next;
-         if O2c_BC.Bytecode_Mode then
-            L_Next := New_Bc_Label;
-            O2c_BC.Jump (O2c_BC.Jz, L_Next);
-         end if;
+         L_Next := New_Lbl;
+         O2c_Ir_Lower.Jump_False (L_Next);
          Append_Body ("      " & (if Branch then "if " else "elsif ")
                       & To_String (Cond.Text) & " then");
          Branch := False;
@@ -6483,10 +6495,8 @@ package body O2c_Compiler is
                Append_Body ("         null;");
             end if;
          end;
-         if O2c_BC.Bytecode_Mode then
-            O2c_BC.Jump (O2c_BC.Jmp, L_End);
-            O2c_BC.Mark (L_Next);
-         end if;
+         O2c_Ir_Lower.Jump (L_End);
+         O2c_Ir_Lower.Mark (L_Next);
          if Cur.Kind = Lex.Tok_Elsif then
             null;                    --  loop consumes the ELSIF
          elsif Cur.Kind = Lex.Tok_Else then
@@ -6509,23 +6519,19 @@ package body O2c_Compiler is
       end loop;
       Expect (Lex.Tok_End, "'END' closing the IF");
       Next;
-      if O2c_BC.Bytecode_Mode then
-         O2c_BC.Mark (L_End);
-      end if;
+      O2c_Ir_Lower.Mark (L_End);
       Append_Body ("      end if;");
    end Parse_If;
 
    procedure Parse_While is
       Cond  : Expr_Rec;
-      L_Top : Natural := 0;
-      L_End : Natural := 0;
+      L_Top : O2c_Ir.Label_Id := 0;
+      L_End : O2c_Ir.Label_Id := 0;
    begin
       Next;                          --  WHILE
-      if O2c_BC.Bytecode_Mode then
-         L_Top := New_Bc_Label;
-         L_End := New_Bc_Label;
-         O2c_BC.Mark (L_Top);
-      end if;
+      L_Top := New_Lbl;
+      L_End := New_Lbl;
+      O2c_Ir_Lower.Mark (L_Top);
       Cond := Parse_Expr;
       if Cond.Typ /= T_Bool then
          raise O2c_Error with "WHILE condition must be BOOLEAN (line "
@@ -6533,9 +6539,7 @@ package body O2c_Compiler is
       end if;
       Expect (Lex.Tok_Do, "'DO'");
       Next;
-      if O2c_BC.Bytecode_Mode then
-         O2c_BC.Jump (O2c_BC.Jz, L_End);
-      end if;
+      O2c_Ir_Lower.Jump_False (L_End);
       Append_Body ("      while " & To_String (Cond.Text) & " loop");
       declare
          Before : constant Natural := Length (Body_Buf);
@@ -6549,22 +6553,18 @@ package body O2c_Compiler is
       end;
       Expect (Lex.Tok_End, "'END' closing the WHILE");
       Next;
-      if O2c_BC.Bytecode_Mode then
-         O2c_BC.Jump (O2c_BC.Jmp, L_Top);
-         O2c_BC.Mark (L_End);
-      end if;
+      O2c_Ir_Lower.Jump (L_Top);
+      O2c_Ir_Lower.Mark (L_End);
       Append_Body ("      end loop;");
    end Parse_While;
 
    procedure Parse_Repeat is
       Cond  : Expr_Rec;
-      L_Top : Natural := 0;
+      L_Top : O2c_Ir.Label_Id := 0;
    begin
       Next;                          --  REPEAT
-      if O2c_BC.Bytecode_Mode then
-         L_Top := New_Bc_Label;
-         O2c_BC.Mark (L_Top);
-      end if;
+      L_Top := New_Lbl;
+      O2c_Ir_Lower.Mark (L_Top);
       Append_Body ("      loop");
       declare
          Before : constant Natural := Length (Body_Buf);
@@ -6583,12 +6583,11 @@ package body O2c_Compiler is
          raise O2c_Error with "UNTIL condition must be BOOLEAN (line "
            & Natural'Image (Cur.Line) & ")";
       end if;
-      if O2c_BC.Bytecode_Mode then
-         --  The Ada body exits when the condition holds, so the bytecode
-         --  jumps back to the top when it does NOT: JZ is the mirror of
-         --  WHILE's exit test.
-         O2c_BC.Jump (O2c_BC.Jz, L_Top);
-      end if;
+      --  The Ada body exits when the condition holds, so the bytecode jumps
+      --  back to the top when it does NOT: JZ is the mirror of WHILE's exit
+      --  test, and the polarity comes from the VM's table (3be), never from a
+      --  name - which is why Jump_False can only mean Jz.
+      O2c_Ir_Lower.Jump_False (L_Top);
       Append_Body ("      exit when " & To_String (Cond.Text) & ";");
       Append_Body ("      end loop;");
    end Parse_Repeat;

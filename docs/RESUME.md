@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         374
+    commits         375
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3195,6 +3195,56 @@ Verified: gate32, all seven suites green, zero warnings.
     Mark 20, Jump 18, Dup_Top 8, Discard 5, Un 2, Trap 6
                               control flow, the bounds trap and stack shuffles
     Global 4, Store 2         two global stores and their interning
+
+### 3bu. Control flow, part 1 — the label machinery, and IF / WHILE / REPEAT
+
+**`Op_Jump_True` is appended**, and the reason is worth keeping.  The IR carried only
+jump-when-false (3be settled its polarity from the VM's table), and the parser's conditions
+test in BOTH directions — eight `Jnz` sites, four `Jz`.  One could rewrite a `Jnz` site as an
+inverted condition plus `Jump_False`; 3bk showed the IR is sometimes one instruction shorter
+and that is legitimate.  But here it would have changed the image of every `IF` for **no
+behavioural gain**, and identity is the stronger evidence whenever it is available.  So the
+op was appended instead: `Jump_True` is `Jnz` and says so.
+
+**And the label namespace moved.**  The emitter has no label allocator — "the label namespace
+belongs to the caller", as its own self-test comment says — so:
+
+    compiler   New_Lbl      the emitter id (the counter that already owned the namespace)
+                            + the IR label, RESERVED with the lowering
+    lowering   Mark / Jump / Jump_False / Jump_True
+                            take an IR LABEL and emit the quad; the mapping stays here
+
+A statement site now names a label it was given and never sees the emitter's numbering — and
+the nine `if O2c_BC.Bytecode_Mode then ... end if` blocks around the allocation and the
+branches are GONE, because the helpers no-op outside bytecode mode.  The three statements got
+SHORTER (IF 4 sites, WHILE 4, REPEAT 2), which is the first time in this workstream that a
+migration removed lines from the parser rather than adding a call.
+
+**The self-test caught a wrong expectation in the check itself.**  My first assertion was "the
+Mark helper is one instruction" — the emitter's `Mark` records a label's POSITION and emits
+**no** bytes, so the count is ZERO.  A "1" there would have meant a byte of code where a label
+is.  The check now states the 0 the emitter does, with the reason in the message.
+
+**Evidence**: **72 of 72** fixtures byte-identical against a front end built from `HEAD` in a
+worktree (this migration is the identity case — the same Mark/Jnz/Jz/Jmp in the same order),
+`run_bc` 123 goldens green, self-test 71 -> 76 checks.  Verified: gate33, all seven suites
+green, zero warnings.
+
+**What is left of the statements, measured by the LABELS each site uses:**
+
+    12  the bounds checks (`L_In`/`L_Up`): Jnz to the trap, Mark to continue - designator
+        chain internals, and they need a trap op before they can be quads
+     8  Parse_Case (`Bc_L_Body`/`Bc_L_Next`/`Bc_L_End`): its label matching is
+        Dup_Top; Push_Int; Eq; Jnz, so it needs an `Op_Dup` (append-only) first
+     4  Parse_Loop / Parse_Exit (`L_Top`/`L_Exit` + the recorded exit label)
+     2  Parse_For (an extra `Jz`/`Mark` beside For_Enter/For_Next, which carry their own
+        labels as operands and are a different mechanism)
+     2  Parse_With (`Bc_Top`/`Bc_Else`): the guard's skip
+    16  Dup_Top 8, Discard 5, Un 2, Trap 6 - the shuffles and the trap itself
+
+So the natural next slice is LOOP/EXIT + FOR + WITH (8 sites, no new op needed), then CASE
+with `Op_Dup`, then the bounds regime with a trap op — and only then is the parser's
+statement surface fully quad-built.
 
 ## 4. Method — what worked, and what did not
 
