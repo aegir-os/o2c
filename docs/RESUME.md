@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         350
+    commits         351
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2299,6 +2299,41 @@ what keys it and what it emits - turn that into a known set, and then step 1 (th
 
 Nothing landed in code this round, and that is the deliberate part: the evidence
 said the target had moved.
+
+### 3aw. THE MAP - 36 dispatch gates, three runtime regions, and one question
+
+Every module-name comparison that gates a dispatch, grouped:
+
+    ~3130, 3364          Mod_Name = "Files"    the intrinsic arms added in 3l -
+                                              FStat/FRead/FWrite/FClose - plus
+    3687-3741            XYplane                XYplane, all in the FACTOR path
+    ~7198                 Env                  statement region A
+    ~7383, 7414           Files
+    ~7673                 Convert              statement region B
+    ~7740, 7768           Files
+    ~7798                 Env
+    ~7836                 Args
+    ~7880                 In
+    ~7947-7985            XYplane
+    10318-10918          Mod_Name = "Files"/"Env"   spec + manifest generation:
+                                              NOT runtime dispatch, out of scope
+
+So the runtime duplication is in THREE regions, not two, and the pair that names
+itself is **Files in statement regions A and B** - both statement-shaped, both
+dispatching the same ids (`Native_Call (9, 1)` at 7409 and again at 7767,
+byte-identical).  That is step 1's target, now named rather than guessed.
+
+**One question must be settled first**: there are TWO statement regions, ~7198-7515
+and ~7673-7990, which is itself a smell - either one supersedes the other (dead
+code kept alive by habit, which the suites would not notice if both are reachable),
+or they serve genuinely different statement forms, in which case merging them
+without understanding the difference is how a working path gets deleted.  The heads
+of the two regions answer it: what KEYS each one, and whether one is reachable when
+the other is not.
+
+That is one targeted read, and it is the last one before acting on step 1 - after
+which the consolidation is a known pair with a known difference, and the
+52-corroborated net covers it because every fixture writes through these paths.
 
 ## 4. Method — what worked, and what did not
 
