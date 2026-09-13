@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         440
+    commits         441
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5662,6 +5662,39 @@ the declaration site), and warnings do not land.  The next attempt should hoist 
 id collision identified.  With the collision fixed plus the link push, the failure was already a verifier
 depth violation rather than memory corruption - and a fixture at /tmp/nestproc.ob2 that prints 0 (want 42)
 will say when it is done.
+
+### 3ei. The id collision is FIXED - the image is correct - and one depth violation is left
+
+The per-invocation local (a variable declared INSIDE `Decl_Procedure`, so each invocation keeps its own -
+LIFO by construction) plus the link changes produce a **correct image** and no warnings.  Read off the
+disassembly:
+
+    Bump  @3098: LOAD_L[0] PUSH 0 LOAD_L[0] PUSH 0 LOAD_IDX_I PUSH 1 IADD STORE_IDX_I
+                 n := n + 1, through the link: link at slot 0, outer slot 0, 8-byte element
+    Outer @3123: LOAD_CONST 40; STORE_L 0; CALL 3098; CALL 3098; LOAD_L 0; STORE_G 1   npar=0
+    module:      CALL 3123
+
+That is the whole feature working on paper: the enclosing body is emitted under its OWN id with its own
+frame, the module's call reaches the enclosing procedure, the enclosing body calls the nested one twice,
+and the nested body reads and writes the enclosing local through the static link, 8-byte indexed, with
+the link in the last argument slot where `Push_Frame`'s reverse pop puts it.
+
+**Why it still does not land**: the VM now reports `operand-stack depth violation` instead of the wild
+address.  That is the right kind of error - a verifier complaint instead of memory corruption - but it is
+not yet fixed, so the change does not land.  The measurement that follows is a correct depth trace per
+procedure: the one run in this session was worthless because the script's own table gave `LOAD_CONST` a
+depth delta of 0 (it must be +1), so every number it printed after the first constant was wrong.  That is
+the third instrument error in this stretch - after the `operand + 3` lookup and the procedure table read
+by the wrong key - and it is the reason the rule is "measure, then repair", not "reason, then repair":
+the instruments need checking as much as the code.
+
+**Two smaller things the image shows**, to settle next: records 29 and 31 have the SAME offset 3098 with
+different frames (0 and 1), so a record for the nested procedure looks duplicated - possibly the
+provisional record `Reserve_Proc` writes and the one `End_Proc` fills in, or a second reserve.  It did not
+affect the emitted code, and it should be understood before the depth violation is chased, since a
+verifier walks records.
+
+Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (still 0; want 42).
 
 ## 4. Method — what worked, and what did not
 
