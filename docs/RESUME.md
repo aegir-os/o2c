@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         346
+    commits         347
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2150,6 +2150,53 @@ All seven suites green, 52 fixtures corroborated by both backends, zero warnings
 **M2b next**: the parser builds IR for `x := <int literal>` with `x` a scalar
 local, and its bytecode comes FROM the IR - the first construct whose evidence is
 behavioural rather than structural.
+
+### 3as. M2b DONE - the first construct runs through the IR
+
+`x := <short integer literal>`, with x a scalar INTEGER variable, now builds a
+quad in the parse and gets its bytecode FROM THE LOWERING: the inline
+`Push_Int` + `Bc_Store` is not used for that shape at all.  Everything else takes
+the old path unchanged.
+
+**The narrowness is deliberate and written down in the code**, both bounds having
+a reason rather than being guesses:
+
+    * the literal must be SHORT (<= 9 digits), so `Integer'Value` in the IR path
+      cannot raise where the inline path refuses cleanly - the inline path's
+      behaviour for an over-long literal is a refusal, and a crash here would be
+      a different answer to the same input;
+    * x must be a scalar INTEGER (UT = 0), so nothing about pointers, records or
+      real conversion is in play yet.
+
+**Evidence that it RAN** - a temporary trace, which is the question a passing
+suite cannot answer by itself:
+
+    IR-ASSIGN i := 1     (lowered= 1)      <- sum.ob2
+    IR-ASSIGN sum := 0   (lowered= 2)
+    ...7 assignments through the IR in loopexit.ob2
+
+The count comes from `O2c_Ir_Lower.Lowered`, so "the IR path ran" is a number
+rather than an assumption.  The trace was then removed: a measurement, not
+permanent noise.
+
+**Evidence that it is RIGHT** - the whole corpus, because dozens of fixtures
+contain exactly this statement:
+
+    all seven suites green, 52 fixtures corroborated by BOTH backends
+
+So the bytecode the lowering produced for the migrated construct is
+behaviourally identical to what the inline path produced, across every fixture
+that uses the shape - the first migration whose evidence is behavioural rather
+than structural.  The Ada path is untouched (its text is still appended), so the
+differential remains the arbiter.
+
+One fact learned on the way: the lexer's token for an integer literal is
+`Lex.Tok_Number`, not `Tok_Int` - the compiler said so, which is cheaper than my
+having guessed it.
+
+**Next, M3**: designators and subscripts, first on purpose - that is where the
+duplicated base derivation and the calling convention live, and where one fix
+took three attempts because the same rule was written in three places.
 
 ## 4. Method — what worked, and what did not
 
