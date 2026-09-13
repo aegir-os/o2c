@@ -334,13 +334,23 @@ package body O2c_Compiler is
    --  LOAD_G/STORE_G against the globals block.  Getting this wrong is
    --  silent - reading a zeroed global instead of a parameter - so it is
    --  one helper rather than a convention at each site.
-   procedure Bc_Load (Ada_Name : String) is
+   procedure Bc_Load (Ada_Name : String;
+                      By_Ref_Scalar : Boolean := False;
+                      Size : Positive := 8) is
       S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
    begin
       --  The CHOICE stays here (it is the parser's fact); the EMISSION is the
       --  IR's.  A load leaves the value on the operand stack, which is what the
       --  calling expression wants, so the quad carries no Dst.
-      if S >= 0 then
+      if By_Ref_Scalar then
+         --  A VAR scalar formal's slot holds the CALLER's address, so the value
+         --  is behind it: the same shape as a field or an element, index 0.  A
+         --  read without this returned the address itself, which is why a by-ref
+         --  scalar only ever misbehaved OUTSIDE the address's own range (3dd).
+         O2c_Ir_Lower.Load_Local (Natural (S));
+         O2c_Ir_Lower.Push_Int (0);
+         O2c_Ir_Lower.Load_Idx (Size);
+      elsif S >= 0 then
          O2c_Ir_Lower.Load_Local (Natural (S));
       else
          O2c_Ir_Lower.Load_Global (Ada_Name);
@@ -464,15 +474,27 @@ package body O2c_Compiler is
       return Nm;
    end Ada_Id;
 
+   --  Forward: Bc_Push_Arg below needs the symbol to know whether the name it
+   --  is loading is a VAR formal, whose slot holds an ADDRESS rather than a
+   --  value.  The body is far below, with the rest of the symbol table.
+   function Find (Name : String) return Natural;
+
    --  Push an actual argument that is a VALUE.  A folded literal pushes its
    --  constant; anything else loads by name.  Bc_Load alone is wrong for a
    --  literal - it would look up a global called "1".
    procedure Bc_Push_Arg (A : Expr_Rec) is
+      Nm : constant String := To_String (A.Text);
+      Id : constant Natural := Find (Nm);
+      BR : constant Boolean :=
+        Id /= 0 and then Syms (Id).Kind = S_Var and then Syms (Id).By_Ref;
+      Sz : constant Positive :=
+        (if Id /= 0 and then (Syms (Id).Typ = T_Char
+                              or else Syms (Id).Typ = T_Bool) then 1 else 8);
    begin
       if A.Folds and then A.Typ = T_Int then
          O2c_Ir_Lower.Push_Int (A.Val);
       else
-         Bc_Load (Ada_Id (To_String (A.Text)));
+         Bc_Load (Ada_Id (Nm), BR, Sz);
       end if;
    end Bc_Push_Arg;
 
@@ -2563,7 +2585,42 @@ package body O2c_Compiler is
             return A;
          end;
       end if;
-      A := Parse_Expr;
+      --  A VAR SCALAR formal is passed as an ADDRESS: the callee's slot holds the
+      --  caller's address and every access goes through it.  Passing the value -
+      --  which is what this used to do - is why an assignment to a by-ref scalar
+      --  in the callee was lost without a word (3dd/3df).  The value parse stays,
+      --  because the type check and the Ada text come from it.
+      declare
+         By_Ref_Scalar : constant Boolean :=
+           O2c_BC.Bytecode_Mode and then Formal.By_Ref
+           and then Formal.UT = 0 and then Cur.Kind = Lex.Tok_Ident;
+      begin
+         if By_Ref_Scalar then
+            declare
+               Nm : constant String := Cur.Text (1 .. Cur.Len);
+               Id : constant Natural := Find (Nm);
+               Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
+            begin
+               if Id /= 0 and then Syms (Id).Kind = S_Var
+                 and then Syms (Id).By_Ref
+               then
+                  --  Passing a by-ref formal on: its slot holds the address.
+                  O2c_Ir_Lower.Load_Local (Natural (Sl));
+               elsif Sl >= 0 then
+                  --  A frame local: stable now, which is what made this
+                  --  expressible at all (the chunked pool, 3dk).
+                  O2c_Ir_Lower.Load_Addr_L (Natural (Sl));
+               else
+                  O2c_Ir_Lower.Addr_Global (Nm, 1);
+               end if;
+            end;
+         end if;
+         A := Parse_Expr;
+         if By_Ref_Scalar then
+            --  The value the parse pushed is not what the callee wants.
+            O2c_Ir_Lower.Discard;
+         end if;
+      end;
       if Formal.UT = 0 then
          if Formal.Typ = T_Long and then A.Typ = T_Int and then A.Lit then
             null;                     --  literal widens to LONGINT (M17)
@@ -4585,7 +4642,10 @@ package body O2c_Compiler is
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "only INTEGER/CHAR/BOOLEAN variables are supported";
                   end if;
-                  Bc_Load (Ada_Id (Cur.Text (1 .. Cur.Len)));
+                  Bc_Load (Ada_Id (Cur.Text (1 .. Cur.Len)),
+                           Syms (Id).By_Ref,
+                           (if Syms (Id).Typ = T_Char
+                            or else Syms (Id).Typ = T_Bool then 1 else 8));
                end if;
                R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                R.Typ := Syms (Id).Typ;
@@ -9864,6 +9924,23 @@ package body O2c_Compiler is
                                & Cur.Text (1 .. 1) & "';");
                   Next;
                else
+                  --  A var PARAMETER's scalars live in the CALLER, with their address
+                  --  in the frame slot, so the store goes THROUGH that address: the
+                  --  base and the index first, because Store_Idx consumes
+                  --  [base, idx, value] in that order.  Bc_Store below picks STORE_L
+                  --  for any frame name and would write the slot that holds the
+                  --  address, which is how Files.Read's `ch := r.cur[0]` never
+                  --  reached its caller (3dd, 3de).
+                  declare
+                     By_Ref : constant Boolean := Syms (Idx).By_Ref;
+                  begin
+                     if O2c_BC.Bytecode_Mode and then By_Ref then
+                        O2c_Ir_Lower.Load_Local
+                          (Natural (O2c_BC.Local_Slot
+                                      (Ada_Id (Head (1 .. H_Len)))));
+                        O2c_Ir_Lower.Push_Int (0);
+                     end if;
+                  end;
                   declare
                      V : Expr_Rec := Parse_Expr;
                   begin
@@ -9883,7 +9960,14 @@ package body O2c_Compiler is
                              & "backend: only INTEGER/CHAR/BOOLEAN "
                              & "assignments are supported";
                         end if;
-                        Bc_Store (Ada_Id (Head (1 .. H_Len)));
+                        if Syms (Idx).By_Ref then
+                           O2c_Ir_Lower.Store_Idx
+                             ((if Syms (Idx).Typ = T_Char
+                               or else Syms (Idx).Typ = T_Bool then 1
+                               else 8));
+                        else
+                           Bc_Store (Ada_Id (Head (1 .. H_Len)));
+                        end if;
                      end if;
                      if Syms (Idx).Typ = T_LReal then
                         if V.Typ = T_Int
@@ -12562,7 +12646,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  equivalent LOCAL shape works.  Until that is fixed, scoping a module
       --  would only convert a loud refusal into a silent wrong answer - the
       --  hazard the Math entry above describes.
-      Compile_Builtin (Oak_Files_Src, Scoped => False);
+      Compile_Builtin (Oak_Files_Src, Scoped => True);   --  probe
       if Emits ("Files") then
          --  Files: parsed above in every case, emitted
          --  only when something imports it (see Emits).

@@ -194,7 +194,8 @@ package O2c_Ir is
                --  its source, and a TEMP's home IS the stack, so Store_Value
                --  emits nothing for one (3db).  No Srcs on purpose - the whole
                --  point is that the value has no id.
-               Op_Store_Local_Pop);          --  local slot Imm_1 := the stack top
+               Op_Store_Local_Pop,           --  local slot Imm_1 := the stack top
+               Op_Load_Addr_L);              --  d := &(VAR parameter whose slot is Imm_1)
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

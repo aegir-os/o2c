@@ -328,6 +328,16 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Store_Local_Pop;
 
+   procedure Load_Addr_L (Slot : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Load_Addr_L, Imm_1 => Slot);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Load_Addr_L;
+
    procedure Mark (L : O2c_Ir.Label_Id) is
    begin
       if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
@@ -712,6 +722,14 @@ package body O2c_Ir_Lower is
             --  The kind byte is an immediate because a bare Trap would
             --  desynchronise the VM, which reads it.
             O2c_BC.Trap (Q.Imm_1);
+
+         when Op_Load_Addr_L =>
+            --  LOAD_ADDR_L takes a u16 slot and pushes the ADDRESS of that
+            --  frame's variable - which for a by-ref formal is the caller's.
+            O2c_BC.Load_Addr_L (Q.Imm_1);
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
 
          when Op_Store_Local_Pop =>
             --  STORE_L takes its value off the operand stack, which is the one

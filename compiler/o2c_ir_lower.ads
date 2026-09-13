@@ -167,6 +167,9 @@ package O2c_Ir_Lower is
    --  already on the operand stack has no Value_Id, which is why this is not
    --  Op_Store_Local with a source.
    procedure Store_Local_Pop (Slot : Natural);
+   --  The address of a VAR parameter's variable.  A by-ref formal's frame slot
+   --  holds that address, and it is stable now, so the address can be taken.
+   procedure Load_Addr_L (Slot : Natural);
 
    --  A UNARY operator whose opcode depends on the width - the sign, and the
    --  only one the parser emits.  Bin_Op's mirror, and the class is the same

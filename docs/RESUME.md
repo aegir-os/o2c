@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         417
-    fixtures        90 in tests/bc/
+    commits         418
+    fixtures        91 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -4917,6 +4917,44 @@ Verified: `make vm-host` with zero warnings, `run_vm` PASS, `run_bc` PASS, `run_
 actual (it passes the value today), and the callee's store must go through it (`Load_Local` as the
 base, `Push_Int (0)`, the value, `Store_Idx (1 | 8)`).  Then `fres.ob2` prints `c=[h]` and `fall.ob2`
 prints `hello` - and Files' read surface is verified.
+
+### 3dl. THE FILES BLOCKER IS GONE — by-ref scalars work, and Files is verified end to end
+
+Parts 2 and 3 of 3df landed on top of 3dk's stable slots, and with them the last thing standing
+between the metric and Files.
+
+**What was wrong, in one sentence**: a `VAR` SCALAR formal's slot was given the caller's VALUE, and the
+callee's store wrote that slot - so the caller's variable never changed, and nothing said so.  Two
+halves, both now in:
+
+    the CALLER (Parse_Actual)   a by-ref scalar actual pushes the caller's ADDRESS -
+                                Load_Local for a formal passed on, Load_Addr_L for a frame local
+                                (which the chunked pool made possible), Addr_Global for a module
+                                variable; the value parse stays for the type check and is Discarded
+    the CALLEE                  a read goes through it (Load_Local, Push_Int 0, Load_Idx) and so
+                                does a store (the same shape, Store_Idx) - both the INDEXED access
+                                with index 0, so no new dereference opcode was needed in either
+                                direction, and the VM's missing LOAD_IND_I never came up
+
+**And the verification is the whole surface, not a slice:**
+
+    varparam.ob2   a user program: g := 40, Bump (g), BumpTwice (g)  ->  43   (new fixture)
+    fres.ob2       Files: res=0 c=[h] eof-clear
+    fall.ob2       Files: len5, "hello" read back through Read, pos5, Seek(1)+Read -> 'e'
+    on disk        t.txt and z.txt, each b'hello'
+
+`fres`'s `c=[h]` is the exact expectation written down in 3df two turns before anything worked, and
+`Read`, `Pos`, `Seek`, `Length` and `Old` all agree with it.
+
+**So the Files flip is IN**, on evidence: with it, `samples/hello.ob2` refuses at `Math.ln` - the
+metric has moved off Files after twenty-odd sessions, and it moved because a library was verified
+rather than because a gap was stepped over.  `Math.ln` is the next gap, and 3cr already established
+what it needs: natives and VM arms for the transcendentals, hand-rolled for a guest runtime with no
+elementary functions.
+
+**One wart, recorded rather than hidden**: `fall.ob2` prints BASE-WRONG, and that is the PROBE's
+fault - it compares `Files.Base (r)` before any `Set`/`Open` has put `f` in the rider.  `Base` itself
+is fine (`Set` sets the field).  Worth fixing in the probe, not in the library.
 
 ## 4. Method — what worked, and what did not
 

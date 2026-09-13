@@ -330,6 +330,14 @@ package body O2c_BC is
       Pushed;                     --  the address is a value
    end Load_Addr_G;
 
+   procedure Load_Addr_L (Slot : Natural) is
+   begin
+      Put_Byte (16#15#);          --  LOAD_ADDR_L
+      Put_U16 (U16 (Slot));
+      N_Insns := N_Insns + 1;
+      Pushed;                     --  the address is a value
+   end Load_Addr_L;
+
    procedure Store (Idx : Natural) is
    begin
       Put_Byte (16#13#);          --  STORE_G
@@ -348,6 +356,7 @@ package body O2c_BC is
         when Assert_Fail => 16#05#,
         when Trap        => 16#06#,
         when Load_Addr_G  => 16#16#,
+        when Load_Addr_L  => 16#15#,
         when Load_Fld_I   => 16#23#,
         when Load_Fld_R   => 16#24#,
         when Load_Fld_P   => 16#25#,

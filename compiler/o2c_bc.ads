@@ -57,7 +57,12 @@ package O2c_BC is
    --  is passed as an ADDRESS, so a literal actual needs this: without it the
    --  callee dereferenced the OFFSET itself and the VM walked off into memory
    --  (3cg).
-   Str_Addr);
+   Str_Addr,
+   --  The address of a VAR parameter's own variable.  Appended like every other
+   --  member, and its byte (0x15) comes from Byte_Of - the spec's first row of
+   --  the address group, "VAR params, arrays".  Input and output of a by-ref
+   --  scalar both need it now that frame slots have stable addresses (3dk).
+   Load_Addr_L);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -102,6 +107,8 @@ package O2c_BC is
    --  Push the address of a global slot.  An array is a run of slots, so
    --  this plus an index is how an element is reached.
    procedure Load_Addr_G (Slot : Natural);
+   --  The address of a VAR parameter's variable, out of its frame slot.
+   procedure Load_Addr_L (Slot : Natural);
    procedure Store (Idx : Natural);
    procedure Bin (O : Op);
    --  TRAP with its kind byte (spec: 0 = index out of range).  The VM reads
