@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         427
+    commits         428
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5230,6 +5230,43 @@ leak), and the trace above is the first evidence pointing at it.  Until that is 
 explanation of the 143 fixtures is a guess - and this turn is the argument for not making one.
 
 The instrument is reverted, the tree is green (`run_bc` PASS), and the committed state is unchanged.
+
+### 3dv. FIXED — the module frame leak: a guard that skipped the close for unflipped builtins
+
+The trace in 3du pointed at the module boundary and the code named itself.  `Emit_Module` begins:
+
+    --  A module must START with no frame open.  The previous module's body frame is
+    --  still open at this point ..., and leaving it open makes this module's first
+    --  procedure skip its id - see O2c_BC.End_Body.
+    if O2c_BC.Bytecode_Mode then
+       O2c_BC.End_Body;
+    end if;
+
+The close was guarded by `Bytecode_Mode`.  An UNFLIPPED builtin compiles with that false - the mode
+is the flip (`Compile_Builtin (Src, Scoped)` sets it) - so the module BEFORE such a builtin leaves its
+body frame open, and every later module's declarations see `Proc_Open` true.  The guard at the
+declaration (`not Proc_Open`, which is what withholds the id) then skips them.
+
+**Why it survived twenty sessions**: the modules after a leak are unflipped too, and an unflipped
+module needs no ids - its members refuse anyway.  It only bites when a LATER module is flipped, and
+`Reals` is the first one that ever was.  The trace showed it exactly: `Wait` (Files' last member,
+Files being the unflipped module before Math) is the last declaration with `open=FALSE`, and Math's
+`power` is the first with `open=TRUE`.
+
+**The fix** is to close unconditionally, which is safe because the emitter's `End_Body` is a no-op
+when no body is open.  `run_bc` PASS - no regression - and the top-level members of a flipped builtin
+now get their ids.
+
+**And `Reals` still refuses, at exactly the place it should:** `call to 'Put' ... with no procedure
+id`.  `Put` and `Digit` are NESTED, and nested declarations are skipped by that same guard for the
+right reason - they are reached while their enclosing procedure is open.  So the leak is fixed and the
+nested case remains, now cleanly separated from it.
+
+**What that leaves validated for the nested work**: 3dr's emitter split (committed, green), the
+`Frame_Proc` split measured as necessary in 3dt (parameters are interned at the declaration, so the
+frame must start there while the body starts at the begin), and 3dq's static link, which needs no new
+VM opcodes because slot addresses are stable since 3dk.  The remaining question is only the ORDER of
+the code buffer.
 
 ## 4. Method — what worked, and what did not
 

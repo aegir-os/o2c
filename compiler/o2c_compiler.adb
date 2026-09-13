@@ -10622,9 +10622,15 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  frame is still open at this point (Begin_Body is not closed by the
       --  emitter until the image is encoded), and leaving it open makes this
       --  module's first procedure skip its id - see O2c_BC.End_Body.
-      if O2c_BC.Bytecode_Mode then
-         O2c_BC.End_Body;
-      end if;
+      --
+      --  UNCONDITIONAL, and that is the fix for a long-standing hole: guarding
+      --  this by Bytecode_Mode skips it for an UNFLIPPED builtin, whose mode is
+      --  false - so the module before such a builtin leaves its frame open and
+      --  every later module's declarations see Proc_Open true and skip their
+      --  ids.  Harmless while those modules are unflipped too (they need no id),
+      --  which is why it survived; the moment one is flipped (Reals) its own
+      --  procedures have none.  End_Body is a no-op when no body is open.
+      O2c_BC.End_Body;
       N_UT := 0;
       Loop_Depth := 0;
       Loop_N := 0;
