@@ -112,6 +112,14 @@ package O2c_BC is
    procedure Load_Fld_R (Off : Natural);
    procedure Store_Fld_R (Off : Natural);
    procedure Store_Fld_P (Off : Natural);
+   --  A field access where the OPCODE names the KIND.  The six
+   --  Load_Fld_*/Store_Fld_* ops differ only in that byte, so one procedure
+   --  with the op as a parameter replaces six bodies that each spelled the
+   --  two-byte offset encoding out again - and the IR's lowering then has ONE
+   --  place to emit from.  A load pushes.  A store does NOT pop, which is what
+   --  the six did; that is recorded rather than changed, because a depth model
+   --  that grew a pop here would move stack_max in every image with a field.
+   procedure Field (O : Op; Off : Natural);
    procedure Drop;
    --  NIL: a pointer constant.  The pool word is zero, so the opcode differs
    --  from LOAD_CONST only in what a reader can conclude about it.

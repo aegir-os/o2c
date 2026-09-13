@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         369
+    commits         370
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2883,6 +2883,62 @@ parser):
 
 So **the field family is next** — mechanical, the same helper-plus-table pattern,
 with `rec`, `recmix`, `recreal`, `recarr`, `ptrfield` and `longfield` as the net.
+
+### 3bp. DONE — record fields go through the IR, and the emitter's six ops became one
+
+Done, and its shape taught the design difference the sizing had predicted: the
+choice here is not a SIZE but a KIND.
+
+    2 load sites   imported-module designator, main designator chain
+    2 store sites  the same two, in statement position
+    1 more site    a POINTER field at a COMPUTED offset, in the bound-procedure
+                   chain — found by grepping for the OP, not by reading the plan
+
+**`O2c_BC.Field (O, Off)` is new in the emitter**, and the six
+`Load_Fld_*`/`Store_Fld_*` procedures are thin wrappers over it.  They differed
+only in the opcode byte and `Byte_Of` already maps all six, so the only per-kind
+thing left is whether a value comes out.  The wrappers keep their names and their
+comments — a reader asking "what does a REAL field load do" still lands on
+`Load_Fld_R` — while the two-byte offset encoding is now written ONCE, which is
+the same argument the IR is built on.
+
+**Recorded rather than changed**: the three stores do NOT model popping the value
+(`Store_Fld` never called `Popped`).  A depth model that grew a pop here would move
+`stack_max` in every image with a field — a behaviour change hiding inside a
+refactor — so the comment says what is true instead.
+
+**The IR side**: `Op_Load_Fld`/`Op_Store_Fld` appended; `Imm_1` is the offset the
+front end computed, `Imm_2` the kind as an ordinal, and `Bc_Fld` maps
+(kind, store) -> one of the six ops.  Same testability argument as `Bc_Load_Idx`:
+all six are one instruction each, so the self-test checks the TABLE — and an
+ordinal that is not one of the three RAISES (`Fld_Kind_Of`) instead of picking an
+opcode by accident, because a wrong pick would be invisible in every count.
+`Op_Load_Fld` takes `Op_Load_Idx`'s optional `Dst`; `Op_Store_Fld` consumes the
+value from the stack.  Self-test 48 -> 53 checks.
+
+**Evidence, again total**: **72 of 72** fixtures with a golden compile
+byte-identically against a front end built from `HEAD` in a worktree — every
+record fixture (`rec`, `recmix`, `recreal`, `recarr`, `ptrfield`, `longfield`,
+`dispatch`, `withguard`) and, because the EMITTER changed too, the whole corpus.
+Verified: gate28, all seven suites green, zero warnings.
+
+**What is left, measured after this change** — with fields done, the rest is the
+base derivation and the arithmetic around it:
+
+    Load_Addr_G 17, Global_Array 12, Global 11
+                                  the base derivation: Push_Base owns the
+                                  arithmetic (M3a), so these are its call sites
+                                  plus the interning calls
+    Load_Local 15, Store_Local 1  a local's slot, inline
+    Bin 42, Push_Int 24           arithmetic and constants: IR-able through
+                                  Op_Add/... once the front end BUILDS expressions
+                                  (M5, not M3)
+    Mark 20, Jump 18, Dup_Top 8, Trap 6, Discard 5, Un 3
+                                  control flow and stack shuffles, where the
+                                  print loop already showed the shape
+
+So **M3's remaining piece is the base derivation** (40 emissions), and the
+`Bin`/`Push_Int` half is M5's.
 
 ## 4. Method — what worked, and what did not
 

@@ -2013,7 +2013,8 @@ package body O2c_Compiler is
                           (O2c_BC.Global_Array
                              (Base_Name, Total_Slots (Base_UT)));
                      end if;
-                     O2c_BC.Load_Fld_P ((F - 1) * 8);
+                     O2c_Ir_Lower.Load_Fld
+                       ((F - 1) * 8, O2c_Ir_Lower.Fld_Ptr);
                      D.Base_On_Stack := True;
                   end if;
                   Implied_Deref := True;
@@ -3578,11 +3579,14 @@ package body O2c_Compiler is
                                     elsif D.K = D_Field then
                                        --  [record]: the field at a known offset.
                                        R.Typ := D.Sc;
-                                       if D.Ptr_Field then O2c_BC.Load_Fld_P (D.Off);
-                                        elsif D.Sc = T_Real or else D.Sc = T_LReal then
-                                           O2c_BC.Load_Fld_R (D.Off);
-                                        else O2c_BC.Load_Fld (D.Off);
-                                        end if;
+                                       O2c_Ir_Lower.Load_Fld
+                                         (D.Off,
+                                          (if D.Ptr_Field
+                                           then O2c_Ir_Lower.Fld_Ptr
+                                           elsif D.Sc = T_Real
+                                             or else D.Sc = T_LReal
+                                           then O2c_Ir_Lower.Fld_Real
+                                           else O2c_Ir_Lower.Fld_Int));
                                     elsif D.K = D_Scalar then
                                        R.Typ := D.Sc;
                                     elsif D.K = D_Ptr then
@@ -4158,12 +4162,18 @@ package body O2c_Compiler is
                         --  [record]: the field at a known offset.
                         R.Typ := D.Sc;
                         if D.Ptr_Field then
+                           --  The expression's TYPE is the front end's business
+                           --  and stays here; the OPCODE is not, and there is
+                           --  no longer a branch to get it wrong in - the kind
+                           --  is stated once and Bc_Fld picks the op.
                            R.Ptr_UT := D.UT;
-                           O2c_BC.Load_Fld_P (D.Off);
-                         elsif D.Sc = T_Real or else D.Sc = T_LReal then
-                            O2c_BC.Load_Fld_R (D.Off);
-                         else O2c_BC.Load_Fld (D.Off);
-                         end if;
+                        end if;
+                        O2c_Ir_Lower.Load_Fld
+                          (D.Off,
+                           (if D.Ptr_Field then O2c_Ir_Lower.Fld_Ptr
+                            elsif D.Sc = T_Real or else D.Sc = T_LReal
+                            then O2c_Ir_Lower.Fld_Real
+                            else O2c_Ir_Lower.Fld_Int));
                      elsif D.K = D_Scalar then
                         R.Typ := D.Sc;
                      elsif D.K = D_Ptr then
@@ -8143,11 +8153,14 @@ package body O2c_Compiler is
                                  declare
                                     V : Expr_Rec := Parse_Expr;
                                  begin
-                                    if D.Ptr_Field then O2c_BC.Store_Fld_P (D.Off);
-                                     elsif D.Sc = T_Real or else D.Sc = T_LReal then
-                                        O2c_BC.Store_Fld_R (D.Off);
-                                     else O2c_BC.Store_Fld (D.Off);
-                                     end if;
+                                    O2c_Ir_Lower.Store_Fld
+                                      (D.Off,
+                                       (if D.Ptr_Field
+                                        then O2c_Ir_Lower.Fld_Ptr
+                                        elsif D.Sc = T_Real
+                                          or else D.Sc = T_LReal
+                                        then O2c_Ir_Lower.Fld_Real
+                                        else O2c_Ir_Lower.Fld_Int));
                                  end;
                               elsif D.K = D_Scalar then
                                  if D.Sc = T_Char
@@ -8446,11 +8459,12 @@ package body O2c_Compiler is
                            declare
                               V : Expr_Rec := Parse_Expr;
                            begin
-                              if D.Ptr_Field then O2c_BC.Store_Fld_P (D.Off);
-                               elsif D.Sc = T_Real or else D.Sc = T_LReal then
-                                  O2c_BC.Store_Fld_R (D.Off);
-                               else O2c_BC.Store_Fld (D.Off);
-                               end if;
+                              O2c_Ir_Lower.Store_Fld
+                                (D.Off,
+                                 (if D.Ptr_Field then O2c_Ir_Lower.Fld_Ptr
+                                  elsif D.Sc = T_Real or else D.Sc = T_LReal
+                                  then O2c_Ir_Lower.Fld_Real
+                                  else O2c_Ir_Lower.Fld_Int));
                            end;
                         elsif D.K = D_Scalar then
                            if not O2c_BC.Bytecode_Mode

@@ -55,6 +55,22 @@ package O2c_Ir_Lower is
    procedure Load_Idx (Elem_Bytes : Natural);
    procedure Store_Idx (Elem_Bytes : Natural);
 
+   --  WHICH KIND of field - the fact that decides between the emitter's six
+   --  field ops.  It is the front end's to state: it knows the field's type,
+   --  and the lowering sees only an offset.
+   type Fld_Kind is (Fld_Int, Fld_Ptr, Fld_Real);
+
+   --  The kind -> opcode table, for Bc_Op's reason: all six field ops are ONE
+   --  instruction each, so an instruction count cannot check the choice - only
+   --  the table can.  `Store` selects the store half.
+   function Bc_Fld (K : Fld_Kind; Store : Boolean) return O2c_Bc.Op;
+
+   --  One field access: the record's ADDRESS is already on the operand stack,
+   --  the OFFSET was computed by the front end, and a store's value is on the
+   --  stack too (parsed after its designator).  No-ops outside bytecode mode.
+   procedure Load_Fld (Off : Natural; K : Fld_Kind);
+   procedure Store_Fld (Off : Natural; K : Fld_Kind);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.

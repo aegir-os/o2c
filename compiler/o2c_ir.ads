@@ -122,7 +122,17 @@ package O2c_Ir is
                --  the one thing the front end knows and the lowering must not
                --  have to re-derive.  The value comes off the stack, as it does
                --  for the emitter's own STORE_IDX_*, so there is no Src.
-               Op_Store_Idx);                --  *(s1 + s2 * Imm_1) := value
+               Op_Store_Idx,                 --  *(s1 + s2 * Imm_1) := value
+               --  Record fields, appended for the same reason.  The emitter
+               --  has SIX ops here (integer/pointer/real x load/store) that
+               --  differ only in the opcode byte, so the IR carries ONE op and
+               --  the KIND as Imm_2: the front end knows the field's type and
+               --  the lowering must not re-derive it, exactly as Imm_1 carries
+               --  the offset the front end already computed.  No Srcs - the
+               --  record's ADDRESS comes off the operand stack, where the
+               --  designator chain left it.
+               Op_Load_Fld,                  --  d := *(s1 + Imm_1), kind Imm_2
+               Op_Store_Fld);                --  *(s1 + Imm_1) := value
 
    type Quad_Info is record
       Op  : O2c_Ir.Op := Op_Nop;

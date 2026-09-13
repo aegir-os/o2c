@@ -107,6 +107,61 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Store_Idx;
 
+   function Fld_Kind_Of (Tag : Natural) return Fld_Kind is
+   begin
+      --  The quad carries the kind as an ordinal, so an ordinal that is not one
+      --  of the three is a front-end bug and says so here rather than picking an
+      --  opcode by accident: the three kinds are all one instruction, so a wrong
+      --  choice would be invisible in every count.
+      case Tag is
+         when 0 => return Fld_Int;
+         when 1 => return Fld_Ptr;
+         when 2 => return Fld_Real;
+         when others =>
+            raise Program_Error with
+              "O2c_Ir_Lower: no such field kind:" & Tag'Image;
+      end case;
+   end Fld_Kind_Of;
+
+   function Bc_Fld (K : Fld_Kind; Store : Boolean) return O2c_Bc.Op is
+   begin
+      if Store then
+         case K is
+            when Fld_Int  => return O2c_Bc.Store_Fld_I;
+            when Fld_Ptr  => return O2c_Bc.Store_Fld_P;
+            when Fld_Real => return O2c_Bc.Store_Fld_R;
+         end case;
+      else
+         case K is
+            when Fld_Int  => return O2c_Bc.Load_Fld_I;
+            when Fld_Ptr  => return O2c_Bc.Load_Fld_P;
+            when Fld_Real => return O2c_Bc.Load_Fld_R;
+         end case;
+      end if;
+   end Bc_Fld;
+
+   procedure Load_Fld (Off : Natural; K : Fld_Kind) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Load_Fld, Imm_1 => Off,
+                   Imm_2 => Fld_Kind'Pos (K));
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Load_Fld;
+
+   procedure Store_Fld (Off : Natural; K : Fld_Kind) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Store_Fld, Imm_1 => Off,
+                   Imm_2 => Fld_Kind'Pos (K));
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Store_Fld;
+
    procedure Call_Native (Id : Natural; Arity : Natural) is
       First : Natural;
    begin
@@ -339,6 +394,23 @@ package body O2c_Ir_Lower is
             --  after its designator.  So nothing is pushed here, and there is no
             --  Dst to store - the store CONSUMES the value.
             O2c_BC.Bin (Bc_Store_Idx (Q.Imm_1));
+
+         when Op_Load_Fld =>
+            --  The offset-carrying form of an indexed access: the record's
+            --  ADDRESS is already on the operand stack, so the operand rule is
+            --  Op_Arg's - declare, do not push.  Imm_1 is the offset the front
+            --  end computed, Imm_2 the kind that picks the opcode, and a Dst
+            --  only when the value is not consumed where it lands.
+            O2c_BC.Field (Bc_Fld (Fld_Kind_Of (Q.Imm_2), False), Q.Imm_1);
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
+         when Op_Store_Fld =>
+            --  And the store half: [address, value] are both on the stack, so
+            --  there is nothing to push and no Dst - the store consumes the
+            --  value, exactly as the hand-written sites did.
+            O2c_BC.Field (Bc_Fld (Fld_Kind_Of (Q.Imm_2), True), Q.Imm_1);
 
          when Op_Discard =>
             O2c_BC.Discard;

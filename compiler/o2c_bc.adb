@@ -518,55 +518,50 @@ package body O2c_BC is
       Pushed;
    end Push_Nil;
 
-   procedure Load_Fld_R (Off : Natural) is
+   --  The six field ops, in one body.  Byte_Of already maps each of the six
+   --  enum members to its spec byte, so the only thing that is per-kind here is
+   --  whether a value comes out.  (The parser's six procedures below are thin
+   --  wrappers now, kept for their names and their comments: a reader asking
+   --  "what does a REAL field load do" should still find Load_Fld_R.)
+   procedure Field (O : Op; Off : Natural) is
    begin
-      Put_Byte (16#24#);          --  LOAD_FLD_R
+      Put_Byte (U64 (Byte_Of (O)));
       Put_Byte (U64 (Off mod 256));
       Put_Byte (U64 (Off / 256));
       N_Insns := N_Insns + 1;
-      Pushed;
+      if O = Load_Fld_I or else O = Load_Fld_P or else O = Load_Fld_R then
+         Pushed;
+      end if;
+   end Field;
+
+   procedure Load_Fld_R (Off : Natural) is
+   begin
+      Field (Load_Fld_R, Off);
    end Load_Fld_R;
 
    procedure Store_Fld_R (Off : Natural) is
    begin
-      Put_Byte (16#27#);          --  STORE_FLD_R
-      Put_Byte (U64 (Off mod 256));
-      Put_Byte (U64 (Off / 256));
-      N_Insns := N_Insns + 1;
+      Field (Store_Fld_R, Off);
    end Store_Fld_R;
 
    procedure Load_Fld_P (Off : Natural) is
    begin
-      Put_Byte (16#25#);          --  LOAD_FLD_P
-      Put_Byte (U64 (Off mod 256));
-      Put_Byte (U64 (Off / 256));
-      N_Insns := N_Insns + 1;
-      Pushed;
+      Field (Load_Fld_P, Off);
    end Load_Fld_P;
 
    procedure Store_Fld_P (Off : Natural) is
    begin
-      Put_Byte (16#28#);          --  STORE_FLD_P
-      Put_Byte (U64 (Off mod 256));
-      Put_Byte (U64 (Off / 256));
-      N_Insns := N_Insns + 1;
+      Field (Store_Fld_P, Off);
    end Store_Fld_P;
 
    procedure Load_Fld (Off : Natural) is
    begin
-      Put_Byte (16#23#);          --  LOAD_FLD_I
-      Put_Byte (U64 (Off mod 256));
-      Put_Byte (U64 (Off / 256));
-      N_Insns := N_Insns + 1;
-      Pushed;
+      Field (Load_Fld_I, Off);
    end Load_Fld;
 
    procedure Store_Fld (Off : Natural) is
    begin
-      Put_Byte (16#26#);          --  STORE_FLD_I
-      Put_Byte (U64 (Off mod 256));
-      Put_Byte (U64 (Off / 256));
-      N_Insns := N_Insns + 1;
+      Field (Store_Fld_I, Off);
    end Store_Fld;
 
    procedure Drop is

@@ -349,6 +349,56 @@ begin
                 "an indexed word store is one instruction (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
+         --  The field kind -> opcode table: six ops, one instruction each, so
+         --  only the table can be checked - the argument Bc_Load_Idx already
+         --  has.  The KIND is the front end's fact, the opcode is the table's.
+         Check
+           (O2c_Ir_Lower.Bc_Fld (O2c_Ir_Lower.Fld_Int, False)
+              = O2c_BC.Load_Fld_I
+            and then O2c_Ir_Lower.Bc_Fld (O2c_Ir_Lower.Fld_Ptr, False)
+              = O2c_BC.Load_Fld_P
+            and then O2c_Ir_Lower.Bc_Fld (O2c_Ir_Lower.Fld_Real, False)
+              = O2c_BC.Load_Fld_R,
+            "an integer, pointer and real field LOAD pick the I, P and R op");
+         Check
+           (O2c_Ir_Lower.Bc_Fld (O2c_Ir_Lower.Fld_Int, True)
+              = O2c_BC.Store_Fld_I
+            and then O2c_Ir_Lower.Bc_Fld (O2c_Ir_Lower.Fld_Ptr, True)
+              = O2c_BC.Store_Fld_P
+            and then O2c_Ir_Lower.Bc_Fld (O2c_Ir_Lower.Fld_Real, True)
+              = O2c_BC.Store_Fld_R,
+            "and the STORE half picks the matching three");
+
+         --  A lowering check for each half: [address] for a load, and
+         --  [address, value] for a store, are already on the stack.
+         O2c_BC.Push_Int (0);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Load_Fld, Imm_1 => 8, Imm_2 => 0, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "a field load is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         O2c_BC.Push_Int (7);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Store_Fld, Imm_1 => 8, Imm_2 => 1, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "a field store is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         --  And an ordinal that is NOT one of the three is refused: the three
+         --  kinds are one instruction each, so a quiet wrong choice would be
+         --  invisible everywhere else.
+         Raised2 := False;
+         begin
+            O2c_Ir_Lower.Emit_Quad
+              ((Op => Op_Load_Fld, Imm_1 => 8, Imm_2 => 9, others => <>));
+         exception
+            when Program_Error => Raised2 := True;
+         end;
+         Check (Raised2, "a field kind that is not one of the three raises");
+
          O2c_BC.Push_Int (1);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));
