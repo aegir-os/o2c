@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         407
+    commits         408
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4551,6 +4551,43 @@ stay.  A version that used the pushed address for all three would fix `onlystr.o
 That is the last step between here and flipping Files: three localized edits inside one block, with
 `onlystr.ob2` (must start passing), `globstr.ob2` (must keep passing) and `arrparam.ob2` (must keep
 passing) as the net.
+
+### 3db. The fix was written, tested, and REVERTED — the last blocker is a gap in the IR
+
+3da's design was implemented and run against its own net.  Four iterations, all reverted; the tree
+never carried a broken path and the corpus stayed green throughout (`run_bc: PASS` after every
+build).  What survived is worth more than the attempt.
+
+**What the iterations established, in order:**
+
+    1. carrier fields + guard + store, plain-designator site missed   -> unchanged (no path entered)
+    2. + the plain-designator site (4360)                             -> 7 fixtures STORAGE_ERROR
+    3. discriminator `D.Base_On_Stack`                                -> corpus green, field still dies
+    4. discriminator `Is_Ptr or else Base_On_Stack` (the indexed rule) -> path ENTERED (new failure mode)
+    5. store with no Src1                                             -> O2c_Ir: no such value
+
+**Two of those are real knowledge.**  First, the recognition point matters: the plain-designator
+site is shared with module-level arrays, so setting the carrier there without a discriminator turns a
+globals run into a field and breaks seven fixtures - `Is_Ptr or else Base_On_Stack` is the same
+condition the indexed sibling uses (2142), and with it the field case reaches the new path while
+everything else is untouched.  Second, and this is the blocker: **the IR cannot express "store the
+operand already on the stack into a frame local."**  `Src1 => No_Value` raises `O2c_Ir: no such
+value`, and a *temp* is defined as having the stack as its home, so `Store_Value` deliberately emits
+nothing for one.  The store quad wants a `Value_Id`; the value that needs storing does not have one.
+That is a hole in the IR's vocabulary - not a mistake in this fix - and it is the last thing between
+here and a working field-array lowering.
+
+**So the next attempt starts from two options, both named:**
+
+    (a) the chain emits the field's address into a frame local as well as pushing it - a store it can
+        express, because `Addr_Global` gives it a VALUE - at the cost of one dead store per field use;
+    (b) give the IR the missing primitive, which is what its own reserved `Op_Load`/`Op_Store` pair
+        looks like it was left for.
+
+The verified pieces are worth keeping in the retry: the `Expr_Rec`/`Desig` carrier fields, the guard
+extended to a non-symbol actual, the `Is_Ptr or else Base_On_Stack` discriminator, and the third
+local pair (`o2c_str_b` in both the frame and the IR).  Every one of them was built and compiled
+clean; only the final store is missing.
 
 ## 4. Method — what worked, and what did not
 
