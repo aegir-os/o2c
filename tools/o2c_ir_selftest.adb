@@ -399,6 +399,34 @@ begin
          end;
          Check (Raised2, "a field kind that is not one of the three raises");
 
+         --  The BASE of a global object, where the interesting case is the one
+         --  that emits NOTHING: Slots = 0 means the address is already on the
+         --  stack, which is how a pointer base and an already-walked chain are
+         --  expressed.  Counting instructions is the right check here - unlike
+         --  the opcode choices above, the three cases have DIFFERENT counts.
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Addr_Global ("garr", 4);
+         Check (O2c_BC.Insns = Before + 1,
+                "a global run's base is one address instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Addr_Global ("garr", 4);
+         Check (O2c_BC.Insns = Before + 1,
+                "and the SAME name is the same run (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Addr_Global ("", 0);
+         Check (O2c_BC.Insns = Before,
+                "Slots = 0 with no offset emits NOTHING");
+
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Addr_Global ("", 0, 16);
+         Check (O2c_BC.Insns = Before + 2,
+                "Slots = 0 with an offset steps into the object (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
          O2c_BC.Push_Int (1);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad ((Op => Op_Discard, others => <>));

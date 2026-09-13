@@ -162,6 +162,19 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Store_Fld;
 
+   procedure Addr_Global (Name : String; Slots : Natural;
+                          Nested : Natural := 0) is
+      V : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      V := O2c_Ir.New_Global (Name, Typ => 0, Slots => Slots);
+      O2c_Ir.Emit (O2c_Ir.Op_Addr_Global, Src1 => V, Imm_1 => Nested);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Addr_Global;
+
    procedure Call_Native (Id : Natural; Arity : Natural) is
       First : Natural;
    begin
@@ -467,8 +480,21 @@ package body O2c_Ir_Lower is
                Store_Value (Q.Dst);
             end if;
 
+         when Op_Addr_Global =>
+            --  The base of a global object.  The lowering's whole job for this
+            --  op is to hand Push_Base the three facts the front end knows -
+            --  which is the payoff of M3a putting that arithmetic in ONE place:
+            --  there is no second copy here to drift from it.  Slots = 0 and
+            --  Nested = 0 emit nothing, because then the address is already on
+            --  the stack.
+            Push_Base (Value_At (Q.Src1).Slots, Q.Imm_1,
+                       To_String (Value_At (Q.Src1).Name));
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
+
          when Op_Not | Op_And | Op_Or | Op_Load | Op_Store
-            | Op_Addr_Local | Op_Addr_Global | Op_Return
+            | Op_Addr_Local | Op_Return
             | Op_Halt =>
             --  Each arrives with the construct that needs it, and until then
             --  says so loudly and says WHICH op - the next stage reads this

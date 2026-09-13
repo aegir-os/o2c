@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         370
+    commits         371
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2939,6 +2939,65 @@ base derivation and the arithmetic around it:
 
 So **M3's remaining piece is the base derivation** (40 emissions), and the
 `Bin`/`Push_Int` half is M5's.
+
+### 3bq. M3 DONE — every address derivation is now ONE op, and the front end no longer calls Push_Base
+
+The sizing said the base derivation was the heterogeneous one: a global array run,
+a scalar global, a local's slot, with offsets added in some places and not others.
+**Measured, it was uniform** — which is the opposite of the last two stages, and
+worth recording as such.  Every one of the 17 sites is exactly
+
+    O2c_BC.Load_Addr_G (O2c_BC.Global_Array (Name, Slots))     12 sites
+    O2c_BC.Load_Addr_G (O2c_BC.Global (Name))                   5 sites
+
+and the 5 scalar ones are the SAME thing with Slots = 1: `Global` and
+`Global_Array` share one interning table and both return the already-interned slot
+for a name, so `Global_Array (n, 1)` and `Global (n)` are indistinguishable — read
+in the emitter, not assumed from the names.
+
+**So the op is `Op_Addr_Global`, and the front end calls `Addr_Global (Name,
+Slots, Nested)`**: it mints one V_Global value, emits the quad, and the lowering
+hands `Push_Base` the three facts the front end has.  That is M3a's payoff made
+literal: the lowering's whole body for this op is a call to the one home of the
+arithmetic, with no second copy to drift from it.  All 19 sites (17 + the 2 that
+already called Push_Base) now go through it, and:
+
+    grep -c 'O2c_BC.Load_Addr_G'  compiler/o2c_compiler.adb   = 0
+    grep -c 'Push_Base'           compiler/o2c_compiler.adb   = 0
+
+**The interesting case is the one that emits nothing.**  `Slots = 0` means the
+address is ALREADY on the operand stack — a pointer base, or an object the chain
+has already stepped into — so the quad legitimately produces no instruction, and
+`Slots = 0` with `Nested > 0` steps into the object (Push_Int + Add).  Unlike the
+opcode tables of 3bo/3bp, those three cases have DIFFERENT instruction counts, so
+the self-test checks them by count (53 -> 57 checks).
+
+**Evidence**: **72 of 72** fixtures byte-identical against a front end built from
+`HEAD` in a worktree, and the imported probes still print 7 / 3 / 8.  Verified:
+gate29, all seven suites green, zero warnings.
+
+**A capacity note, since this commit is a new CONSUMER of the IR tables.**  Every
+migration moves an emission from a direct call to a quad, so `O2c_Ir`'s tables now
+grow with the program where they used to not grow at all, and M1 left them at
+4_096 values / 16_384 quads with a comment saying the capacity "must be revisited,
+with a written justification, when a real consumer arrives".  The sizing: the
+largest fixture is 736 bytes of code (~250 instructions at 1-5 bytes each, so
+fewer than 250 quads of 16_384), `hello.ob2` at 530 lines is roughly 20x that, and
+a fixture 65x gcloop would be needed to reach the quad cap.  It is not silently
+full — `O2c_Ir.Emit` raises "too many quads" — so the ceiling stands as documented
+rather than guessed at, and the next milestone that adds a consumer should re-run
+this measurement rather than trust it.
+
+**M3 is complete.**  What is left in the parser, measured after this change:
+
+    Bin 42, Push_Int 24           arithmetic and constants - M5's, once the front
+                                  end BUILDS expressions instead of emitting them
+    Load_Local 15, Store_Local 1  a local's slot: the next family, and the one
+                                  `Op_Addr_Local` was reserved for
+    Mark 20, Jump 18, Dup_Top 8, Trap 6, Discard 5, Un 3
+                                  control flow and stack shuffles
+    Global 6, Load 1, Store 3     scalar global access, which the IR already
+                                  models as V_Global operands of Op_Copy/Op_Store
 
 ## 4. Method — what worked, and what did not
 

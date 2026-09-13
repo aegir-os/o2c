@@ -71,6 +71,20 @@ package O2c_Ir_Lower is
    procedure Load_Fld (Off : Natural; K : Fld_Kind);
    procedure Store_Fld (Off : Natural; K : Fld_Kind);
 
+   --  The BASE of a global object - an array run, a record, or a scalar - as an
+   --  ADDRESS on the operand stack.  `Slots` is the object's whole run and
+   --  `Nested` a byte offset the chain has already walked to, and **Slots = 0
+   --  means the address is ALREADY on the stack**: that is how a pointer base
+   --  and an object already stepped into are expressed, and it is why this op
+   --  can legitimately emit no instruction at all.
+   --
+   --  The arithmetic itself is Push_Base's and stays there - M3a gave it one
+   --  home, and this op is how a QUAD reaches it.  A no-op outside bytecode
+   --  mode.  One IR value (a V_Global carrying the name and the run) is minted
+   --  per call, so it is the values table that grows, not the emitter's.
+   procedure Addr_Global (Name : String; Slots : Natural;
+                          Nested : Natural := 0);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.

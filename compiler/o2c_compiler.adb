@@ -1948,9 +1948,8 @@ package body O2c_Compiler is
                      if not UTypes (Base_UT).Is_Ptr
                        and then not D.Base_On_Stack
                      then
-                        O2c_BC.Load_Addr_G
-                          (O2c_BC.Global_Array
-                             (Base_Name, Total_Slots (Base_UT)));
+                        O2c_Ir_Lower.Addr_Global
+                             (Base_Name, Total_Slots (Base_UT));
                      end if;
                   else
                      --  Ada mode needs no offset, so a scalar leaf is just its
@@ -2009,9 +2008,8 @@ package body O2c_Compiler is
                      if not UTypes (Base_UT).Is_Ptr
                        and then not D.Base_On_Stack
                      then
-                        O2c_BC.Load_Addr_G
-                          (O2c_BC.Global_Array
-                             (Base_Name, Total_Slots (Base_UT)));
+                        O2c_Ir_Lower.Addr_Global
+                             (Base_Name, Total_Slots (Base_UT));
                      end if;
                      O2c_Ir_Lower.Load_Fld
                        ((F - 1) * 8, O2c_Ir_Lower.Fld_Ptr);
@@ -2079,12 +2077,11 @@ package body O2c_Compiler is
                --  element and a user-typed one - call it, so the copies that
                --  disagreed (a pointer's Total_Slots is 0; a record field was
                --  one slot) can no longer come back.
-               O2c_Ir_Lower.Push_Base
-                 (Global_Slots =>
-                    (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
-                     then 0 else Total_Slots (Base_UT)),
-                  Nested    => Nested,
-                  Base_Name => Base_Name);
+               O2c_Ir_Lower.Addr_Global
+                 (Base_Name,
+                  (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
+                   then 0 else Total_Slots (Base_UT)),
+                  Nested);
             end if;
             declare
                Ix : Expr_Rec := Parse_Expr;
@@ -2118,12 +2115,11 @@ package body O2c_Compiler is
                      --  element and a user-typed one - call it, so the copies that
                      --  disagreed (a pointer's Total_Slots is 0; a record field was
                      --  one slot) can no longer come back.
-                     O2c_Ir_Lower.Push_Base
-                       (Global_Slots =>
-                          (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
-                           then 0 else Total_Slots (Base_UT)),
-                        Nested    => Nested,
-                        Base_Name => Base_Name);
+                     O2c_Ir_Lower.Addr_Global
+                       (Base_Name,
+                        (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
+                         then 0 else Total_Slots (Base_UT)),
+                        Nested);
                      O2c_BC.Bin (O2c_BC.Add);
                      D.Base_On_Stack := True;
                   end if;
@@ -2229,8 +2225,7 @@ package body O2c_Compiler is
          --  is why `f := s = t` compared nothing, and why discarding an
          --  address there underflowed: there was never one to discard.
          if O2c_BC.Bytecode_Mode then
-            O2c_BC.Load_Addr_G
-              (O2c_BC.Global_Array (Base_Name, Total_Slots (Base_UT)));
+            O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT));
          end if;
          D.K := D_Str;
          return D;
@@ -2367,7 +2362,7 @@ package body O2c_Compiler is
                   else
                      --  A fixed array: its address, and a length the
                      --  emitter knows because the declaration fixed it.
-                     O2c_BC.Load_Addr_G (O2c_BC.Global (Ada_Id (Nm)));
+                     O2c_Ir_Lower.Addr_Global (Ada_Id (Nm), 1);
                      O2c_BC.Push_Int (UTypes (Syms (Id).UT).Arr_Len);
                   end if;
                end;
@@ -7716,17 +7711,14 @@ package body O2c_Compiler is
                                          & "needs a declared ARRAY OF CHAR "
                                          & "variable";
                                     end if;
-                                    O2c_BC.Load_Addr_G
-                                      (O2c_BC.Global_Array
+                                    O2c_Ir_Lower.Addr_Global
                                          (Ada_Id (SNm),
-                                          Total_Slots (Syms (SId).UT)));
+                                          Total_Slots (Syms (SId).UT));
                                  end;
-                                 O2c_BC.Load_Addr_G
-                                   (O2c_BC.Global
-                                      (Ada_Id (To_String (Arg_R (2).Text))));
-                                 O2c_BC.Load_Addr_G
-                                   (O2c_BC.Global
-                                      (Ada_Id (To_String (Arg_R (3).Text))));
+                                 O2c_Ir_Lower.Addr_Global
+                                      (Ada_Id (To_String (Arg_R (2).Text)), 1);
+                                 O2c_Ir_Lower.Addr_Global
+                                      (Ada_Id (To_String (Arg_R (3).Text)), 1);
                                  --  Foreign entries 2 and 4: ToInt and
                                  --  ToReal, native ids 6 and 8.
                                  O2c_Ir_Lower.Call_Native
@@ -7756,10 +7748,9 @@ package body O2c_Compiler is
                                          & "needs a declared ARRAY OF CHAR "
                                          & "variable";
                                     end if;
-                                    O2c_BC.Load_Addr_G
-                                      (O2c_BC.Global_Array
+                                    O2c_Ir_Lower.Addr_Global
                                          (Ada_Id (SNm),
-                                          Total_Slots (Syms (SId).UT)));
+                                          Total_Slots (Syms (SId).UT));
                                  end;
                                  --  Native id 7: the third foreign entry.
                                  O2c_Ir_Lower.Call_Native (7, 2);
@@ -7784,10 +7775,9 @@ package body O2c_Compiler is
                                          & "needs a declared ARRAY OF CHAR "
                                          & "variable";
                                     end if;
-                                    O2c_BC.Load_Addr_G
-                                      (O2c_BC.Global_Array
+                                    O2c_Ir_Lower.Addr_Global
                                          (Ada_Id (SNm),
-                                          Total_Slots (Syms (SId).UT)));
+                                          Total_Slots (Syms (SId).UT));
                                  end;
                                  --  Native id 9: foreign entry 5.
                                  O2c_Ir_Lower.Call_Native (9, 1);
@@ -7812,11 +7802,10 @@ package body O2c_Compiler is
                                             & "needs declared ARRAY OF CHAR "
                                             & "variables";
                                        end if;
-                                       O2c_BC.Load_Addr_G
-                                         (O2c_BC.Global_Array
+                                       O2c_Ir_Lower.Addr_Global
                                             (Ada_Id (ANm),
                                              Total_Slots
-                                               (Syms (AId).UT)));
+                                               (Syms (AId).UT));
                                     end;
                                  end loop;
                                  --  Native id 10: foreign entry 6.
@@ -7847,11 +7836,10 @@ package body O2c_Compiler is
                                             & "declared ARRAY OF CHAR "
                                             & "variables";
                                        end if;
-                                       O2c_BC.Load_Addr_G
-                                         (O2c_BC.Global_Array
+                                       O2c_Ir_Lower.Addr_Global
                                             (Ada_Id (ANm),
                                              Total_Slots
-                                               (Syms (AId).UT)));
+                                               (Syms (AId).UT));
                                     end;
                                  end loop;
                                  --  Native ids 11 and 12: foreign 7 and 8.
@@ -7894,12 +7882,10 @@ package body O2c_Compiler is
                                          (Ada_Id
                                             (To_String (Arg_R (1).Text)));
                                     end if;
-                                    O2c_BC.Load_Addr_G
-                                      (O2c_BC.Global_Array
+                                    O2c_Ir_Lower.Addr_Global
                                          (Ada_Id (BN),
-                                          Total_Slots (Syms (BID).UT)));
-                                    O2c_BC.Load_Addr_G
-                                      (O2c_BC.Global (Ada_Id (RN)));
+                                          Total_Slots (Syms (BID).UT));
+                                    O2c_Ir_Lower.Addr_Global (Ada_Id (RN), 1);
                                     --  Native id 13: foreign entry 9.
                                     O2c_Ir_Lower.Call_Native (13, 3);
                                  end;
@@ -7945,15 +7931,13 @@ package body O2c_Compiler is
                                             & "declared ARRAY OF CHAR "
                                             & "variable";
                                        end if;
-                                       O2c_BC.Load_Addr_G
-                                         (O2c_BC.Global_Array
+                                       O2c_Ir_Lower.Addr_Global
                                             (Ada_Id (ANm),
-                                             Total_Slots (Syms (AId).UT)));
+                                             Total_Slots (Syms (AId).UT));
                                     else
                                        --  The converters write a scalar
                                        --  through the slot's address.
-                                       O2c_BC.Load_Addr_G
-                                         (O2c_BC.Global (Ada_Id (ANm)));
+                                       O2c_Ir_Lower.Addr_Global (Ada_Id (ANm), 1);
                                     end if;
                                  end;
                                  --  Ids 20-25: String, Name, Char, Int,
@@ -8599,9 +8583,8 @@ package body O2c_Compiler is
                           & " > " & Integer'Image (N) & ")";
                      end if;
                      if O2c_BC.Bytecode_Mode then
-                        O2c_BC.Load_Addr_G
-                          (O2c_BC.Global_Array
-                             (Ada_Id (Head (1 .. H_Len)), Total_Slots (U)));
+                        O2c_Ir_Lower.Addr_Global
+                             (Ada_Id (Head (1 .. H_Len)), Total_Slots (U));
                         O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
                         O2c_BC.Bin (O2c_BC.Copy_Str);
                      elsif Cur.Len = N then
@@ -9220,9 +9203,8 @@ package body O2c_Compiler is
                                              --  slot.
                                              O2c_BC.Load_Local (Natural (P_Sl));
                                           else
-                                             O2c_BC.Load_Addr_G
-                                               (O2c_BC.Global_Array
-                                                  (Ada_Id (To_String (A.Text)), Total_Slots (AU)));
+                                             O2c_Ir_Lower.Addr_Global
+                                                  (Ada_Id (To_String (A.Text)), Total_Slots (AU));
                                           end if;
                                           O2c_BC.Load_Local (I_Sl);
                                           O2c_Ir.Emit (O2c_Ir.Op_Load_Idx, Dst => V_V, Imm_1 => 1);
