@@ -1794,6 +1794,40 @@ package body O2c_Compiler is
       end;
    end Bc_Base;
 
+   --  The address of a field - or of the element run starting at it - plus
+   --  Nested, the field's offset inside the base.  On_Stack says the base's
+   --  address is ALREADY on the operand stack, which is what a pointer base or a
+   --  chained one means.  A var PARAMETER is the case that needs its own frame
+   --  slot, and it is the reason this is one procedure: the copies this replaces
+   --  had the first case wrong, and the third copy went the same way - Addr_Global
+   --  invented a global named after the parameter, so Files.Read addressed a
+   --  buffer nobody had written while every write-path access happened to work.
+   procedure Bc_Field_Base (Base_Name : String; Base_UT : Natural;
+                            Nested : Natural; On_Stack : Boolean) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      declare
+         BId    : constant Natural := Find (Base_Name);
+         By_Ref : constant Boolean :=
+           BId /= 0 and then Syms (BId).Kind = S_Var
+           and then Syms (BId).By_Ref;
+      begin
+         if On_Stack then
+            O2c_Ir_Lower.Addr_Global (Base_Name, 0, Nested);
+         elsif By_Ref then
+            Bc_Load (Ada_Id (Base_Name));
+            if Nested /= 0 then
+               O2c_Ir_Lower.Push_Int (Nested);
+               O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add);
+            end if;
+         else
+            O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT), Nested);
+         end if;
+      end;
+   end Bc_Field_Base;
+
    function Parse_Rec_Ptr_Chain (Base_Name : String;
                                  Base_UT   : Natural)
      return Desig
@@ -2142,11 +2176,9 @@ package body O2c_Compiler is
                --  element and a user-typed one - call it, so the copies that
                --  disagreed (a pointer's Total_Slots is 0; a record field was
                --  one slot) can no longer come back.
-               O2c_Ir_Lower.Addr_Global
-                 (Base_Name,
-                  (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
-                   then 0 else Total_Slots (Base_UT)),
-                  Nested);
+               Bc_Field_Base
+                 (Base_Name, Base_UT, Nested,
+                  UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack);
             end if;
             declare
                Ix : Expr_Rec := Parse_Expr;
@@ -2180,11 +2212,9 @@ package body O2c_Compiler is
                      --  element and a user-typed one - call it, so the copies that
                      --  disagreed (a pointer's Total_Slots is 0; a record field was
                      --  one slot) can no longer come back.
-                     O2c_Ir_Lower.Addr_Global
-                       (Base_Name,
-                        (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
-                         then 0 else Total_Slots (Base_UT)),
-                        Nested);
+                     Bc_Field_Base
+                       (Base_Name, Base_UT, Nested,
+                        UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack);
                      O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add);
                      D.Base_On_Stack := True;
                   end if;
@@ -2305,11 +2335,9 @@ package body O2c_Compiler is
             --  wrongly cleared it: the crash that made it look irrelevant came from
             --  the pool-native fall-through, which MASKED a still-missing offset.
             --  A field not at offset 0 is what tells the two apart.
-            O2c_Ir_Lower.Addr_Global
-              (Base_Name,
-               (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
-                then 0 else Total_Slots (Base_UT)),
-               Nested);
+            Bc_Field_Base
+              (Base_Name, Base_UT, Nested,
+               UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack);
          end if;
          D.K := D_Str;
          --  Only when the base came from the chain.  A module-level array also

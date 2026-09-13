@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         409
+    commits         410
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4635,6 +4635,39 @@ transcendentals, hand-rolled for a guest runtime with no elementary functions.
 
 Verified: run_bc PASS, bytecode_gaps PASS, differential PASS, all five field/array probes print ABC,
 and `out.txt` holds `abc`.
+
+### 3dd. Files' read surface — one bug fixed, and the next one named exactly
+
+3dc left Files' read/seek side unverified, which is why the flip stayed out.  This measures it.
+
+**What works**: `Old` (FStat -> `Length` = 5), `Pos` (5 after five reads), `Seek`, and the write path.
+
+**One real bug, found and fixed.**  `Files.Read`'s `FRead` argument list disassembled to
+
+    55: LOAD_L 0; 58: LOAD_L 0; 61: LOAD_FLD_P 0     ; r.f
+    64: LOAD_L 0; 67: LOAD_FLD_I 8                   ; r.pos
+    70: LOAD_ADDR_G 5                                ; the address of a GLOBAL named "r"
+
+- `Addr_Global` was inventing a module-level global for a **var parameter**, and `r.cur` is a field
+of one.  So the native read into storage nobody had written while every write-path access happened to
+avoid the case.  The value path now goes through `Bc_Field_Base`, one procedure that knows the three
+places a base can live - on the stack (a pointer), in a frame slot (a by-ref formal), or in the
+globals - shared by the string-value path and the two indexed ones, because three copies is how this
+went wrong three times.  The disassembly now shows `LOAD_L 0; LOAD_CONST; IADD`, i.e. `r + cur`'s
+offset.
+
+**And the next one, named by the same disassembly.**  `Read`'s last two instructions are
+
+    128: LOAD_IDX_B          ; r.cur[0]
+    129: STORE_L  [1]        ; ch := ...
+
+`ch` is a **`var` scalar parameter** (`Read (var r: Rider; var ch: char)`), so that store must go
+THROUGH the parameter's address; `STORE_L` writes the slot that holds the address instead, and the
+caller's variable is never written at all - which is why the probe printed a character it had never
+received.  This is not a Files bug: it is every assignment to a `var` scalar formal, in any program,
+and it is why `eof`/`pos`/`res` (fields, not formals) all behaved.
+
+So the flip stays out, for a reason that is now one instruction wide.
 
 ## 4. Method — what worked, and what did not
 
