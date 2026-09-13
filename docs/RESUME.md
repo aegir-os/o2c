@@ -6160,6 +6160,31 @@ measurement that tells them apart is a single grep:
 `Input` (`Oak_Input_Src`, `Scoped => False`) is next and is the same shape as `Term` until the probe says
 otherwise.
 
+### 3ey. Term switches to 256-colour, and the terminal gets a written target
+
+A design question that had never been discussed: what the Aegir terminal should handle for escape codes.
+Measured before answering - `userspace/terminal/terminal.adb` (1279 lines) handles NO escape sequences, and
+`Term` emits a small output-only ANSI set - and the decision is now written down in the AEGIR tree, at
+`docs/terminal-emulation.md`: target VT100/xterm, with the sequences `Term` emits as the guaranteed core,
+everything outside the set DEFINED (ignored and counted) rather than undefined, and the Term <-> Terminal
+integration left as a later unit with the CSI parser specified as a pure function over a byte stream.
+
+Colour follows from it: **256 now**, so `Term.SetColor` emits `ESC[38;5;<fg>mESC[48;5;<bg>m` instead of the
+old single-digit `ESC[3<fg>m`, with values outside 0..255 clamped.
+
+**The differential suite earned its place.**  The first version clamped by assigning to the PARAMETERS -
+legal in Oberon, where they are copies, and impossible in the Ada the compiler also emits, where they are
+`in`:
+
+    diff: FAIL: termuse: ADA_BROKEN, and it is not a recorded Ada-side limit - look at it
+    run_m1: host build of emitted Ada failed
+
+So the clamp moved into locals (`f := fg; if f > 255 then f := 255 end; ...`), and the bytes are unchanged.
+That is a real hazard for anything written in the Oberon builtins: the same source goes to two backends and
+only one of them forbids writing to a parameter.
+
+Gate 7/7 PASS; `tests/bc/termuse.out` now carries the 256-colour bytes.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

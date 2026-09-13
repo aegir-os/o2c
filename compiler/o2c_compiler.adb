@@ -12275,14 +12275,31 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "  Ch(109)" & ASCII.LF;
       S := S & "end Reset;" & ASCII.LF;
       S := S & "procedure SetColor*(fg: integer; bg: integer);" & ASCII.LF;
+      --  LOCALS for the clamped values: assigning to a parameter is fine in
+      --  Oberon (it is a copy) but the emitted Ada declares parameters 'in', so
+      --  writing to one does not compile - the differential suite caught exactly
+      --  that as ADA_BROKEN rather than letting it land.
+      S := S & "  var f: integer; b: integer;" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
+      S := S & "  f := fg;" & ASCII.LF;
+      S := S & "  b := bg;" & ASCII.LF;
+      S := S & "  if f < 0 then f := 0 end;" & ASCII.LF;
+      S := S & "  if f > 255 then f := 255 end;" & ASCII.LF;
+      S := S & "  if b < 0 then b := 0 end;" & ASCII.LF;
+      S := S & "  if b > 255 then b := 255 end;" & ASCII.LF;
       S := S & "  Bracket;" & ASCII.LF;
-      S := S & "  Ch(51);" & ASCII.LF;
-      S := S & "  Out.Int(fg, 0);" & ASCII.LF;
+      S := S & "  Out.Int(38, 0);" & ASCII.LF;
+      S := S & "  Ch(59);" & ASCII.LF;
+      S := S & "  Out.Int(5, 0);" & ASCII.LF;
+      S := S & "  Ch(59);" & ASCII.LF;
+      S := S & "  Out.Int(f, 0);" & ASCII.LF;
       S := S & "  Ch(109);" & ASCII.LF;
       S := S & "  Bracket;" & ASCII.LF;
-      S := S & "  Ch(52);" & ASCII.LF;
-      S := S & "  Out.Int(bg, 0);" & ASCII.LF;
+      S := S & "  Out.Int(48, 0);" & ASCII.LF;
+      S := S & "  Ch(59);" & ASCII.LF;
+      S := S & "  Out.Int(5, 0);" & ASCII.LF;
+      S := S & "  Ch(59);" & ASCII.LF;
+      S := S & "  Out.Int(b, 0);" & ASCII.LF;
       S := S & "  Ch(109)" & ASCII.LF;
       S := S & "end SetColor;" & ASCII.LF;
       S := S & "procedure SetCursor*(x: integer; y: integer);" & ASCII.LF;
