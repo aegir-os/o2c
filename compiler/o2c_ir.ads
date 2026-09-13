@@ -85,6 +85,12 @@ package O2c_Ir is
                --  memory: addresses are values, so this is one level
                Op_Load,                      --  d := *s1
                Op_Store,                     --  *d := s1
+               --  RESERVED, and measured as unneeded: this VM has no
+               --  address-of-local.  A local's base - an open ARRAY parameter's
+               --  own slot - is a VALUE load (LOAD_L / LOAD_L+1 for the length),
+               --  which 3br wired through Op_Load_Local.  Append-only means the
+               --  member stays; nothing emits it, and if M5 finds it IS wanted,
+               --  this comment is the thing to correct first.
                Op_Addr_Local,                --  d := &s1
                Op_Addr_Global,               --  d := &s1
 

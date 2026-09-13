@@ -85,6 +85,23 @@ package O2c_Ir_Lower is
    procedure Addr_Global (Name : String; Slots : Natural;
                           Nested : Natural := 0);
 
+   --  The VALUE of a variable, and the STORE of one.  Four helpers because the
+   --  parser picks between a frame local and a module variable at each use, and
+   --  it must not get that wrong (its own comment: reading a zeroed global
+   --  where a parameter was meant is silent).  `Slot >= 0` in the caller decides
+   --  local-versus-global, which is the caller's fact.
+   --
+   --  A LOAD leaves the value on the operand stack - that is what an expression
+   --  wants, and it is why Op_Load_Local's and Op_Copy's Dst are optional.  A
+   --  STORE consumes the value the front end has already pushed: it is expressed
+   --  as a source that IS the stack (a temp), not as an op with no source, so
+   --  the model keeps meaning what it says.  All four no-op outside bytecode
+   --  mode.
+   procedure Load_Local  (Slot : Natural);
+   procedure Store_Local (Slot : Natural);
+   procedure Load_Global (Name : String);
+   procedure Store_Global (Name : String);
+
    --  CONTRACT: a local named in a quad must already have been declared to the
    --  emitter with `O2c_BC.Local` - the lowering resolves the name through the
    --  emitter's table and refuses by name when it is absent.

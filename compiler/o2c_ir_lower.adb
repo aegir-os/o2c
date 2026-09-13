@@ -162,6 +162,58 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Store_Fld;
 
+   procedure Load_Local (Slot : Natural) is
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Load_Local, Imm_1 => Slot);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Load_Local;
+
+   procedure Store_Local (Slot : Natural) is
+      T : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      --  The value is the operand stack: a temp names it, and Push_Value emits
+      --  nothing for one.  That is the front end's shape for every assignment -
+      --  it pushes as it parses - so this is what keeps the emitted image the
+      --  same while making the store a real quad with a real source.
+      T := O2c_Ir.New_Temp (Typ => 0);
+      O2c_Ir.Emit (O2c_Ir.Op_Store_Local, Src1 => T, Imm_1 => Slot);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Store_Local;
+
+   procedure Load_Global (Name : String) is
+      V : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      V := O2c_Ir.New_Global (Name, Typ => 0);
+      O2c_Ir.Emit (O2c_Ir.Op_Copy, Src1 => V);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Load_Global;
+
+   procedure Store_Global (Name : String) is
+      T : Value_Id;
+      V : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode then
+         return;
+      end if;
+      T := O2c_Ir.New_Temp (Typ => 0);
+      V := O2c_Ir.New_Global (Name, Typ => 0);
+      O2c_Ir.Emit (O2c_Ir.Op_Copy, Dst => V, Src1 => T);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Store_Global;
+
    procedure Addr_Global (Name : String; Slots : Natural;
                           Nested : Natural := 0) is
       V : Value_Id;
@@ -264,6 +316,14 @@ package body O2c_Ir_Lower is
               & "frame: " & To_String (I.Name);
          end if;
          O2c_BC.Load_Local (Natural (S));
+      elsif I.Kind = V_Temp then
+         --  The mirror of Store_Value's V_Temp case, and the reason a store can
+         --  be a quad with a source rather than an op with a hole in it: a
+         --  temp's home IS the operand stack, so its producer left the value
+         --  there and there is NOTHING to emit here.  The emitter's depth model
+         --  still checks the consumer, so a temp that nothing produced underflows
+         --  loudly rather than storing nothing.
+         null;
       elsif I.Kind = V_Global then
          O2c_BC.Load (O2c_BC.Global (To_String (I.Name)));
       else
@@ -332,8 +392,13 @@ package body O2c_Ir_Lower is
       --  image.  That property is the whole reason the op set is closed.
       case Q.Op is
          when Op_Copy =>
+            --  A Dst only when the value is to LAND somewhere: with no Dst this
+            --  is the push an expression needs, which is how the front end reads
+            --  a variable's value into the operand stack.
             Push_Value (Q.Src1);
-            Store_Value (Q.Dst);
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
 
          when Op_Nop =>
             null;
@@ -374,7 +439,9 @@ package body O2c_Ir_Lower is
 
          when Op_Load_Local =>
             O2c_BC.Load_Local (Q.Imm_1);
-            Store_Value (Q.Dst);
+            if Q.Dst /= No_Value then
+               Store_Value (Q.Dst);
+            end if;
 
          when Op_Store_Local =>
             Push_Value (Q.Src1);

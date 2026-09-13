@@ -319,20 +319,25 @@ package body O2c_Compiler is
    procedure Bc_Load (Ada_Name : String) is
       S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
    begin
+      --  The CHOICE stays here (it is the parser's fact); the EMISSION is the
+      --  IR's.  A load leaves the value on the operand stack, which is what the
+      --  calling expression wants, so the quad carries no Dst.
       if S >= 0 then
-         O2c_BC.Load_Local (Natural (S));
+         O2c_Ir_Lower.Load_Local (Natural (S));
       else
-         O2c_BC.Load (O2c_BC.Global (Ada_Name));
+         O2c_Ir_Lower.Load_Global (Ada_Name);
       end if;
    end Bc_Load;
 
    procedure Bc_Store (Ada_Name : String) is
       S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
    begin
+      --  And a store consumes the value the front end has already pushed, which
+      --  the IR expresses as a source that IS the operand stack.
       if S >= 0 then
-         O2c_BC.Store_Local (Natural (S));
+         O2c_Ir_Lower.Store_Local (Natural (S));
       else
-         O2c_BC.Store (O2c_BC.Global (Ada_Name));
+         O2c_Ir_Lower.Store_Global (Ada_Name);
       end if;
    end Bc_Store;
    Used_Int_Arr  : Boolean := False;  --  need O2c_Int_Arr base (M12)
@@ -2349,8 +2354,8 @@ package body O2c_Compiler is
                   if Syms (Id).Open_Arr and then Sl >= 0 then
                      --  Forwarding an ARRAY OF formal: it already carries
                      --  its address and length in its own two slots.
-                     O2c_BC.Load_Local (Natural (Sl));
-                     O2c_BC.Load_Local (Natural (Sl) + 1);
+                     O2c_Ir_Lower.Load_Local (Natural (Sl));
+                     O2c_Ir_Lower.Load_Local (Natural (Sl) + 1);
                   elsif Syms (Id).Open_Arr then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "forwarding a global ARRAY OF parameter is not yet "
@@ -3486,7 +3491,7 @@ package body O2c_Compiler is
                               raise O2c_BC.Wrong_Construct with "bytecode "
                                 & "backend: LEN of an unknown parameter";
                            end if;
-                           O2c_BC.Load_Local (Natural (Sl) + 1);
+                           O2c_Ir_Lower.Load_Local (Natural (Sl) + 1);
                         end;
                      elsif Syms (LId).UT /= 0
                        and then UTypes (Syms (LId).UT).Arr_Len > 0
@@ -4218,7 +4223,7 @@ package body O2c_Compiler is
                                 & "backend: ARRAY OF parameter '" & Nm
                                 & "' is not in the frame";
                            end if;
-                           O2c_BC.Load_Local (Natural (Sl));
+                           O2c_Ir_Lower.Load_Local (Natural (Sl));
                         end if;
                         R.Text := To_Unbounded_String (Nm);
                         R.Typ := T_Str;
@@ -4231,7 +4236,7 @@ package body O2c_Compiler is
                      --  An open array's address is in the parameter's own
                      --  slot, not in a global run, so the base is a local
                      --  load rather than a global address.
-                     O2c_BC.Load_Local
+                     O2c_Ir_Lower.Load_Local
                        (Natural (O2c_BC.Local_Slot (Ada_Id (Nm))));
                   end if;
                   declare
@@ -4259,7 +4264,7 @@ package body O2c_Compiler is
                            O2c_BC.Trap (0);
                            O2c_BC.Mark (L_In);
                            O2c_BC.Dup_Top;
-                           O2c_BC.Load_Local (Len);
+                           O2c_Ir_Lower.Load_Local (Len);
                            O2c_BC.Bin (O2c_BC.Lt);
                            O2c_BC.Jump (O2c_BC.Jnz, L_Ok);
                            O2c_BC.Trap (0);
@@ -6880,7 +6885,7 @@ package body O2c_Compiler is
          --  The loop variable lived in a frame slot; a module variable has
          --  to carry the final value back to its global.
          if not In_Proc then
-            O2c_BC.Load_Local (Bc_Slot);
+            O2c_Ir_Lower.Load_Local (Bc_Slot);
             O2c_BC.Store (O2c_BC.Global (Ada_Id (V_Name (1 .. V_Len))));
          end if;
       end if;
@@ -9176,11 +9181,11 @@ package body O2c_Compiler is
                                           O2c_Ir.Emit (O2c_Ir.Op_Label, Dst => V_Top);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
-                                          O2c_BC.Load_Local (I_Sl);
+                                          O2c_Ir_Lower.Load_Local (I_Sl);
                                           if Is_Open then
                                              --  ... and its length is the parameter's second slot, so the bound is
                                              --  loaded rather than fixed at compile time.
-                                             O2c_BC.Load_Local (Natural (P_Sl) + 1);
+                                             O2c_Ir_Lower.Load_Local (Natural (P_Sl) + 1);
                                           else
                                              O2c_BC.Push_Int (N);
                                           end if;
@@ -9201,19 +9206,19 @@ package body O2c_Compiler is
                                           if Is_Open then
                                              --  The caller's characters, addressed through the parameter's first
                                              --  slot.
-                                             O2c_BC.Load_Local (Natural (P_Sl));
+                                             O2c_Ir_Lower.Load_Local (Natural (P_Sl));
                                           else
                                              O2c_Ir_Lower.Addr_Global
                                                   (Ada_Id (To_String (A.Text)), Total_Slots (AU));
                                           end if;
-                                          O2c_BC.Load_Local (I_Sl);
+                                          O2c_Ir_Lower.Load_Local (I_Sl);
                                           O2c_Ir.Emit (O2c_Ir.Op_Load_Idx, Dst => V_V, Imm_1 => 1);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
                                           --  The terminator, tested as the NEGATION so the jump is the false case:
                                           --  the IR carries a jump-when-false, not a jump-when-true, and a condition
                                           --  written in the wrong polarity is a loop that runs and prints wrongly.
-                                          O2c_BC.Load_Local (V_Sl);
+                                          O2c_Ir_Lower.Load_Local (V_Sl);
                                           O2c_BC.Push_Int (0);
                                           O2c_Ir.Emit (O2c_Ir.Op_Ne, Dst => V_Cond, Src1 => V_V, Src2 => V_Zero);
                                           O2c_Ir_Lower.Emit_Quad
@@ -9221,9 +9226,9 @@ package body O2c_Compiler is
                                           O2c_Ir.Emit (O2c_Ir.Op_Jump_False, Src1 => V_End, Src2 => V_Cond);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
-                                          O2c_BC.Load_Local (V_Sl);
+                                          O2c_Ir_Lower.Load_Local (V_Sl);
                                           O2c_Ir_Lower.Call_Native (4, 1);
-                                          O2c_BC.Load_Local (I_Sl);
+                                          O2c_Ir_Lower.Load_Local (I_Sl);
                                           O2c_BC.Push_Int (1);
                                           O2c_Ir.Emit (O2c_Ir.Op_Add, Dst => V_I, Src1 => V_I, Src2 => V_One);
                                           O2c_Ir_Lower.Emit_Quad

@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         371
+    commits         372
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2998,6 +2998,74 @@ this measurement rather than trust it.
                                   control flow and stack shuffles
     Global 6, Load 1, Store 3     scalar global access, which the IR already
                                   models as V_Global operands of Op_Copy/Op_Store
+
+### 3br. DONE — the operand family: the parser reads and writes variables through quads
+
+The plan said "a local's slot, inline".  Measuring found two things the plan did
+not know, and both made the stage smaller and more interesting than it looked:
+
+1. **The operand seam already existed.**  `Bc_Load`/`Bc_Store` pick LOAD_L/STORE_L
+   against the current frame versus LOAD_G/STORE_G against the globals block, with
+   the parser's own warning attached: reading a zeroed global instead of a
+   parameter is silent.  Sixteen call sites go through them, so re-routing those
+   two BODIES covers all sixteen.
+2. **The IR already had the model for "the value is on the stack" and had never
+   learned it.**  `Store_Value (V_Temp)` emits nothing — a temp's home IS the
+   operand stack — but `Push_Value` had no `V_Temp` case, so a *consumer* could
+   not say the same thing.  Adding it is the mirror image of a case that has been
+   there since the print loop.
+
+**So a store is written as a source that IS the stack, not as an op with a hole.**
+`Store_Local (Slot)` mints a temp and emits `Op_Store_Local (Src1 => temp)`; the
+lowering pushes nothing for a temp and emits the store — one instruction, exactly
+what the hand-written site emitted.  The alternative was `Src1 = No_Value` meaning
+"already on the stack", which would have made one op mean two things; the project's
+rule is that an op's contract should mean what it says.  The safety is the
+emitter's: a temp that nothing produced still meets `Store_Local`'s `Popped (1)`
+and underflows LOUDLY rather than storing nothing.
+
+**What landed:**
+
+    Push_Value        the V_Temp case (push nothing: the value is already there)
+    Op_Copy           Dst now optional - with none, the copy IS the push an
+    Op_Load_Local     expression wants (and the two that already had a Dst still
+                      store, so the print loop is untouched)
+    four helpers      Load_Local / Store_Local / Load_Global / Store_Global,
+                      one line at a site, no-ops outside bytecode mode
+    16 raw sites      every remaining `O2c_BC.Load_Local` in the parser
+    Bc_Load/Bc_Store  bodies rerouted, which is 16 more callers
+
+    grep -c 'O2c_BC.Load_Local|O2c_BC.Store_Local' compiler/o2c_compiler.adb = 0
+
+**And one op is now measured as unnecessary.**  `Op_Addr_Local` was reserved in M1
+for `d := &s1`, but this VM has no address-of-local: an open ARRAY parameter's base
+is a VALUE load (its own slot, and slot+1 for the length), which is exactly what
+this commit wired.  The enum is append-only, so the member stays — with the comment
+saying it is reserved and why nothing needs it, which is the honest option when
+deleting is not one.
+
+**Evidence**: **72 of 72** fixtures byte-identical against a front end built from
+`HEAD`, the imported probes still printing 7 / 3 / 8 — worth more than usual here
+because `Push_Value` and two ops' contracts changed under the whole corpus.
+Self-test 57 -> 60 checks (a no-Dst copy is one push; a no-Dst local load is one
+instruction; a store whose source is the stack is one instruction).  Verified:
+gate30, all seven suites green, zero warnings.
+
+**What is left, and it is now the short list:**
+
+    Bin 42, Push_Int 24       arithmetic and constants - M5's expression builder
+    Mark 20, Jump 18          control flow
+    Set_* 9, Band 1, Bor 1    the OPERATOR families - the other half of the
+                              decision to do locals first, and the one that forces
+                              a design choice: `and`/`or` on BOOLEANS emit
+                              Band/Bor while on SETS they emit Set_Intersect/
+                              Set_Union, and both operands are Tc_Word, so either
+                              the SET ops are appended as their own quads or
+                              Type_Class grows a Tc_Set and Bc_Op must then decide
+                              every arithmetic op's behaviour at it
+    Store 2, Global 4         scalar global access (Op_Copy with a V_Global Dst)
+    Trap 6, Dup_Top 8, Discard 5, Un 3
+                              stack shuffles and the bounds trap
 
 ## 4. Method — what worked, and what did not
 

@@ -103,6 +103,7 @@ begin
    --  is to notice when the lowering changes, not to tolerate it.
    declare
       Lx, Lg, C5 : Value_Id;
+      Tp : Value_Id;
       Sl, P, Before : Natural;
       Raised2 : Boolean := False;
    begin
@@ -119,6 +120,7 @@ begin
       --  contract the compiler must respect too, and the reason this self-test
       --  ran red before it ran green.
       Sl := O2c_BC.Local ("x");
+      Tp := New_Temp (Typ => 1);
       pragma Unreferenced (Sl, P);
 
       Before := O2c_BC.Insns;
@@ -126,6 +128,16 @@ begin
         ((Op => Op_Copy, Dst => Lx, Src1 => C5, Src2 => No_Value, others => <>));
       Check (O2c_BC.Insns = Before + 2, "x := 5 lowers to two instructions");
       Check (O2c_Ir_Lower.Lowered = 1, "the lowerer counted that quad");
+
+      --  The same copy with NO Dst, which is the shape every expression has:
+      --  the value lands on the operand stack and the caller consumes it from
+      --  there, so the push is the whole quad.
+      Before := O2c_BC.Insns;
+      O2c_Ir_Lower.Emit_Quad
+        ((Op => Op_Copy, Src1 => C5, Src2 => No_Value, others => <>));
+      Check (O2c_BC.Insns = Before + 1,
+             "a copy with no Dst is one push (got"
+               & Natural'Image (O2c_BC.Insns - Before) & ")");
 
       Before := O2c_BC.Insns;
       O2c_Ir_Lower.Emit_Quad
@@ -286,12 +298,33 @@ begin
                 "a local load and its store are two instructions (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
+         --  And the load with no Dst: one instruction, the push itself.
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Load_Local, Imm_1 => Sl, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "a local load with no Dst is one instruction (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
          O2c_BC.Push_Int (7);
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Emit_Quad
            ((Op => Op_Store_Local, Src1 => C5, Imm_1 => Sl, others => <>));
          Check (O2c_BC.Insns = Before + 2,
                 "a pushed value and a local store are two instructions (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
+         --  The OTHER store shape, and the one the parser actually uses: the
+         --  value is already on the stack, named by a TEMP whose home is the
+         --  stack.  Push_Value emits nothing for a temp, so the store is ONE
+         --  instruction - which is what makes the IR route identical to the
+         --  hand-written site it replaces.
+         O2c_BC.Push_Int (7);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Store_Local, Src1 => Tp, Imm_1 => Sl, others => <>));
+         Check (O2c_BC.Insns = Before + 1,
+                "a store whose source IS the stack is one instruction (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
          O2c_BC.Push_Int (0);
