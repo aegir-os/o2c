@@ -8,11 +8,13 @@
 --
 --  It is deliberately self-checking: no golden file, exit status 0 or 1, so it
 --  can run inside the existing host-tool suite.
+with O2c_Bc;
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Text_IO; use Ada.Text_IO;
 
 with O2c_Ir; use O2c_Ir;
+with O2c_Ir_Lower;
 
 procedure O2c_Ir_Selftest is
 
@@ -92,6 +94,56 @@ begin
    end;
 
    Dump;
+
+   --  ---- the lowering, against the REAL emitter -------------------------
+   --  A quad the front end would build for `x := 5`: one of M2's construct.
+   --  The instruction counts are pinned on purpose - the point of a self-test
+   --  is to notice when the lowering changes, not to tolerate it.
+   declare
+      Lx, Lg, C5 : Value_Id;
+      Sl, P, Before : Natural;
+      Raised2 : Boolean := False;
+   begin
+      Init;                       --  a fresh IR and a fresh emitter run
+      Begin_Proc;
+      Lx := New_Local ("x", Typ => 1);
+      Lg := New_Global ("g", Typ => 1);
+      C5 := Const_Int (5);
+
+      O2c_BC.Begin_Mode;
+      P := O2c_BC.Begin_Proc (1, 0);
+      --  AFTER Begin_Proc, not before: interning a local allocates a frame
+      --  slot, so the emitter requires an open procedure - which is the
+      --  contract the compiler must respect too, and the reason this self-test
+      --  ran red before it ran green.
+      Sl := O2c_BC.Local ("x");
+      pragma Unreferenced (Sl, P);
+
+      Before := O2c_BC.Insns;
+      O2c_Ir_Lower.Emit_Quad
+        ((Op => Op_Copy, Dst => Lx, Src1 => C5, Src2 => No_Value));
+      Check (O2c_BC.Insns = Before + 2, "x := 5 lowers to two instructions");
+      Check (O2c_Ir_Lower.Lowered = 1, "the lowerer counted that quad");
+
+      Before := O2c_BC.Insns;
+      O2c_Ir_Lower.Emit_Quad
+        ((Op => Op_Copy, Dst => Lg, Src1 => C5, Src2 => No_Value));
+      Check (O2c_BC.Insns = Before + 2,
+             "a global store lowers to two instructions");
+
+      begin
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Jump, Dst => No_Value, Src1 => No_Value,
+             Src2 => No_Value));
+      exception
+         when Program_Error =>
+            Raised2 := True;
+      end;
+      Check (Raised2, "an op with no lowering raises rather than passing");
+
+      O2c_BC.End_Proc;
+      O2c_BC.Finish;
+   end;
 
    --  The two paths that must RAISE: a capacity overrun is reported, never
    --  truncated (the project's rule for capacity tables), and an out-of-range

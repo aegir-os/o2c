@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         345
+    commits         346
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2112,6 +2112,44 @@ Zero warnings, all seven suites green, 52 fixtures corroborated by both backends
 **M2 next**: one construct end to end - a scalar assignment to a local - with the
 parser building IR for it and its bytecode emitted FROM the IR, everything else
 still inline.  That is where the seam starts to carry weight.
+
+### 3ar. M2a DONE - the lowering pass, verified against the real emitter
+
+`compiler/o2c_ir_lower.ads/.adb`: IR quads -> the bytecode emitter, in ONE place,
+which is where the calling convention and the stack discipline will live instead
+of being duplicated per branch in the parser.
+
+Two design points that are the point of the whole exercise:
+
+- **no `others` arm.**  `case Q.Op is` enumerates every member, so adding an Op
+  to the IR without deciding how it lowers is a COMPILE ERROR here rather than a
+  silently empty image.  That property only holds while there is no `others`, and
+  it is the reason the op set is closed;
+- **only `Op_Copy` is lowered**, and every other op says so by name:
+  "O2c_Ir_Lower: OP_JUMP has no lowering yet".  Ops arrive with the construct
+  that needs them, one stage at a time, so nothing here is an unverified arm.
+
+**Verified against the real emitter**, in the self-test that already ran from
+`tests/run_bc.sh`: `x := 5` (a quad the front end will build in M2b) lowers to
+exactly two instructions, a global store lowers to two, the lowerer counts what
+it did (so "the IR path ran" is a number rather than an assumption), and an op
+with no lowering RAISES rather than passing.
+
+**And it ran red before it ran green**, which is the useful part: interning a
+local allocates a frame slot, so `O2c_BC.Local` requires an OPEN procedure, and
+the test had it before `Begin_Proc`.  That is not a test detail - the compiler
+must respect the same contract in M2b, and it is exactly the kind of ambient
+requirement the old inline structure kept implicit, where it was invisible.
+
+Three more context clauses were the compiler's to name, not mine to guess:
+`with O2c_Ir` in the spec, `with O2c_Bc` and `use Ada.Strings.Unbounded` in the
+body - the second because a spec's `use` does not reach its body.
+
+All seven suites green, 52 fixtures corroborated by both backends, zero warnings.
+
+**M2b next**: the parser builds IR for `x := <int literal>` with `x` a scalar
+local, and its bytecode comes FROM the IR - the first construct whose evidence is
+behavioural rather than structural.
 
 ## 4. Method — what worked, and what did not
 
