@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         399
+    commits         400
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4246,6 +4246,52 @@ not, `new (f)` allocates the wrong size, the loop's writes land outside the obje
 Files symptom follows: the garbage name the host filesystem saw, and `Length` reading 0 because the
 two fields overlap instead of sitting 72 bytes apart.  Listing the TYPES descriptors with their
 sizes and name refs settles it, and that is the next command, not the next turn's design.
+
+### 3ct. ROOT CAUSE — an array-valued FIELD has no correct lowering, and Files is built on one
+
+3cs left one question: is descriptor 1 the `FileDesc`.  It is, and the answer resolves the cluster.
+
+**The descriptor** (TYPES is 24 bytes, one descriptor, in the flipped-Files image):
+
+    kind=3 (RECORD)  flags=0  size=80  name_ref=0   no field metadata   +16 has a 1
+
+`FileDesc` is `name: A64; size: longint` = 64 + 8 = 72, but the size is **80** - and the emitted
+store is `STORE_FLD_I 72`, i.e. `size` sits at 8 + 64.  So the fixed array field carries an **8-byte
+length word in front of its 64 characters**.  That is the layout; the question is who disagrees.
+
+**The natives do.**  `o2c_fstat`/`fread`/`fwrite`/`fclose` are in `obc_vm.adb` 1528-1585 and they read
+the name with `Name_At (Args (0))` - bytes from the address given, from offset **0**, to a NUL, "as
+every string here is".  The Oakwood contract assumes the characters start at the address passed.
+
+**And the compiler cannot produce that address for a field.**  Two probes:
+
+    Out.String (fp^.name)   ->  vm: malformed code        (the verifier rejects the image)
+    Show (fp^.name)         ->  'fp' is not an array variable   (refused)
+
+So an array-valued field has no correct lowering: the value path REFUSES, and the `Out.String`
+intrinsic emits an image that will not load.  Both are loud, which is the rule working.
+
+**Files is built on exactly that construct, through the intrinsic arms** - `Read`, `Write`,
+`WriteString` and `Close` all pass `r.f^.name` to a native:
+
+    r.res := FRead (r.f^.name, r.pos, r.cur);      r.res := FClose (r.f^.name)
+
+The intrinsic arms accept any expression, so they do not refuse - and there the push is silently
+wrong, which is why the flipped image RAN and wrote a file with a garbage name instead of failing.
+
+**That is the whole mystery, and it explains every symptom the last six entries measured.**  `New`
+is fine and identical to `Lib2.New` (3co/3cs) - it only does INDEXED writes, which are fine.  The
+garbage name on the host filesystem came from `FWrite (r.f^.name, ...)`, which opened the file at a
+garbage address: the name was never wrong, the ADDRESS was.  `Length` read 0 because nothing was
+ever written through a correct name.  And the reason a builtin `New` and a user `New` behave
+differently is that the user one is never reached with an array-valued field: `Show (fp^.name)` is
+refused, so no user module can even express the construct - only a builtin's own body can, through
+an intrinsic arm, which is the one path that does not check.
+
+**So the Files fix is a feature, and a small one**: lower an array-valued field to the ADDRESS of
+its characters (the natives' contract, offset 0 of the field's data, not of the field's storage),
+in the intrinsic arms and the value path alike.  Then `FRead`/`FWrite`/`FClose` get a real address,
+and the Files bodies become correct - they are already correct in every other respect.
 
 ## 4. Method — what worked, and what did not
 
