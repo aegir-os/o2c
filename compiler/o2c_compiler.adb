@@ -369,7 +369,10 @@ package body O2c_Compiler is
    --  The bytecode counterpart of Loop_Lbl: the label EXIT jumps to.  Sized
    --  and indexed by Loop_Depth, which is bounds-checked against Loop_Lbl
    --  before either is used, so the two cannot disagree about the limit.
-   Bc_Loop_Exit : array (1 .. 64) of Natural := (others => 0);
+   --  Where EXIT lands, per LOOP nesting depth.  IR labels now: the quad a
+   --  Jump builds names one, and the lowering owns the mapping onto the
+   --  emitter's numbering - so nothing here has to know it.
+   Bc_Loop_Exit : array (1 .. 64) of O2c_Ir.Label_Id := (others => 0);
 
    procedure Append_Decl (S : String) is
    begin
@@ -6604,8 +6607,8 @@ package body O2c_Compiler is
       --  once and fell through, and EXIT vanished - so `loop i := i + 1 end`
       --  terminated instead of running forever.  A wrong image, no
       --  diagnostic: the failure mode this backend exists to refuse.
-      L_Top  : Natural := 0;
-      L_Exit : Natural := 0;
+      L_Top  : O2c_Ir.Label_Id := 0;
+      L_Exit : O2c_Ir.Label_Id := 0;
    begin
       Next;                          --  LOOP
       Loop_Depth := Loop_Depth + 1;
@@ -6615,15 +6618,14 @@ package body O2c_Compiler is
            & Natural'Image (Cur.Line) & ")";
       end if;
       Loop_N := Loop_N + 1;
-      if O2c_BC.Bytecode_Mode then
-         --  Recorded per depth before the body is parsed, so a nested EXIT
-         --  inside a WHILE/REPEAT/FOR still leaves THIS loop - which is what
-         --  the Ada label does for the Ada side.
-         L_Top := New_Bc_Label;
-         L_Exit := New_Bc_Label;
-         Bc_Loop_Exit (Loop_Depth) := L_Exit;
-         O2c_BC.Mark (L_Top);
-      end if;
+      --  Recorded per depth before the body is parsed, so a nested EXIT inside
+      --  a WHILE/REPEAT/FOR still leaves THIS loop - which is what the Ada
+      --  label does for the Ada side.  No mode test any more: New_Lbl and Mark
+      --  are both no-ops outside bytecode mode.
+      L_Top := New_Lbl;
+      L_Exit := New_Lbl;
+      Bc_Loop_Exit (Loop_Depth) := L_Exit;
+      O2c_Ir_Lower.Mark (L_Top);
       declare
          Img : constant String := Natural'Image (Loop_N);
          Lbl : constant String := "O2c_Loop_"
@@ -6643,12 +6645,10 @@ package body O2c_Compiler is
          end;
          Expect (Lex.Tok_End, "'END' closing the LOOP");
          Next;
-         if O2c_BC.Bytecode_Mode then
-            --  The back-jump, then the exit mark: falling off the end of the
-            --  body loops, and EXIT lands here instead of looping.
-            O2c_BC.Jump (O2c_BC.Jmp, L_Top);
-            O2c_BC.Mark (L_Exit);
-         end if;
+         --  The back-jump, then the exit mark: falling off the end of the body
+         --  loops, and EXIT lands here instead of looping.
+         O2c_Ir_Lower.Jump (L_Top);
+         O2c_Ir_Lower.Mark (L_Exit);
          Append_Body ("      end loop " & Lbl & ";");
       end;
       Loop_Depth := Loop_Depth - 1;
@@ -6661,13 +6661,10 @@ package body O2c_Compiler is
            & "statement (line " & Natural'Image (Cur.Line) & ")";
       end if;
       Next;                          --  past EXIT
-      if O2c_BC.Bytecode_Mode then
-         --  An absolute jump out of the innermost LOOP, wherever EXIT sits.
-         --  Leaving a nested WHILE or FOR takes no unwinding: frames are
-         --  frame slots and every loop is jumps, so there is no state to
-         --  restore.
-         O2c_BC.Jump (O2c_BC.Jmp, Bc_Loop_Exit (Loop_Depth));
-      end if;
+      --  An absolute jump out of the innermost LOOP, wherever EXIT sits.
+      --  Leaving a nested WHILE or FOR takes no unwinding: frames are frame
+      --  slots and every loop is jumps, so there is no state to restore.
+      O2c_Ir_Lower.Jump (Bc_Loop_Exit (Loop_Depth));
       Append_Body ("      exit " & To_String (Loop_Lbl (Loop_Depth)) & ";");
    end Parse_Exit;
 
@@ -6719,8 +6716,9 @@ package body O2c_Compiler is
       G_Rec (G_N) := GT;
       declare
          Before : constant Natural := Length (Body_Buf);
-         L_End  : constant Natural := New_Bc_Label;
+         L_End  : O2c_Ir.Label_Id := 0;
       begin
+         L_End := New_Lbl;
          if O2c_BC.Bytecode_Mode then
             --  Oberon's WITH runs the body only if the object's dynamic type
             --  is the guard's, or an extension of it, and *skips* it when
@@ -6728,14 +6726,16 @@ package body O2c_Compiler is
             --  GUARD, whose trap belongs to the v(T) form.  Without it the
             --  body ran regardless: it printed the right answer for a
             --  matching object and the wrong one silently for any other.
+            --  The two calls that HAVE to stay guarded are the raw emitter
+            --  ones: Bc_Load resolves a slot through the emitter's tables and
+            --  Type_Test builds a descriptor, and both raise outside bytecode
+            --  mode.  The branch itself does not need the test.
             Bc_Load (VName (1 .. V_Len));
             O2c_BC.Type_Test (Desc_For (GT));
-            O2c_BC.Jump (O2c_BC.Jz, L_End);
          end if;
+         O2c_Ir_Lower.Jump_False (L_End);
          Statement_Seq;              --  until END
-         if O2c_BC.Bytecode_Mode then
-            O2c_BC.Mark (L_End);
-         end if;
+         O2c_Ir_Lower.Mark (L_End);
          if Length (Body_Buf) = Before then
             Append_Body ("         null;");
          end if;

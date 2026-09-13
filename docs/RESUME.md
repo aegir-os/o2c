@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         375
+    commits         376
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3245,6 +3245,46 @@ green, zero warnings.
 So the natural next slice is LOOP/EXIT + FOR + WITH (8 sites, no new op needed), then CASE
 with `Op_Dup`, then the bounds regime with a trap op — and only then is the parser's
 statement surface fully quad-built.
+
+### 3bv. Control flow, part 2 — LOOP/EXIT and WITH, and where the guard belongs
+
+Six sites: `Parse_Loop` (Mark `L_Top`, Jump `L_Top`, Mark `L_Exit`), `Parse_Exit` (a Jump into
+the exit label recorded per LOOP depth) and `Parse_With` (Jump_False and Mark on `L_End`).
+`Bc_Loop_Exit`'s element type moved to `O2c_Ir.Label_Id`, so EXIT's target is an IR label and
+nothing outside the lowering knows the emitter's numbering.
+
+**And it answered a question 3bu raised: WHERE THE GUARD BELONGS.**  Two of the three
+statements lost their `if O2c_BC.Bytecode_Mode then` tests outright — `New_Lbl` and the four
+branch helpers are no-ops outside bytecode mode — but `Parse_With` KEEPS one, now around only
+
+    Bc_Load (VName ...)        resolves a slot through the emitter's tables
+    O2c_BC.Type_Test (...)     builds a descriptor
+
+because those are the calls that RAISE outside bytecode mode (`Global` refuses before
+`Begin_Mode`).  So the rule is stated rather than guessed: **the guard is for the calls that
+need the emitter, not for the branch** — and a guard kept "to be safe" hides which calls those
+are, which is how a mode bug survives a migration that looked mechanical.
+
+**Evidence**: **72 of 72** identical against a front end built from `HEAD` (this stage is the
+identity case as well — the same allocations in the same order), `run_bc` 123 goldens green.
+Verified: gate34, all seven suites green, zero warnings.
+
+**What is left, measured — 22 Mark/Jump sites and the shuffles:**
+
+    12 bounds checks + 6 Trap (0) + 3 Lt + 3 Ge + Dup_Top
+                                the array index regime: needs Op_Dup and Op_Trap (append-only),
+                                after which its pieces all already exist - Bin_Op for the
+                                compare, Jump_True and Mark for the branch
+     8 Parse_Case               its label matching is Dup_Top; Push_Int; Eq; Jnz, so Op_Dup
+                                again, and everything else exists
+     2 Parse_For                the two Marks feed For_Enter/For_Next, whose labels are
+                                OPERANDS of the opcode (a fixup each) rather than Mark/Jump
+                                pairs - so FOR needs its own ops or an exposed mapping, and it
+                                is the one place where "hide the emitter's numbering" cannot
+                                hold yet
+     2 Un (Neg/Rneg), 5 Discard, 5 Push_Str, 23 Push_Int
+                                the unary sign needs a Un_Op helper (Bin_Op's mirror); the rest
+                                are pushes feeding ops that already declare their operands
 
 ## 4. Method — what worked, and what did not
 
