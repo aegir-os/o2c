@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         395
+    commits         396
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4114,6 +4114,37 @@ builtin path is fine and the fault is in what the module's FIRST compilation lef
 The flip is out; the metric is at `Files.Old`; the ledger stands at seven.  Four of this session's
 Files entries were hypotheses, and three of them died on contact with a measurement - which is the
 case for measuring before editing that the method section keeps making, at a cost of one turn each.
+
+### 3cp. The Files comparison, and its instrument — which does not exist yet
+
+3co asked for a byte comparison of `New` between the builtin and user-library images.  Two facts
+came out of setting it up, and neither is the comparison itself.
+
+**The procedure table's stride is 24 bytes** (`Proc_Rec`), not the 16 the record's field layout
+suggests - `code_off` u32, `frame_slots` u32, `n_params` u16, `n_results` u16, `stack_max` u32 is
+20, and the record is padded.  My first parse read every other record as garbage (`nparams = 841`)
+and would have produced a confident, wrong comparison; the VM's own constant corrected it.
+
+**And the image carries no name map.**  Both images have only sections 3 (TYPES), 4 (CONST), 5
+(DATA) and 6 (CODE) - no EXPORT, no DEBUG - so there is no way to ask an image "which procedure is
+`New`".  That is why the harness has always taken names from the SOURCE and offsets from the
+image, and it means the comparison needs a **disassembler over the proc table** rather than a name
+lookup.
+
+**So the instrument is the next step, not the finding.**  Two ways to get it, and the first is
+cheap: emit the DEBUG section (the spec reserves id 7 for exactly this, *"source file names, line
+table, procedure names"*, and the header already has the flags slot for it) and the comparison
+becomes a lookup.  The second is a disassembler in the harness.
+
+**Where the Files hunt stands after five entries:** the compiler is cleared (3cn), the native
+argument convention is consistent (3cn), every language shape is correct including the exact layout
+and the cross-module case (3co), the writes reach the host with the wrong values (3co), and the
+one thing that differs between a working `New` and a broken one is that one is a BUILTIN.  Each of
+those was a measurement, and three of them killed a hypothesis.  That is the method working, and it
+is also slow - the honest read is that Files is a CLUSTER (3cl predicted six defects; the Strings
+path had six) and that the same effort spent on a SWEEP for the class would cover more ground:
+every instance of it so far - 3cb, 3cc, 3ce, 3ci - was a parser branch that appends Ada text with
+no bytecode call and no refusal, and a scan for that shape would have found all four at once.
 
 ## 4. Method — what worked, and what did not
 
