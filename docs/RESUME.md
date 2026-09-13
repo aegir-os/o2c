@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         365
+    commits         366
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2669,6 +2669,47 @@ from a regression - the same blind spot AGENTS.md already records for the gap ha
 concluded the gate had stalled, from a comparison against timings in earlier logs - but
 that suite does two boots and it was 72 seconds in.  `pgrep` cost one command and would
 have shown QEMU alive and working.  Checking beat inferring, again.
+
+### 3bl. The metric's first real movement, measured and then REVERTED
+
+`hello.ob2` has refused at `Geom.Sqr is not yet supported` for many steps despite all
+the IR work.  This session asked the metric again and found the cause by reading the
+ORDER of statements rather than guessing:
+
+    line 12382   user libraries compiled here      <- Bytecode_Mode is whatever the
+                                                      last builtin left, i.e. FALSE
+    line 12393   O2c_BC.Bytecode_Mode := True       <- only the MAIN module
+
+So a user library's procedures never got a `Bc_Proc`, the import table carried 0, and
+the `Bc = 0` refusal was correct.  Builtins are different by design: the VM calls them
+as natives, so they must NOT be emitted.
+
+**One line - set `Bytecode_Mode := True` for the user-library loop - and the metric
+moved past two refusals:**
+
+    before:  bytecode backend: Geom.Sqr is not yet supported
+    after:   bytecode backend: Geom.SetBase is an FFI primitive and is not yet supported
+
+Sqr is the module's FIRST call; SetBase is a later one, so the change means Geom's own
+bodies were genuinely being compiled.  The machinery is all in place and was built for
+this: `Begin_Proc` returns a GLOBAL id, the export/import tables already carry
+`Bc_Proc`, the call paths already consume it, and the double-push that broke u3/u4 is
+already fixed (3677: "NOTHING is pushed here", with the note that the identical shape
+worked with local callees).
+
+**And it was reverted, deliberately.**  `hello.ob2` still does not compile - the change
+moves the refusal along, it does not remove it - while it alters how EVERY user library
+compiles, which is unverified and changes behaviour for programs the corpus does not
+cover.  Keeping it would be churn in the tree for no user-visible gain, and the project
+rule is not to start from a bad state.
+
+**What is NOT measured, and must not be assumed:** why `SetBase` is called an "FFI
+primitive".  `SetBase` in geom.ob2 is an ordinary procedure with a body.  The refusal
+text at 7958 is a DEFAULT message, so it may be a misleading diagnosis of a different
+cause - and the expression path looks the id up in `Xs (XI).Bc` while the statement
+path uses `Syms (Idx).Bc_Proc`, which are two different lookups and only the first is
+known to be wired to the export table.  That is a HYPOTHESIS from reading two call
+sites, not a measurement, and the next step is to measure it rather than to act on it.
 
 ## 4. Method — what worked, and what did not
 
