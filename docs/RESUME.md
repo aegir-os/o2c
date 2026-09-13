@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         394
+    commits         395
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4077,6 +4077,43 @@ reads, not about what the compiler pushed.
 
 Nothing changed in code this round: a hypothesis tested and killed, which is the outcome the method
 section asks for.  The flip is out, the metric is at `Files.Old`, and the ledger stands at seven.
+
+### 3co. Files: every SHAPE works, and the one that fails is IDENTICAL to one that works
+
+3cn said the compiler was cleared and the VM's natives were next.  That was too fast.  Four more
+measurements, and the last one changes the question.
+
+**The one command 3cn asked for, run from a scratch directory:**
+
+    Files.New ("out.txt"); Files.Register (f); Files.Set (r, f, 0);
+    Files.WriteString (r, "abc"); Files.Close (r);
+    -> a file appears with a GARBAGE NAME ('(p\x0f...') and the content b'((('
+
+So the writes DO reach the host - the name and the bytes are both wrong - which rules out "nothing
+is emitted" and points at values, not plumbing.
+
+**Every shape, then, measured against it:**
+
+    a 64-char array field + a longint, written through a pointer   (Files.FileDesc's layout)  ABC, size-ok
+    a string LITERAL actual passed ACROSS a module boundary        Lib2.New ("out.txt")      out
+    Files.New's own source, as a USER library                      (the same twelve lines)   out
+    a `var Rider` written field by field, pointer field included                             7 same
+
+Every one correct.  And the last one is the finding: **`Files.New` and `Lib2.New` are the same
+twelve lines** - a local pointer, `new (f)`, the 64-step loop with `if i < len (s)`, the write
+through `f^.name[i]` - and one is right while the other writes a garbage name.  The difference is
+not the language, the layout, the open formal, the literal actual, or the module boundary: it is
+that one is compiled as a BUILTIN (`Compile_Builtin`, `Scoped => True`) and the other as a user
+library.
+
+**So the next step is a byte comparison, not another probe**: dump `New`'s code out of a
+Files-flipped image and out of the user-library image, and diff them.  They should be identical -
+same source, same compiler - so a difference names the bug directly, and no difference means the
+builtin path is fine and the fault is in what the module's FIRST compilation left behind.
+
+The flip is out; the metric is at `Files.Old`; the ledger stands at seven.  Four of this session's
+Files entries were hypotheses, and three of them died on contact with a measurement - which is the
+case for measuring before editing that the method section keeps making, at a cost of one turn each.
 
 ## 4. Method — what worked, and what did not
 
