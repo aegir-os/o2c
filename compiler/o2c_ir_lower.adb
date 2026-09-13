@@ -234,6 +234,18 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Push_Int;
 
+   procedure Push_Str (Text : String) is
+      C : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      C := O2c_Ir.Const_Str (Text);
+      O2c_Ir.Emit (O2c_Ir.Op_Copy, Src1 => C);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Push_Str;
+
    procedure Dup is
    begin
       if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
@@ -511,6 +523,10 @@ package body O2c_Ir_Lower is
          --  still checks the consumer, so a temp that nothing produced underflows
          --  loudly rather than storing nothing.
          null;
+      elsif I.Kind = V_Const_Str then
+         --  A string constant: its pool word holds the offset of the text inside
+         --  the CONST payload, which is what the VM's string ops consume.
+         O2c_BC.Push_Str (To_String (I.Name));
       elsif I.Kind = V_Global then
          O2c_BC.Load (O2c_BC.Global (To_String (I.Name)));
       else

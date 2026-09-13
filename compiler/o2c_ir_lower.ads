@@ -150,6 +150,7 @@ package O2c_Ir_Lower is
    --  value and nothing else.  The same helper covers an index bound, a literal
    --  operand and a length, which is what the statement sites kept spelling out.
    procedure Push_Int (V : Integer);
+   procedure Push_Str (Text : String);
 
    --  Duplicate the top of the operand stack.  Needed before a bounds compare,
    --  which must not consume the index it is about to use, and by CASE's label

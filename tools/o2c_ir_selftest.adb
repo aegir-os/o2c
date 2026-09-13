@@ -642,6 +642,16 @@ begin
                 "the constant push helper is one instruction (got"
                   & Natural'Image (O2c_BC.Insns - Before) & ")");
 
+         --  A string constant is the same shape with the pool's own opcode, and
+         --  it needed Push_Value to learn V_Const_Str - the kind was in the
+         --  value model from M1 and had no consumer until a site had a string
+         --  literal to push.
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Push_Str ("abc");
+         Check (O2c_BC.Insns = Before + 1,
+                "a string constant is one push (got"
+                  & Natural'Image (O2c_BC.Insns - Before) & ")");
+
          Before := O2c_BC.Insns;
          O2c_Ir_Lower.Bin_Op (Op_Ge);
          Check (O2c_BC.Insns = Before + 1,

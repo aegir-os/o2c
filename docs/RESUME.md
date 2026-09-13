@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         378
+    commits         379
     fixtures        83 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3385,6 +3385,50 @@ literals is the next stage, and it will remove the rest — the identity net is 
 difference visible instead of silent.
 
 Verified: gate36, all seven suites green, zero warnings; self-test 81 -> 85 checks.
+
+### 3by. The literal tail — and the prologue dead code it was still carrying
+
+3bx's own pattern said what came next: **each helper that guards on `Proc_Open` removes one
+instance of prologue dead code**, and the instances that remained were the RAW pushes.  So
+this stage migrated them — `Push_Int` 16 sites and `Push_Str` 5 — plus the last three
+`Discard`s, the two `Store (Global (...))` writes, and the designator chain's own `Mul`/`Add`
+(which are `Push_Int` + `Bin_Op`, not expressions).
+
+`Push_Str` needed one thing the value model had carried since M1 with no consumer:
+`Push_Value` had no `V_Const_Str` case.  A string constant's pool word is the OFFSET of its
+text inside the CONST payload, which is what the VM's string ops consume, so the case is one
+line — and the check is that a string constant is one push.
+
+    the parser's raw emissions after this stage:
+        Bin 3        Str_Cmp, Copy_Str, and one whose OPCODE IS A VARIABLE
+        Type_Test 2  the WITH guard and the type guard
+        Global 2     the mutex ops' slot argument
+        Push_Word 1  a 64-bit SET mask
+        Mutex_Lock / Mutex_Unlock, one each
+
+**Which is to say: nothing left is a literal, a branch, a label, a frame slot or a variable
+access.**  The four families that remain each have a design question of their own — strings,
+the type test, the mutex ops, the 64-bit SET mask — and none of them is in anything else's
+way.  The parser's emission surface is, for the constructs the language actually uses in the
+corpus, quad-built.
+
+**Evidence: 68 of 72 identical, and the four that differ LOST bytes — dead ones.**  The check
+that settles it is not "the goldens pass" but the ENTRY OFFSET: the image's `entry` field
+points at the module body, so code before it is unreachable by construction.  Measured:
+
+    fixture     old: entry / code size   new: entry / code size   removed before the entry
+    constfold        93 / 208                28 / 144             65 bytes = 13 pushes x 5
+    constuse         38 / 160                28 / 152             10 bytes =  2 pushes x 5
+    strconst         38 / 120                28 /  80             10 bytes =  2 pushes x 5
+    fordown        1136 bytes            1128 bytes
+
+A module-level literal is 5 bytes — `LOAD_CONST` plus its u32 pool index — and those pushes
+fired in the DECLARATION part, before any procedure was open.  They are the third and largest
+instance of the class 3bt found and 3bx predicted, and the new entry lands at a constant 28
+bytes (the frame setup that is always there).  Every one of the four images is SMALLER, and
+`run_bc` is green *including* all four.
+
+Verified: gate37, all seven suites green, zero warnings; self-test 85 -> 86 checks.
 
 ## 4. Method — what worked, and what did not
 

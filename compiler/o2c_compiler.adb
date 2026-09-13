@@ -468,7 +468,7 @@ package body O2c_Compiler is
    procedure Bc_Push_Arg (A : Expr_Rec) is
    begin
       if A.Folds and then A.Typ = T_Int then
-         O2c_BC.Push_Int (A.Val);
+         O2c_Ir_Lower.Push_Int (A.Val);
       else
          Bc_Load (Ada_Id (To_String (A.Text)));
       end if;
@@ -2125,8 +2125,8 @@ package body O2c_Compiler is
                      --  the stack so the next subscript chains from THIS address instead
                      --  of re-deriving the array's and dropping the row index - which is
                      --  what made two rows alias.
-                     O2c_BC.Push_Int (Total_Slots (UTypes (UT).Elem_UT) * 8);
-                     O2c_BC.Bin (O2c_BC.Mul);
+                     O2c_Ir_Lower.Push_Int (Total_Slots (UTypes (UT).Elem_UT) * 8);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mul);
                      --  Derive the base exactly as the scalar sibling does.
                      --  Measured for both shapes: a standalone array arrives
                      --  with base_ptr=FALSE, base_slots=8, nothing on the stack
@@ -2144,7 +2144,7 @@ package body O2c_Compiler is
                         (if UTypes (Base_UT).Is_Ptr or else D.Base_On_Stack
                          then 0 else Total_Slots (Base_UT)),
                         Nested);
-                     O2c_BC.Bin (O2c_BC.Add);
+                     O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add);
                      D.Base_On_Stack := True;
                   end if;
                   --  element is a user type: keep chaining on it
@@ -2395,7 +2395,7 @@ package body O2c_Compiler is
                      --  A fixed array: its address, and a length the
                      --  emitter knows because the declaration fixed it.
                      O2c_Ir_Lower.Addr_Global (Ada_Id (Nm), 1);
-                     O2c_BC.Push_Int (UTypes (Syms (Id).UT).Arr_Len);
+                     O2c_Ir_Lower.Push_Int (UTypes (Syms (Id).UT).Arr_Len);
                   end if;
                end;
             end if;
@@ -2710,7 +2710,7 @@ package body O2c_Compiler is
                      end;
                   else
                      begin
-                        O2c_BC.Push_Int (Integer'Value (Raw));
+                        O2c_Ir_Lower.Push_Int (Integer'Value (Raw));
                      exception
                         when Constraint_Error =>
                            raise O2c_BC.Wrong_Construct with
@@ -2755,7 +2755,7 @@ package body O2c_Compiler is
                   --  Ada text is quoted separately by Ada_String_Literal), so
                   --  the whole token is the string.  The pool word holds its
                   --  offset in the CONST payload.
-                  O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
+                  O2c_Ir_Lower.Push_Str (Cur.Text (1 .. Cur.Len));
                end if;
                Next;
             end if;
@@ -2811,8 +2811,8 @@ package body O2c_Compiler is
                begin
                   --  the two endpoint values are on the stack and the mask
                   --  is the set; drop them
-                  O2c_BC.Discard;
-                  O2c_BC.Discard;
+                  O2c_Ir_Lower.Discard;
+                  O2c_Ir_Lower.Discard;
                   O2c_BC.Push_Word
                     (Interfaces.Shift_Left (Interfaces.Unsigned_64 (1), Lo)
                      * (Interfaces.Shift_Left
@@ -3524,7 +3524,7 @@ package body O2c_Compiler is
                      elsif Syms (LId).UT /= 0
                        and then UTypes (Syms (LId).UT).Arr_Len > 0
                      then
-                        O2c_BC.Push_Int (UTypes (Syms (LId).UT).Arr_Len);
+                        O2c_Ir_Lower.Push_Int (UTypes (Syms (LId).UT).Arr_Len);
                      else
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "LEN of '" & LNm & "' has no known length";
@@ -4325,9 +4325,9 @@ package body O2c_Compiler is
                         if T'Length >= 2 and then T (T'First) = '"'
                           and then T (T'Last) = '"'
                         then
-                           O2c_BC.Push_Str (T (T'First + 1 .. T'Last - 1));
+                           O2c_Ir_Lower.Push_Str (T (T'First + 1 .. T'Last - 1));
                         else
-                           O2c_BC.Push_Str (T);
+                           O2c_Ir_Lower.Push_Str (T);
                         end if;
                      end;
                      R.Typ := T_Str;
@@ -4360,7 +4360,7 @@ package body O2c_Compiler is
                           & "' is not a constant INTEGER expression, so its "
                           & "value cannot be pushed";
                      end if;
-                     O2c_BC.Push_Int (Syms (Id).Const_Val);
+                     O2c_Ir_Lower.Push_Int (Syms (Id).Const_Val);
                      R.Typ := Syms (Id).Typ;
                      R.Text := Null_Unbounded_String;
                      R.Lit := True;
@@ -4944,7 +4944,7 @@ package body O2c_Compiler is
                      --  compare gives -1/0/1; the relational against zero
                      --  gives whichever operator was asked for.
                      O2c_BC.Bin (O2c_BC.Str_Cmp);
-                     O2c_BC.Push_Int (1);   --  0 less, 1 equal, 2 greater
+                     O2c_Ir_Lower.Push_Int (1);   --  0 less, 1 equal, 2 greater
                      O2c_BC.Bin (Bc_O);
                   end if;
                   R.Text := To_Unbounded_String
@@ -6910,7 +6910,7 @@ package body O2c_Compiler is
          --  to carry the final value back to its global.
          if not In_Proc then
             O2c_Ir_Lower.Load_Local (Bc_Slot);
-            O2c_BC.Store (O2c_BC.Global (Ada_Id (V_Name (1 .. V_Len))));
+            O2c_Ir_Lower.Store_Global (Ada_Id (V_Name (1 .. V_Len)));
          end if;
       end if;
    end Parse_For;
@@ -7891,7 +7891,7 @@ package body O2c_Compiler is
                                       and then Arg_R (1).Typ = T_Int
                                       and then Arg_R (1).Folds
                                     then
-                                       O2c_BC.Push_Int (Arg_R (1).Val);
+                                       O2c_Ir_Lower.Push_Int (Arg_R (1).Val);
                                     else
                                        Bc_Load
                                          (Ada_Id
@@ -8027,8 +8027,8 @@ package body O2c_Compiler is
                               --  passes two on; nothing else reads them, so
                               --  the constants are inlined and the globals
                               --  are not needed at all.
-                              O2c_BC.Push_Int (640);
-                              O2c_BC.Push_Int (400);
+                              O2c_Ir_Lower.Push_Int (640);
+                              O2c_Ir_Lower.Push_Int (400);
                               O2c_Ir_Lower.Call_Native (14, 2);
                            else
                               raise O2c_BC.Wrong_Construct with
@@ -8600,7 +8600,7 @@ package body O2c_Compiler is
                      if O2c_BC.Bytecode_Mode then
                         O2c_Ir_Lower.Addr_Global
                              (Ada_Id (Head (1 .. H_Len)), Total_Slots (U));
-                        O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
+                        O2c_Ir_Lower.Push_Str (Cur.Text (1 .. Cur.Len));
                         O2c_BC.Bin (O2c_BC.Copy_Str);
                      elsif Cur.Len = N then
                         Append_Body ("      " & Head (1 .. H_Len) & " := "
@@ -9037,8 +9037,8 @@ package body O2c_Compiler is
                         if Member = "Init" then
                            --  Globals start zeroed, so this is only needed to
                            --  put a used mutex back to free.
-                           O2c_BC.Push_Int (0);
-                           O2c_BC.Store (O2c_BC.Global (Ada_Id (Arg)));
+                           O2c_Ir_Lower.Push_Int (0);
+                           O2c_Ir_Lower.Store_Global (Ada_Id (Arg));
                         elsif Member = "Lock" then
                            O2c_BC.Mutex_Lock (O2c_BC.Global (Ada_Id (Arg)));
                         else
@@ -9109,8 +9109,8 @@ package body O2c_Compiler is
                                  Ch : constant String := To_String (A.Text);
                               begin
                                  if O2c_BC.Bytecode_Mode then
-                                    O2c_BC.Discard;
-                                    O2c_BC.Push_Str (Ch (2 .. 2));
+                                    O2c_Ir_Lower.Discard;
+                                    O2c_Ir_Lower.Push_Str (Ch (2 .. 2));
                                  end if;
                                  M := To_Unbounded_String
                                    (Ada_String_Literal (Ch (2 .. 2)));
@@ -9197,7 +9197,7 @@ package body O2c_Compiler is
                                              --  loaded rather than fixed at compile time.
                                              O2c_Ir_Lower.Load_Local (Natural (P_Sl) + 1);
                                           else
-                                             O2c_BC.Push_Int (N);
+                                             O2c_Ir_Lower.Push_Int (N);
                                           end if;
                                           --  Src1 is the index, not a
                                           --  placeholder: the lowering reads
@@ -9229,7 +9229,7 @@ package body O2c_Compiler is
                                           --  the IR carries a jump-when-false, not a jump-when-true, and a condition
                                           --  written in the wrong polarity is a loop that runs and prints wrongly.
                                           O2c_Ir_Lower.Load_Local (V_Sl);
-                                          O2c_BC.Push_Int (0);
+                                          O2c_Ir_Lower.Push_Int (0);
                                           O2c_Ir.Emit (O2c_Ir.Op_Ne, Dst => V_Cond, Src1 => V_V, Src2 => V_Zero);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
@@ -9239,7 +9239,7 @@ package body O2c_Compiler is
                                           O2c_Ir_Lower.Load_Local (V_Sl);
                                           O2c_Ir_Lower.Call_Native (4, 1);
                                           O2c_Ir_Lower.Load_Local (I_Sl);
-                                          O2c_BC.Push_Int (1);
+                                          O2c_Ir_Lower.Push_Int (1);
                                           O2c_Ir.Emit (O2c_Ir.Op_Add, Dst => V_I, Src1 => V_I, Src2 => V_One);
                                           O2c_Ir_Lower.Emit_Quad
                                             (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
@@ -9327,7 +9327,7 @@ package body O2c_Compiler is
                      if O2c_BC.Bytecode_Mode then
                         if Member = "Int" then
                            if not Had_Width then
-                              O2c_BC.Push_Int (0);   --  omitted width: 0
+                              O2c_Ir_Lower.Push_Int (0);   --  omitted width: 0
                            end if;
                            --  M4d: two arguments, both already pushed - the value by the
                            --  parse and the width by the default above.  Op_Arg declares
@@ -9354,7 +9354,7 @@ package body O2c_Compiler is
                            --  optional width is accepted and unused, as it is
                            --  in O2c_Put_Real.
                            if not Had_Width then
-                              O2c_BC.Push_Int (0);
+                              O2c_Ir_Lower.Push_Int (0);
                            end if;
                            --  M4e: REAL and LONGREAL share this native and therefore this
                            --  route - they differ only in the Ada formatting.  Two
