@@ -2334,7 +2334,25 @@ package body O2c_Compiler is
          if Formal.Typ = T_Char and then not Formal.By_Ref
            and then Cur.Kind = Lex.Tok_String
          then
-            A := Parse_Expr;       --  string literal actual
+            --  A string literal actual.  Parse_Expr pushes its ADDRESS - a
+            --  string IS an address in this VM - and an ARRAY OF formal also
+            --  needs the LENGTH that travelled with it, which the VARIABLE case
+            --  below has always pushed.  Without it the caller under-pushes by
+            --  one, so the callee's length slot holds whatever the next actual
+            --  left there, and the VM's verifier rejects the image outright:
+            --  "operand-stack depth violation ... depth -1" (3cd's reproducer is
+            --  exactly this - Out.Int (One ("abc"), 0)).
+            declare
+               --  Read BEFORE Parse_Expr advances: the count is the literal's,
+               --  and it lives in the source text, because a string in the CONST
+               --  payload carries no length of its own.
+               Lit_Len : constant Integer := Cur.Len;
+            begin
+               A := Parse_Expr;
+               if O2c_BC.Bytecode_Mode then
+                  O2c_Ir_Lower.Push_Int (Lit_Len);
+               end if;
+            end;
             return A;
          end if;
          if Cur.Kind /= Lex.Tok_Ident then

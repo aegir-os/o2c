@@ -932,6 +932,9 @@ package body OBC_VM is
    function Verify (Code : Byte_Array; Img : Image_Info) return Status is
       PC    : Natural := Img.Body_Off;
       Depth : Integer := 0;
+      --  The instruction the depth check is about: kept across the case
+      --  because the arms advance PC past it.
+      This_Op : Natural := 0;
 
       function Fits (Off, N : Natural) return Boolean is
         (Off + N <= Code'Length);
@@ -940,6 +943,11 @@ package body OBC_VM is
         (Depth >= 0 and then Depth <= Integer (Img.Stack_Max));
    begin
       while PC < Code'Length loop
+         --  Captured BEFORE the case: the arms advance PC, so by the time the
+         --  depth check runs, Code (PC) is the NEXT instruction.  Reporting
+         --  that one names the wrong instruction - which is exactly the kind of
+         --  off-by-one this diagnostic exists to stop.
+         This_Op := Natural (Code (PC));
          case Code (PC) is
             when Op_Nop | Op_Halt =>
                PC := PC + 1;
@@ -1324,7 +1332,8 @@ package body OBC_VM is
               (Ada.Text_IO.Standard_Error,
                "vm: operand-stack depth violation at code offset"
                & Natural'Image (PC) & ": depth" & Integer'Image (Depth)
-               & ", limit" & Integer'Image (Integer (Img.Stack_Max)));
+               & ", limit" & Integer'Image (Integer (Img.Stack_Max))
+               & ", opcode" & Natural'Image (This_Op));
             return Bad_Stack;
          end if;
       end loop;

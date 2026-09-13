@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         384
-    fixtures        85 in tests/bc/
+    commits         385
+    fixtures        86 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -3670,6 +3670,63 @@ for it is now in place, because each attempt reports *depth -1 at offset N* inst
 **What would unblock the lever**: this one shape, then `Scoped => True` per module.  And the
 oracle for each is OBNC's `*Test.obn` (3ca), which is a better net than anything in `tests/bc`
 for a library.
+
+### 3ce. FIXED — a string LITERAL actual passed no length; and the lever's third stop
+
+**The bug, and its reproducer is ten lines:**
+
+    procedure One(a: array of char): integer;
+    begin return len(a) end One;
+    begin Out.Int(One("abc"), 0); Out.Ln end
+
+`Parse_Actual`'s string-literal branch did `A := Parse_Expr; return A;` - pushing the literal's
+ADDRESS and nothing else - while the VARIABLE branch beside it has always pushed address AND
+length.  So an ARRAY OF formal called with a literal left its length slot holding whatever the
+next actual had left there, the caller under-pushed by one, and the VM's verifier rejected the
+whole image.  Fixed by pushing the literal's length as a constant (the count comes from the
+source text, because a string in the CONST payload carries no length of its own), and pinned by
+`tests/bc/litarg.ob2` - a literal actual and a variable one, both lengths checked, printing 3
+and 8.
+
+**How it was found is the part to keep.**  Six shapes were tested and DISPROVED one at a time
+(one open formal, two, forwarding, a nested call with an open actual, nested calls with an INT
+formal, an early return) - every one of them working in isolation, which is what a corpus of 85
+fixtures had said all along.  What finally pointed at it was not reasoning but the diagnostic
+that now reports **the depth and the limit** on a stack violation, and then the CAUSING
+instruction: the depth was `-1` (not over-limit), and the instruction was `Call_Native`, i.e. the
+consumer of a value that was never pushed.  The pattern fell out of the disproofs once they were
+written down: **every failing case passed a string literal, every passing case did not.**
+
+That diagnostic had one off-by-one of its own, worth recording: the offset is reported *after*
+the arm has advanced `PC`, so the first version named the NEXT instruction.  It now captures the
+opcode before the case - "report the instruction that caused it, not the one after it".
+
+**And with that fix the lever moved, for real this time.**  `Strings` compiled from its own body
+runs `Length`, `Pos` and `Cap`, and
+
+    Scoped => True    hello.ob2 refuses at   bytecode backend: Texts.OpenWriter is an FFI ...
+
+- the metric's first genuine movement in this whole workstream: past a whole library, to the next
+one.  The refusal that stood there for twenty sessions is gone.
+
+**It is still not landable, because a THIRD blocker appeared** - a smaller one each time:
+
+    Scoped => True, and by hand:   Strings.Pos ("world", s) from a program
+    -> vm: internal error in phase 3: STORAGE_ERROR (stack overflow ...)
+
+`Length` alone runs; `Pos` crashes almost certainly by recursing into itself, i.e. **an
+intra-module call inside a compiled library body resolves to the wrong procedure id**.  `Pos`
+calls `Length(s)` twice, `Cap` calls `Length(s)`, which is exactly the shape that no fixture has
+ever exercised: a call to a sibling procedure *inside a module whose bodies are emitted*.  So
+`Scoped => False` is restored, `bytecode_gaps.sh` keeps its `Strings.Length` entry (with a
+pointer here), and the metric is back at `Strings.Pos`.
+
+**The three stops, in order, and each one smaller than the last:** a parameterless function
+call emitted nothing (3cb); a literal actual passed no length (this); an intra-module call
+inside a library body mis-resolves.  The next attempt at the lever starts there.
+
+Evidence: `run_bc` green including `litarg`; the identity net unchanged for every other fixture;
+gate42.
 
 ## 4. Method — what worked, and what did not
 

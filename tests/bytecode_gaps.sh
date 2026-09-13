@@ -303,6 +303,10 @@ fi
 #  discarded, so the call ran and quietly yielded nothing - Math.cos (0.0)
 #  printed 0.000 and Strings.Length ("abcd") printed 16.  Asserted for both an
 #  expression call and a statement call, since they are separate paths.
+#
+#  Strings.Length is still here because Strings is still served by natives: see
+#  3ce for how far the attempt to compile its own bodies got, and what stopped
+#  it (an intra-module call inside the library body).
 for probe in 'Math.cos (0.0)|var x: real; begin x := Math.cos(0.0) end' \
              'Strings.Length|var s: array 16 of char; n: integer; begin s := "abcd"; n := Strings.Length(s) end'; do
    label="${probe%%|*}"; body="${probe#*|}"
