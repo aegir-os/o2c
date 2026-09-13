@@ -9125,68 +9125,96 @@ package body O2c_Compiler is
                                             O2c_BC.Local ("o2c_str_i");
                                           V_Sl  : constant Natural :=
                                             O2c_BC.Local ("o2c_str_v");
-                                          L_Top : constant Natural :=
-                                            New_Bc_Label;
-                                          L_End : constant Natural :=
-                                            New_Bc_Label;
-                                          L_Bdy : constant Natural :=
-                                            New_Bc_Label;
+                                          --  The emitter's labels belong to the compiler, so the front end allocates
+                                          --  them and hands the pairing over; the IR never sees an emitter label id.
+                                          L_Top : constant Natural := New_Bc_Label;
+                                          L_End : constant Natural := New_Bc_Label;
+                                          Ir_Top : constant O2c_Ir.Label_Id := O2c_Ir.New_Label;
+                                          Ir_End : constant O2c_Ir.Label_Id := O2c_Ir.New_Label;
+                                          V_Top : constant O2c_Ir.Value_Id := O2c_Ir.Label_Value (Ir_Top);
+                                          V_End : constant O2c_Ir.Value_Id := O2c_Ir.Label_Value (Ir_End);
+                                          V_I : constant O2c_Ir.Value_Id := O2c_Ir.New_Local ("o2c_str_i", EType'Pos (T_Int));
+                                          V_V : constant O2c_Ir.Value_Id := O2c_Ir.New_Local ("o2c_str_v", EType'Pos (T_Char));
+                                          V_Cond : constant O2c_Ir.Value_Id := O2c_Ir.New_Temp (EType'Pos (T_Int));
+                                          V_Zero : constant O2c_Ir.Value_Id := O2c_Ir.Const_Int (0, EType'Pos (T_Int));
+                                          V_One : constant O2c_Ir.Value_Id := O2c_Ir.Const_Int (1, EType'Pos (T_Int));
                                        begin
-                                          --  The chain pushed the array's
-                                          --  address; this loop derives its
-                                          --  own, so drop that one.
-                                          O2c_BC.Discard;
-                                          O2c_BC.Push_Int (0);
-                                          O2c_BC.Store_Local (I_Sl);
-                                          O2c_BC.Mark (L_Top);
+                                          O2c_Ir_Lower.Reserve_Label (Ir_Top, L_Top);
+                                          O2c_Ir_Lower.Reserve_Label (Ir_End, L_End);
+                                          --  The chain pushed the array's address; this loop derives its own, so drop
+                                          --  that one.  The pushes the loop still needs are emitted here, in place,
+                                          --  because they are the front end's side of the bargain: these ops DECLARE
+                                          --  their operands, they do not emit them - the rule Op_Arg set.
+                                          O2c_Ir.Emit (O2c_Ir.Op_Discard);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          O2c_Ir.Emit (O2c_Ir.Op_Store_Local, Src1 => V_Zero, Imm_1 => I_Sl);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          O2c_Ir.Emit (O2c_Ir.Op_Label, Dst => V_Top);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
                                           O2c_BC.Load_Local (I_Sl);
                                           if Is_Open then
-                                             --  ... and its length is the
-                                             --  parameter's second slot, so
-                                             --  the bound is loaded rather
-                                             --  than fixed at compile time.
-                                             O2c_BC.Load_Local
-                                               (Natural (P_Sl) + 1);
+                                             --  ... and its length is the parameter's second slot, so the bound is
+                                             --  loaded rather than fixed at compile time.
+                                             O2c_BC.Load_Local (Natural (P_Sl) + 1);
                                           else
                                              O2c_BC.Push_Int (N);
                                           end if;
-                                          O2c_BC.Bin (O2c_BC.Lt);
-                                          O2c_BC.Jump (O2c_BC.Jnz, L_Bdy);
-                                          O2c_BC.Jump (O2c_BC.Jmp, L_End);
-                                          O2c_BC.Mark (L_Bdy);
+                                          --  Src1 is the index, not a
+                                          --  placeholder: the lowering reads
+                                          --  the OPERAND's class to pick the op
+                                          --  family, so a No_Value here raises
+                                          --  rather than silently comparing at
+                                          --  the wrong width.  Src2 is the
+                                          --  bound, which is pushed in place.
+                                          O2c_Ir.Emit (O2c_Ir.Op_Lt, Dst => V_Cond,
+                                                       Src1 => V_I);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          O2c_Ir.Emit (O2c_Ir.Op_Jump_False, Src1 => V_End, Src2 => V_Cond);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
                                           if Is_Open then
-                                             --  The caller's characters,
-                                             --  addressed through the
-                                             --  parameter's first slot.
-                                             O2c_BC.Load_Local
-                                               (Natural (P_Sl));
+                                             --  The caller's characters, addressed through the parameter's first
+                                             --  slot.
+                                             O2c_BC.Load_Local (Natural (P_Sl));
                                           else
                                              O2c_BC.Load_Addr_G
                                                (O2c_BC.Global_Array
-                                                  (Ada_Id
-                                                     (To_String (A.Text)),
-                                                   Total_Slots (AU)));
+                                                  (Ada_Id (To_String (A.Text)), Total_Slots (AU)));
                                           end if;
                                           O2c_BC.Load_Local (I_Sl);
-                                          O2c_BC.Bin (O2c_BC.Load_Idx_B);
-                                          O2c_BC.Store_Local (V_Sl);
+                                          O2c_Ir.Emit (O2c_Ir.Op_Load_Idx, Dst => V_V, Imm_1 => 1);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          --  The terminator, tested as the NEGATION so the jump is the false case:
+                                          --  the IR carries a jump-when-false, not a jump-when-true, and a condition
+                                          --  written in the wrong polarity is a loop that runs and prints wrongly.
                                           O2c_BC.Load_Local (V_Sl);
                                           O2c_BC.Push_Int (0);
-                                          O2c_BC.Bin (O2c_BC.Eq);
-                                          O2c_BC.Jump (O2c_BC.Jnz, L_End);
+                                          O2c_Ir.Emit (O2c_Ir.Op_Ne, Dst => V_Cond, Src1 => V_V, Src2 => V_Zero);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          O2c_Ir.Emit (O2c_Ir.Op_Jump_False, Src1 => V_End, Src2 => V_Cond);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
                                           O2c_BC.Load_Local (V_Sl);
-                                          O2c_BC.Native_Call (4, 1);
+                                          O2c_Ir_Lower.Call_Native (4, 1);
                                           O2c_BC.Load_Local (I_Sl);
                                           O2c_BC.Push_Int (1);
-                                          O2c_BC.Bin (O2c_BC.Add);
-                                          O2c_BC.Store_Local (I_Sl);
-                                          O2c_BC.Jump (O2c_BC.Jmp, L_Top);
-                                          O2c_BC.Mark (L_End);
-                                          --  The member dispatch below runs
-                                          --  separately from this block and
-                                          --  would emit the pool-string
-                                          --  native too, on a stack this
-                                          --  loop has already emptied.
+                                          O2c_Ir.Emit (O2c_Ir.Op_Add, Dst => V_I, Src1 => V_I, Src2 => V_One);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          O2c_Ir.Emit (O2c_Ir.Op_Jump, Src1 => V_Top);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          O2c_Ir.Emit (O2c_Ir.Op_Label, Dst => V_End);
+                                          O2c_Ir_Lower.Emit_Quad
+                                            (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                                          --  The member dispatch below runs separately from this block and would emit
+                                          --  the pool-string native too, on a stack this loop has already emptied.
                                           Str_Looped := True;
                                        end;
                                     end if;

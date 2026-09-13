@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         364
+    commits         365
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2628,6 +2628,47 @@ operands.  The test is asserting the contract, not working around it.
 `Op_Label`, `Op_Jump`, `Op_Jump_False`, `Op_Load_Local`, `Op_Load_Idx`,
 `Call_Native (4, 1)`, `Op_Add`, `Op_Store_Local`, `Op_Discard`.  The corpus is the net,
 since every fixture prints through it.
+
+### 3bk. M4f part 2 DONE - the native surface is fully migrated
+
+**`grep` now finds ZERO raw `O2c_BC.Native_Call` in the compiler**, asserted in the
+patch itself.  The print loop is IR quads: `Op_Discard`, `Op_Store_Local`, `Op_Label`,
+`Op_Lt` + `Op_Jump_False`, `Op_Load_Idx`, `Op_Ne` + `Op_Jump_False`,
+`Call_Native (4, 1)`, `Op_Add`, `Op_Jump`, `Op_Label`.  The operand pushes stay as
+emitter calls in the front end, because these ops DECLARE their operands rather than
+emitting them - the rule Op_Arg set in 3ba, now applied to the designator chain too.
+
+**It forced one rule into the open**: `Store_Value` had no `V_Temp` case because M2
+had no temps.  A temp's home IS the operand stack - its producer leaves the value
+there and the next quad takes it off - so storing to one emits NOTHING.  Emitting a
+store would be an instruction the hand-written code never had.
+
+**This is the first migration that is NOT byte-identical, and that is a real weakening
+of the evidence.**  The hand-written loop used `Jump (Jnz, L_Bdy)` + `Jump (Jmp,
+L_End)` where the IR's jump-when-false emits a single `Jz` (one instruction fewer, same
+behaviour), and the terminator test flipped `Eq` + `Jnz` to `Ne` + `Jz` (the IR carries
+jump-when-false, not jump-when-true).  M4b-M4e could be checked by identity; this one
+is checked by the corpus and the differential, which is behavioural - sound, but a
+different kind of proof.
+
+**Two defects, one loud and one measured:**
+
+- `Op_Lt` had no `Src1`, so the lowering read a `No_Value` for the OPERAND-CLASS
+  lookup and raised `O2c_Ir: no such value`.  Four fixtures hit it, and precisely the
+  four that reach the char-array loop.  `Src1` is now the index it genuinely compares.
+- `Value_Id` needed qualifying, and `Typ` is `Natural` while `T_Int`/`T_Char` are
+  `EType`, so they are passed as `EType'Pos (...)`.
+
+**And my own sweep lied to me.**  It reported "67 ok / 14 bad", which reads as a
+disaster; most of the 14 are negative fixtures whose refusals are CORRECT
+(`proctype_bad`, `stubbad`, `threadstart_bad`, ...) plus three fixtures that have no
+golden at all.  A crude "count the mismatches" sweep cannot tell a refusal-under-test
+from a regression - the same blind spot AGENTS.md already records for the gap harness.
+
+**And I called a wedge that was not one.**  I read `run_m1` starting at 20:54:06 and
+concluded the gate had stalled, from a comparison against timings in earlier logs - but
+that suite does two boots and it was 72 seconds in.  `pgrep` cost one command and would
+have shown QEMU alive and working.  Checking beat inferring, again.
 
 ## 4. Method — what worked, and what did not
 

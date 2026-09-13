@@ -142,7 +142,15 @@ package body O2c_Ir_Lower is
       I : constant Value_Info := Value_At (V);
       S : Integer;
    begin
-      if I.Kind = V_Local then
+      if I.Kind = V_Temp then
+         --  A temp's home IS the operand stack: its producer leaves the value
+         --  there and the next quad that consumes it takes it off.  So there is
+         --  nothing to emit here, and emitting a store would be an extra
+         --  instruction the hand-written code did not have.  (M2 had no temps,
+         --  which is why this was absent until the print loop's conditions
+         --  needed it.)
+         null;
+      elsif I.Kind = V_Local then
          S := Local_Slot_Of (V);
          if S < 0 then
             raise Program_Error with "O2c_Ir_Lower: local is not in the "
