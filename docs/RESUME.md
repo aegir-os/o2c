@@ -5813,6 +5813,35 @@ The flip is still REVERTED, because the builtin does not compile yet: what stand
 `Scoped => True` is an M3-era statement-parser limitation, not the bytecode backend.  That is a different
 subsystem and a separate step.  Tree green, `run_bc` PASS; committed state carries the two fixes.
 
+### 3en. The last barrier before Reals, minimised: a NUMBER on the LEFT of a binary minus
+
+3em left a parser message at `Oak_Reals_Src` line 63.  Asking the parser to report the token it choked on
+- the instrument that has been right every time this stretch - gives it in one run:
+
+    S stmt-expected kind=TOK_MINUS text='-'
+
+so the statement dispatcher is looking at a MINUS where a new statement should begin: the assignment
+consumed `e := 0` and stopped, leaving `- e`.  And the builtin's line 63 is exactly
+
+    e := 0 - e
+
+which reduces it to a shape, not a module.  Minimised:
+
+    x := 0 - x;   ->  M3 statement expected at line 6, token TOK_MINUS
+    x := x - 0;   ->  compiles and links (4216 bytes)
+
+**So the parser mishandles a numeric LITERAL on the LEFT of a binary minus.**  That is a pre-existing bug
+in the expression parser, unrelated to the bytecode backend, and the corpus has never caught it because
+none of its modules writes a number on the left of a minus - which is why `Reals` is the first thing to
+trip it.  The two-operand swap above is the whole diagnostic.
+
+Everything in the bytecode backend for `Reals` is now cleared (3em).  This parser shape is the ONE thing
+between `Reals` and `Scoped => True`, and it is the smallest possible target: one expression-parser site,
+with a six-line reproduction at /tmp/minus_repro.ob2 that will become a fixture the moment it passes.
+
+The probe is reverted (it was instrumentation) and the flip with it; tree green, `run_bc` PASS, 447
+commits.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
