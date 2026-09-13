@@ -9284,7 +9284,18 @@ package body O2c_Compiler is
                            --  The factor already pushed the character's
                            --  code and the native takes one argument, so
                            --  there is nothing to convert here.
-                           O2c_BC.Native_Call (4, 1);
+                           --  M4c: the first ARGUMENTED member through the IR.  The push
+                           --  above stays where it is - Op_Arg DECLARES it rather than
+                           --  performing it - so the emission is identical and the corpus
+                           --  is the net.
+                           if O2c_BC.Bytecode_Mode then
+                              O2c_Ir.Emit (O2c_Ir.Op_Arg);
+                              O2c_Ir.Emit (O2c_Ir.Op_Call_Native, Imm_1 => 4, Imm_2 => 1);
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count - 1)));
+                              O2c_Ir_Lower.Emit_Quad
+                                (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+                           end if;
                         else
                            raise O2c_BC.Wrong_Construct with
                              "bytecode backend: Out." & Member
