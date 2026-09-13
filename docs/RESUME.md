@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         401
+    commits         402
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4333,6 +4333,41 @@ verifier caught) or the chain's push is skipped and the factor never compensates
 its third argument like its indexed siblings already do, and `fldv.ob2` / `fldv2.ob2` (kept in
 /tmp, reproduced in 3ct) become the fixtures: `Out.String (fp^.name)` should print ABC, and
 `Show (fp^.name)` should stop being refused.
+
+### 3cv. 3cu was INCOMPLETE — the missing `Nested` is real but is not this bug
+
+3cu concluded the fix was 2298 taking its third argument.  The edit was made, mirrored exactly from
+the indexed sibling at 2142 - and it changed nothing, so it was REVERTED rather than landed.
+
+**Two probes, and the second is the one that decided it:**
+
+    fldv.ob2   `name: A64` as the FIRST field   (so Nested is 0 either way)
+    fldv3.ob2  `pad: integer; name: A64`        (so Nested is 8 and the edit must matter)
+
+Both fail identically.  With `Nested` supplied, a field that is NOT at offset 0 still fails - so the
+failure cannot be the missing offset, and 3cu's "one read and one edit" was wrong about the edit.
+
+**And the failure was not what I had been reading.**  `vm: malformed code` was the SECOND line; the
+first is
+
+    vm: internal error in phase 3: CONSTRAINT_ERROR (obc_vm.adb:2067 range check failed)
+
+i.e. a NATIVE indexing `Args (0)` on an argument list that is too short, at RUNTIME.  The image
+PASSES verification - the error comes after, from the interpreter's own `Call_Native`.  So for "an
+array field used as a string value" the verifier's static model and the actual pushes disagree, and
+it is loud: an internal error, then malformed code.  Every `tail -1`/`tail -2` in this session hid
+that line, which is a reading habit worth naming - the diagnosis turned on `head`, not `tail`.
+
+**What that leaves, stated as narrowly as the evidence allows:**
+
+    - `Out.String (fp^.name)`       fails at runtime, field offset irrelevant
+    - `Show (fp^.name)`             still refused by Parse_Actual (2418), untouched by all of this
+    - the module-level array case   not re-measured this round, and NOT claimed either way
+
+The next instrument is already in hand and has a known gap: `tools/bc_disasm.py` stops at opcode
+`0x39` (the comparison group is a RANGE row in the spec's table, which the extractor does not parse),
+so it breaks before reaching the CALL_NATIVE in `fldv.obc` and cannot show the extra or missing
+push.  Fixing that gap is a few lines, and it is what turns this from deduction into a diff.
 
 ## 4. Method — what worked, and what did not
 
