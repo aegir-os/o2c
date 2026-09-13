@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         348
+    commits         349
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2232,6 +2232,44 @@ half-applied patch.  "Measure, do not assume" applies to my own edits as much as
 the compiler's behaviour.
 
 Next in M3: the calling convention, the other half of what is duplicated.
+
+### 3au. M3b SIZED - the calling convention is duplicated TWICE, and in two shapes
+
+Measured before touching it, because "the other half of what is duplicated" turned
+out to be bigger than the phrase suggests:
+
+    Parse_Expr        3,393 lines      where the call sites live
+    Parse_Factor      1,753 lines
+    Parse_Actual        150 lines      the argument convention - ONE home, good
+    Call_Proc             2 sites      factor 3677 / statement 3829
+    Native_Call        12+ sites       split across BOTH paths
+
+The `Native_Call` list is the finding.  The same intrinsic families are dispatched
+TWICE - once in the factor path (3193, 3389, 3713, 3743) and once in the statement
+path (7409, 7443, 7706, 7739, 7767, 7797, 7832, 7878) - so every new intrinsic has
+to be wired in two places, and the two can drift.  That is the same shape as the
+base-derivation rule that was written three times (3ak-3at), one level up.
+
+**Why it is not a small step.**  The two `Call_Proc` sites are structurally
+different, not copies: the factor path resolves an EXPORT record and calls
+`Xs (XI).Bc`, while the statement path resolves a local symbol, checks
+`Foreign_Native` first, and falls back to `Syms (Idx).Bc_Proc`.  Unifying them means
+deciding what a call site is, and that decision is exactly what the IR's `Op_Arg` /
+`Op_Call` pair exists to carry - both are in the op set and both explicitly say
+"has no lowering yet", which is the tracked reminder rather than a note.
+
+**So the order, cheapest and best-covered first:**
+
+    1. the `Out` family - the most-used, and present in EVERY fixture, so the
+       52-corroborated net covers a mistake here immediately;
+    2. the intrinsic families one at a time - Files, Env, Args, XYplane, In,
+       Convert - each landing alone, each gated;
+    3. the two `Call_Proc` paths LAST, because that is where 3d's cross-module
+       transport defect lives and it needs the transport work first.
+
+`Parse_Actual` is already the right shape (one home, six callers), so the argument
+convention needs consolidating INTO it rather than extracting from scratch - the
+cheapest piece of the whole area, and the first thing to look at when step 1 starts.
 
 ## 4. Method — what worked, and what did not
 
