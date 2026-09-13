@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         406
+    commits         407
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4521,6 +4521,36 @@ store it into the loop's temp local and load the base from there, exactly as the
 load it from a global or from a parameter slot.  The bound is the field's static length, which the
 designator knows and `A` does not - so the front end has to carry it through, and that is the whole
 of the change.  `onlystr.ob2` and `globstr.ob2` (failing and passing today) are the test pair.
+
+### 3da. The fix's design, settled — three edits, and one distinction that matters
+
+3cz left the shape; this is the design, ready to write.
+
+**One carrier field.** `Expr_Rec` has `CStr : Boolean := False; -- whole ARRAY OF CHAR variable
+value` but no array TYPE, so the call site cannot know a field's static length.  Add
+`Arr_UT : Natural := 0` beside it, set by the chain's `D_Str` branch - which is the one place that
+already has `UT`, the array's type, in hand - and carried through the `Desig` -> `Expr_Rec`
+conversion like the other fields.
+
+**One guard.** The loop at 9340 is entered on `Find (A.Text) > 0`; extend it so a non-symbol actual
+with `A.Arr_UT /= 0` enters too, with `AU := (if A.Arr_UT /= 0 then A.Arr_UT else Syms (ASym).UT)`
+and `Is_Open`/`N`/`P_Sl` derived from that rather than from `Syms (ASym)` - which is out of range for
+the field case and would itself be the next crash.
+
+**One store.** The loop's first act is `Op_Discard` ("The chain pushed the array's address; this
+loop derives its own, so drop that one").  For a field, that push IS the base, so the field case
+must STORE it into a local and load the base from there instead of discarding it.
+
+**And the distinction that would make a naive version wrong**: the stack's address is the right base
+for a field, but NOT for an ARRAY OF parameter - a parameter's own first slot holds the caller's
+address, which is why that case does `Load_Local (P_Sl)` rather than using what the stack already
+had.  So the store-instead-of-discard is for the field case only; the two existing derivations must
+stay.  A version that used the pushed address for all three would fix `onlystr.ob2` and break
+`arrparam.ob2`, which is exactly the trade this backend refuses.
+
+That is the last step between here and flipping Files: three localized edits inside one block, with
+`onlystr.ob2` (must start passing), `globstr.ob2` (must keep passing) and `arrparam.ob2` (must keep
+passing) as the net.
 
 ## 4. Method — what worked, and what did not
 
