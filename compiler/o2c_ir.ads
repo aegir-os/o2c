@@ -36,6 +36,15 @@ package O2c_Ir is
    No_Value : constant Value_Id := 0;
    No_Quad  : constant Quad_Id  := 0;
 
+   --  The WIDTH an operation runs at.  The emitter has separate ops per width -
+   --  Add/Eq/Lt for integers, Radd/Req/Rlt for reals, and the _B variants for
+   --  packed bytes - and an OPAQUE type id cannot choose between them.  That was
+   --  a gap in M1: the lowering needs to know the width, so the front end states
+   --  it.  Three classes are enough for every op the emitter has.
+   type Type_Class is (Tc_Word,   --  integers, longs, booleans, sets, pointers
+                       Tc_Real,   --  real and longreal
+                       Tc_Byte);  --  packed CHARACTER elements
+
    --  ---- values ----------------------------------------------------------
 
    --  How a value is stored.  Deliberately abstract: the IR does not know the
@@ -51,6 +60,7 @@ package O2c_Ir is
 
    type Value_Info is record
       Kind  : Value_Kind := V_Temp;
+      Class : Type_Class := Tc_Word;   --  the width an op on it runs at
       Typ   : Natural := 0;   --  opaque type id, issued by the front end
       Slots : Natural := 1;   --  storage, in eight-byte slots
       Bytes : Natural := 0;   --  packed byte length, 0 when not packed
@@ -120,9 +130,11 @@ package O2c_Ir is
    --  procedure, so this is where a procedure begins.
    procedure Begin_Proc;
 
-   function New_Temp (Typ : Natural; Slots : Natural := 1) return Value_Id;
+   function New_Temp (Typ : Natural; Slots : Natural := 1;
+                    Class : Type_Class := Tc_Word) return Value_Id;
    function New_Local (Name : String; Typ : Natural;
-                       Slots : Natural := 1) return Value_Id;
+                       Slots : Natural := 1;
+                       Class : Type_Class := Tc_Word) return Value_Id;
    function New_Global (Name : String; Typ : Natural;
                         Slots : Natural := 1) return Value_Id;
 

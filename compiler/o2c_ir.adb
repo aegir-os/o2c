@@ -77,16 +77,19 @@ package body O2c_Ir is
       return Value_Id (N_Values);
    end Add_Value;
 
-   function New_Temp (Typ : Natural; Slots : Natural := 1) return Value_Id is
+   function New_Temp (Typ : Natural; Slots : Natural := 1;
+                      Class : Type_Class := Tc_Word) return Value_Id is
    begin
-      return Add_Value ((Kind => V_Temp, Typ => Typ, Slots => Slots,
-                         others => <>));
+      return Add_Value ((Kind => V_Temp, Typ => Typ, Class => Class,
+                         Slots => Slots, others => <>));
    end New_Temp;
 
    function New_Local (Name : String; Typ : Natural;
-                       Slots : Natural := 1) return Value_Id is
+                       Slots : Natural := 1;
+                       Class : Type_Class := Tc_Word) return Value_Id is
    begin
-      return Add_Value ((Kind => V_Local, Typ => Typ, Slots => Slots,
+      return Add_Value ((Kind => V_Local, Typ => Typ, Class => Class,
+                         Slots => Slots,
                          Name => To_Unbounded_String (Name),
                          others => <>));
    end New_Local;

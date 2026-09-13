@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         360
+    commits         361
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2488,6 +2488,42 @@ design addition, not a member wiring.
 Nothing in code this round: the measurement said the target was a stage, not a
 member, and that is the second time in this session the sizing changed on contact
 (3d was the first).
+
+### 3bg. M4g (i) DONE - the type class closes the M1 gap
+
+Every IR value now carries `Class : Type_Class` (`Tc_Word`, `Tc_Real`, `Tc_Byte`), and
+the integer and real comparison/arithmetic ops lower.  This closes the gap 3bf found:
+an OPAQUE type id cannot choose between `Add` and `Radd`, so the front end states the
+width instead of leaving the lowering to guess.
+
+**The width choice lives in ONE function, `Bc_Op (Op, Class)`, precisely so it can be
+tested directly** - because an instruction COUNT cannot tell `Add` from `Radd`; both
+are one instruction.  The self-test therefore checks the mapping itself:
+
+    Bc_Op (Op_Add, Tc_Word) = Add      Bc_Op (Op_Add, Tc_Real) = Radd
+    Bc_Op (Op_Lt,  Tc_Real) = Rlt
+
+That is the same rigour that settled the jump polarity in 3be: for a choice that
+cannot be seen in a count, settle it from the table rather than from the name.
+
+**The OPERAND decides the width, not the destination.**  A comparison's destination is
+a boolean word while its operands may be reals, so the op family follows `Src1`.  An
+op with no byte form (arithmetic at `Tc_Byte`) raises rather than guessing.
+
+**And a self-audit changed a TEST.**  My first check was labelled "a real add" while
+the value's class still defaulted to `Tc_Word` - so it was exercising the word path
+and its name claimed more than it did.  Caught by reading my own addition rather than
+its verdict.  The fix gave the builders a DEFAULTED `Class` parameter, so existing
+call sites are untouched and the check exercises the path it names.  A test whose
+name overstates its coverage is the same defect as a comment that lies.
+
+Self-test now makes 31 checks, up from 12 when the builders were first covered.  No
+bytecode image changes: the front end does not set classes yet - that happens member
+by member, starting with the loop that needed them.
+
+**Next**: M4g (ii) a RUN-net for the FFI families, whose probes only compile; then
+(iii) the mechanical members; then (iv) `Out.String`'s loop, which begins by marking
+its values' classes - now possible.
 
 ## 4. Method — what worked, and what did not
 

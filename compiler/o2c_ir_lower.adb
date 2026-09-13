@@ -16,6 +16,53 @@ package body O2c_Ir_Lower is
       return N_Lowered;
    end Lowered;
 
+   function Bc_Op (Op : O2c_Ir.Op; C : O2c_Ir.Type_Class) return O2c_Bc.Op is
+   begin
+      --  Real has its own family for arithmetic AND comparison; bytes only have
+      --  the element loads, so anything else at Tc_Byte is a front-end error
+      --  rather than something to guess at.
+      case C is
+         when O2c_Ir.Tc_Real =>
+            case Op is
+               when O2c_Ir.Op_Add => return O2c_Bc.Radd;
+               when O2c_Ir.Op_Sub => return O2c_Bc.Rsub;
+               when O2c_Ir.Op_Mul => return O2c_Bc.Rmul;
+               when O2c_Ir.Op_Div => return O2c_Bc.Rdiv;
+               when O2c_Ir.Op_Neg => return O2c_Bc.Rneg;
+               when O2c_Ir.Op_Eq => return O2c_Bc.Req;
+               when O2c_Ir.Op_Ne => return O2c_Bc.Rne;
+               when O2c_Ir.Op_Lt => return O2c_Bc.Rlt;
+               when O2c_Ir.Op_Le => return O2c_Bc.Rle;
+               when O2c_Ir.Op_Gt => return O2c_Bc.Rgt;
+               when O2c_Ir.Op_Ge => return O2c_Bc.Rge;
+               when others =>
+                  raise Program_Error with "O2c_Ir_Lower: no real form of "
+                    & O2c_Ir.Op'Image (Op);
+            end case;
+         when O2c_Ir.Tc_Word =>
+            case Op is
+               when O2c_Ir.Op_Add => return O2c_Bc.Add;
+               when O2c_Ir.Op_Sub => return O2c_Bc.Sub;
+               when O2c_Ir.Op_Mul => return O2c_Bc.Mul;
+               when O2c_Ir.Op_Div => return O2c_Bc.IDiv;
+               when O2c_Ir.Op_Mod => return O2c_Bc.IMod;
+               when O2c_Ir.Op_Neg => return O2c_Bc.Neg;
+               when O2c_Ir.Op_Eq => return O2c_Bc.Eq;
+               when O2c_Ir.Op_Ne => return O2c_Bc.Ne;
+               when O2c_Ir.Op_Lt => return O2c_Bc.Lt;
+               when O2c_Ir.Op_Le => return O2c_Bc.Le;
+               when O2c_Ir.Op_Gt => return O2c_Bc.Gt;
+               when O2c_Ir.Op_Ge => return O2c_Bc.Ge;
+               when others =>
+                  raise Program_Error with "O2c_Ir_Lower: no word form of "
+                    & O2c_Ir.Op'Image (Op);
+            end case;
+         when O2c_Ir.Tc_Byte =>
+            raise Program_Error with "O2c_Ir_Lower: "
+              & O2c_Ir.Op'Image (Op) & " has no byte form";
+      end case;
+   end Bc_Op;
+
    procedure Reserve_Label (Ir_Label : O2c_Ir.Label_Id; Bc_Label : Natural) is
    begin
       if Natural (Ir_Label) = 0 or else Natural (Ir_Label) > Max_Ir_Labels then
@@ -176,8 +223,15 @@ package body O2c_Ir_Lower is
             O2c_BC.Jump (O2c_BC.Jz, Bc_Label_Of (Q.Src1));
 
          when Op_Add | Op_Sub | Op_Mul | Op_Div | Op_Mod
-            | Op_Neg | Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge
-            | Op_Not | Op_And | Op_Or | Op_Load | Op_Store
+            | Op_Neg | Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge =>
+            --  The WIDTH comes from the OPERAND, not the destination: a
+            --  comparison's destination is a boolean word while its operands may
+            --  be reals, and the op family follows the operands.
+            O2c_BC.Bin
+              (Bc_Op (Q.Op, Value_At (Q.Src1).Class));
+            Store_Value (Q.Dst);
+
+         when Op_Not | Op_And | Op_Or | Op_Load | Op_Store
             | Op_Addr_Local | Op_Addr_Global | Op_Call | Op_Return
             | Op_Halt =>
             --  Each arrives with the construct that needs it, and until then

@@ -16,6 +16,8 @@ with Ada.Text_IO; use Ada.Text_IO;
 with O2c_Ir; use O2c_Ir;
 with O2c_Ir_Lower;
 
+use type O2c_Bc.Op;
+
 procedure O2c_Ir_Selftest is
 
    Fails : Natural := 0;
@@ -236,6 +238,51 @@ begin
             end;
          end;
          Check (Raised2, "a jump to an unreserved label raises");
+      end;
+
+      --  ---- the width choice, checked DIRECTLY -----------------------------
+      --  An instruction count cannot tell Add from Radd, so the mapping is
+      --  tested where it lives rather than inferred from what got emitted.
+      Check (O2c_Ir_Lower.Bc_Op (Op_Add, Tc_Word) = O2c_BC.Add,
+             "add at word width is Add");
+      Check (O2c_Ir_Lower.Bc_Op (Op_Add, Tc_Real) = O2c_BC.Radd,
+             "add at real width is Radd");
+      Check (O2c_Ir_Lower.Bc_Op (Op_Lt, Tc_Real) = O2c_BC.Rlt,
+             "a comparison follows its OPERAND's width, not the boolean result");
+      Raised2 := False;
+      begin
+         declare
+            X : constant O2c_BC.Op := O2c_Ir_Lower.Bc_Op (Op_Add, Tc_Byte);
+            pragma Unreferenced (X);
+         begin
+            null;
+         end;
+      exception
+         when Program_Error =>
+            Raised2 := True;
+      end;
+      Check (Raised2, "an op with no byte form raises rather than guessing");
+
+      --  and the same choice through the LOWERING, on a value whose class IS
+      --  real - the first version of this check said "a real add" while the
+      --  class still defaulted to word, so it was exercising the word path.
+      declare
+         Lr : Value_Id;
+      begin
+         Lr := New_Local ("r", Typ => 1, Class => Tc_Real);
+         declare
+            Sl : constant Natural := O2c_BC.Local ("r");
+            pragma Unreferenced (Sl);
+         begin
+            null;
+         end;
+         O2c_BC.Push_Int (1);
+         O2c_BC.Push_Int (2);
+         Before := O2c_BC.Insns;
+         O2c_Ir_Lower.Emit_Quad
+           ((Op => Op_Add, Dst => Lr, Src1 => C5, Src2 => C5, others => <>));
+         Check (O2c_BC.Insns = Before + 2,
+                "an add and a store are two instructions");
       end;
 
       O2c_BC.End_Proc;

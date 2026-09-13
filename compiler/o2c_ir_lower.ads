@@ -4,6 +4,7 @@
 --  stack discipline live, instead of being duplicated per branch in the parser.
 --  It sits between the two so that neither knows the other: the front end
 --  builds quads, this walks them, and O2c_BC receives the calls.
+with O2c_Bc;
 with O2c_Ir;
 
 package O2c_Ir_Lower is
@@ -34,6 +35,10 @@ package O2c_Ir_Lower is
    --  answer, not a refusal.  So the front end, which owns the counter, hands the
    --  pair over here before any quad naming that label is lowered.
    procedure Reserve_Label (Ir_Label : O2c_Ir.Label_Id; Bc_Label : Natural);
+
+   --  The width choice, in ONE place, so it can be tested directly: an
+   --  instruction COUNT cannot tell Add from Radd, but this mapping can.
+   function Bc_Op (Op : O2c_Ir.Op; C : O2c_Ir.Type_Class) return O2c_Bc.Op;
 
    --  Emit the bytecode for one quad.  Called INSIDE an open emitter procedure
    --  (O2c_BC.Proc_Open must hold), because that is what the emitter's stores
