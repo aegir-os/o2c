@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         421
+    commits         422
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5052,6 +5052,32 @@ assigned and why a nested declaration does not get one.  `Nested_Depth` exists i
 **A note on method, since it keeps being the thing that matters**: every one of the last four steps
 was found by TURNING SOMETHING ON and reading what it said, not by reading the code and predicting.
 The transpose - "an FFI primitive" - was itself wrong for the same reason.
+
+### 3dp. The nested-procedure blocker, located in one condition — and why the fix is not small
+
+3do's error had an exact shape, and the assignment site is a single place (6394):
+
+    if O2c_BC.Bytecode_Mode and then not O2c_BC.Proc_Open then
+       ...
+       Syms (N_Sym).Bc_Proc := O2c_BC.Begin_Proc (N_Par + N_Open, ...);
+    end if;
+
+The id is assigned ONLY when no procedure is open - which is true for a top-level one and false for a
+NESTED one, since a nested declaration is parsed while its enclosing procedure is open.  So
+`Bc_Proc` stays 0, and the call site reports it by name, kind and parameter count.  That is the whole
+mechanism.
+
+**Why the fix is a feature and not a condition to widen.**  Handing a nested procedure an id is the
+easy half: `Begin_Proc` closes the procedure that is open, so emitting a nested body separately means
+saving and resuming the outer one's state.  The hard half is the one that matters here: `Reals`'s
+`Put` and `Digit` read and write the ENCLOSING procedure's locals (`str`, `n`, `v`, `d`, `s`, `k`), so
+a separately-emitted nested body needs up-level addressing - static links, or inlining - and neither
+is a small change to this IR, whose frame model is one flat run of slots per procedure.
+
+**So `Reals` is where the next real piece of work is, and it is now bounded**: nested procedures with
+up-level access.  Everything else about the module is ordinary code this backend already compiles -
+real arithmetic, `CHR`, `len`, an open-array formal, `var` out-parameters (which is 3dl's fix, and
+`Convert (x, str)` is exactly its shape).
 
 ## 4. Method — what worked, and what did not
 
