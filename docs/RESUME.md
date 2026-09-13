@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         430
+    commits         431
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5329,6 +5329,33 @@ written down in 3dw and reproduced twice.
 
 The instrument and the recipe are reverted; the tree is green (`run_bc` PASS, `run_vm` PASS) and the
 committed state is 3dv's leak fix.
+
+### 3dy. The mutex check: the local is ALREADY in the table — so the next probe is the table
+
+3dx left two facts that did not fit.  Sequencing the emitter's own steps answered it, and the answer
+inverts what I had assumed.  With traces in `Reserve_Proc`, `Open_Proc`, `End_Proc` and after `Local`'s
+interning, the fixture prints:
+
+    T reserve  id= 30 frame= 0  next= 0
+    T openproc id= 30 frame= 30 next= 0
+    TRACE mutex arg=m frame_owner= 30 body_owner= 30 next_frame= 0
+
+There is NO `T internal m` line anywhere.  `Local ("m")` therefore took its LOOKUP path - it found an
+entry whose `Proc` is already 30 - so `m` was put in the locals table BEFORE the declaration's own
+interning, and the declaration's call then found it and did not increment `Next_Frame`.  That is why
+the count is 0 and the slot is stale: not a reset, and not a missing intern, but an intern that already
+happened.
+
+**So the next probe is the table itself**: at the mutex check (and at the declaration), print
+`N_Locals` and every entry's `Proc`/`Slot`/`Name`.  Two candidates are worth naming so the output can
+rule between them - `O2c_BC.Local` being reached twice for one declaration (the second call finding the
+first's entry), and the parameter interning path, which runs at the header and may register the names
+that the `var` section then re-uses.  The trace above cannot distinguish them; the table can.
+
+**Settled and unchanged**: the three-piece recipe from 3dw takes 144 failures to 1, reproduced twice,
+and is saved as a script (`/tmp/nest_recipe.py`) so applying it is mechanical rather than retyped.
+
+Instrument and recipe reverted; tree green (`run_bc` PASS) and the committed state is 3dv's leak fix.
 
 ## 4. Method — what worked, and what did not
 
