@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         414
+    commits         415
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4808,6 +4808,48 @@ before the attempt and the tree is green again (`run_vm` PASS, `run_bc` PASS).
 patch by LINE RANGE rather than by text, since the text repeats.  Then the chunked store, then
 `LOAD_ADDR_L`, then 3df's parts 2 and 3 (the caller passes an address; the callee stores through it),
 and `fres.ob2` prints `c=[h]` with `fall.ob2` printing `hello`.
+
+### 3di. The chunked store: the SITE LIST is the deliverable
+
+A second attempt at 3dh's design, reverted for the same reason (a blind patch over a file whose
+identifiers repeat), and this time the enumeration is written down so no attempt has to rediscover it.
+
+**Every site, by line, from `grep -n 'type Context is record|Locals *:|Locals =>|Locals (|C.Locals|
+Locals.all|Locals :=' vm/obc_vm.adb`:**
+
+    61    Max_VM_Locals (1024)          becomes unused - leave; it is a constant, not a ceiling
+    300   type Context is record         unchanged (insert the chunk types+helpers AFTER its
+                                        `end record;`, since they take a Context)
+    303   Locals : U64_Array_Access      REPLACE with Chunks : Locals_Chunks_Access := null
+    2122  comment                       unchanged
+    2166  comment                       mentions Locals (Frame_Base...) - worth updating
+    2168  Locals renames Ctx.Locals     REPLACE (there is no array to rename)
+    2182  Locals_Used renames Pool_Used unchanged - a COUNT, not storage
+    2191  Base := Locals_Used           unchanged
+    2219-2228  the growth block         REPLACE with Ensure_Locals (Ctx, Base + Frame_Slots - 1)
+    2232  Locals (Base+K) := Pop        -> Set_Local
+    2238  Locals_Used := ...            unchanged
+    2335  Mark_Word (C.Locals (K))      -> Mark_Word (Get_Local (C, K))   the GC root scan
+    2482  Locals_Used := Frame_Slots(0) unchanged
+    2684  Push (Locals (Addr))          -> Push (Get_Local (Ctx, Addr))
+    2689  Locals (Addr) := Pop          -> Set_Local
+    2731  Locals_Used := ...            unchanged
+    2745  Locals_Used := ...            unchanged
+    3434-3436  FOR slots, written      -> Set_Local x3
+    3476-3478  FOR slots, read         -> Get_Local x3
+    3483-3484  the FOR step            -> Set_Local / Get_Local     <- MISSED on the first attempt
+    3011-3013  a Context construction  -> Chunks => null,
+    3674  the other construction       -> Chunks => null,
+
+**Two of those are why the attempts failed**: 3483/3484 (the FOR step) were not in my first patch at
+all, and there are TWO `Context` constructions (3011 in the thread-spawn path, 3674 in `Run_Context`),
+so a text anchor for `Locals =>` is ambiguous.  A third failure was arithmetic: inserting a
+multi-line block shifts every later line, and I shifted by the block's LINE count instead of by the
+ONE element it is in the list.
+
+**So the next attempt's method matters more than its patch**: enumerate first (the list above), edit
+bottom-up, shift by elements and not lines, assert the content of every line touched - and prefer the
+editor tool that shows the lines and refuses an ambiguous edit over a blind text substitution.
 
 ## 4. Method — what worked, and what did not
 
