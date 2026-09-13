@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         442
+    commits         443
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5723,6 +5723,39 @@ its own id and frame, module call reaching it, nested call with its link, up-lev
 link - the VM's verifier rejects one procedure's operand stack.  The next measurement is a depth trace with
 a correct table (`LOAD_CONST` = +1, and the call's pop is the CALLEE's `NParams`, which the record now
 carries correctly since the reserve and the end agree).
+
+Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (still 0; want 42).
+
+### 3ek. The VM named the instruction, and the grep named the bug: SIX call sites, two patched
+
+3ej left one depth violation.  Rather than write a fourth depth script (three of the four instrument
+errors in this stretch were hand-written tables), the VM's own checks were instrumented to report their
+state.  The verifier's 20 `Bad_Stack` returns printed nothing; the interpreter's 26 printed:
+
+    X badstack pc= 3131 sp= 0
+
+That is exact.  3131 is `Outer`'s FIRST call to `Bump` - the disassembly puts `CALL 3098` at 3123 + 8 -
+and SP = 0 says the operand stack is EMPTY at a call whose callee declares one parameter.  The link was
+never pushed, which is precisely the symptom the earlier fixes were aimed at.
+
+**And the reason is a count I never took.**  Grepping every `Call_Proc` site in the compiler:
+
+    4171   the expression path WITH arguments      <- patched
+    4208   the expression path, parameterless      <- patched
+    3995   the library/handle path
+    8037   the generic call emitter
+    8352   the generic call emitter
+    9949   the statement/generic path
+    10132  "the EMPTY Op_Arg run: a parameterless call"   <- the shape `Bump;` has
+
+Six sites, and the link push went into two of them.  `Bump;` is a bare-name statement, so it takes one of
+the last four - and 10132's own comment already describes it as the parameterless call.  The fix is to
+push the link at the site that is reached; the measurement that identifies it is the VM's `pc`, which is
+what the interpreter instrument was added to give.
+
+**This is the fifth instrument error corrected by printing, and the first time the instrument was the VM
+itself rather than a script of mine** - which is why it was right the first time.  When the code under test
+can report its own state, ask it.
 
 Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (still 0; want 42).
 
