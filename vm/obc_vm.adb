@@ -1313,7 +1313,18 @@ package body OBC_VM is
                return Not_Implemented;
          end case;
          if not Depth_Ok then
-            Note_At ("operand-stack depth violation", PC);
+            --  The NUMBER, not only the offset.  "operand-stack depth
+            --  violation" names a symptom and leaves two candidates - a depth
+            --  below zero and one above the image's stack_max - which want
+            --  OPPOSITE fixes, so a hunt that sees only the offset guesses
+            --  between them.  One Put_Line inside Value_At is what found 3bt's
+            --  bug after two wrong guesses; this is that move made permanent,
+            --  in the place the hunt keeps arriving.
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "vm: operand-stack depth violation at code offset"
+               & Natural'Image (PC) & ": depth" & Integer'Image (Depth)
+               & ", limit" & Integer'Image (Integer (Img.Stack_Max)));
             return Bad_Stack;
          end if;
       end loop;

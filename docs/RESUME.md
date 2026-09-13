@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         383
+    commits         384
     fixtures        85 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -3622,6 +3622,54 @@ pops, which is why the value is parsed last.
 Evidence: identity (unchanged - no existing fixture wrote through an ARRAY OF parameter, which is
 the point), `run_bc` including `vararr`, gate39; and the library symptom is gone: `Strings.Cap`
 applied to `"hello"` now prints `HELLO` (probe `P9`).
+
+### 3cd. The lever, retried — it advanced, and ONE library body still trips the verifier
+
+3bz's two blockers are fixed, so the `Scoped => True` experiment was run again.  It got further
+and it is still not landable, and both halves are measurements.
+
+**What now works through the lever** (probe `P9`, and the metric):
+
+    Strings.Length   prints 5        (was a recorded gap in bytecode_gaps.sh)
+    Strings.Cap      prints HELLO    (was the silent no-op of 3bz/3cc)
+    hello.ob2        refuses at      bytecode backend: Texts.OpenWriter is an FFI primitive ...
+                                     the same place as 3bz - past the whole Strings module
+
+So the two fixes paid off exactly where they were aimed: a library body that merely *compiles* is
+no longer the bar; `Cap` and `Length` now *run*.
+
+**What still fails**: `Strings.Pos` produces an image the VM REFUSES to load -
+
+    vm: operand-stack depth violation at code offset 1124: depth -1, limit 18
+
+which is why the flip is reverted again (a rejected image is worse than a refusal, and it is the
+project's rule).
+
+**The datum, and the diagnostic that produced it.**  The verifier's message used to name only the
+offset, which left two candidates - a depth below zero and one above `stack_max` - that want
+opposite fixes.  It now reports both numbers (the same move that found 3bt's bug, made permanent):
+**the depth is -1 in every failure**, i.e. the walk *pops* where it believes the stack is empty,
+never "over the limit".  One run, after five disproofs.
+
+**Five candidates disproved, each working in ISOLATION** - recorded so the next session does not
+re-walk them:
+
+    one open-array formal      procedure One(a: array of char) called from the body      OK
+    two open-array formals     procedure Two(a, b: array of char): integer               OK
+    forwarding one level down  Outer(b) calls Inner(b)                                   OK
+    a nested call with an open actual   Out.Int(One(s), 0)                               OK
+    early returns              b3 (no loops) and w6 (loops, flag instead of return)      OK / FAIL
+    nested calls, INTEGER formal        Out.Int(Tw(3), 0)   (fnexpr's shape)             OK
+
+`Pos`'s body as a USER module (`b4`) fails identically, so it is not the builtin path; and a
+variant of that body with NO early return (`w6`) fails too.  What is left is a combination: the
+failing bodies all nest a `for` and a `while` with `&` conditions inside a FUNCTION that is
+called with an open-array actual.  The next step is a systematic shrink of `w6` - and the tool
+for it is now in place, because each attempt reports *depth -1 at offset N* instead of a symptom.
+
+**What would unblock the lever**: this one shape, then `Scoped => True` per module.  And the
+oracle for each is OBNC's `*Test.obn` (3ca), which is a better net than anything in `tests/bc`
+for a library.
 
 ## 4. Method — what worked, and what did not
 
