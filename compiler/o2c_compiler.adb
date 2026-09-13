@@ -3190,7 +3190,7 @@ package body O2c_Compiler is
                      --  order ids 27 and 28 read them, and `Two` decides the
                      --  arity as well as the id: FRead (27), FWrite (28),
                      --  FClose (29).
-                     O2c_BC.Native_Call
+                     O2c_Ir_Lower.Call_Native
                        ((if Two
                          then (if Eq_No_Case (Nm, "FREAD") then 27 else 28)
                          else 29),
@@ -3818,7 +3818,7 @@ package body O2c_Compiler is
                            --  declaration and the verifier checks it against
                            --  the VM's table, so a stub that disagrees fails
                            --  at load rather than unbalancing the stack.
-                           O2c_BC.Native_Call (Syms (Id).Foreign_Native,
+                           O2c_Ir_Lower.Call_Native (Syms (Id).Foreign_Native,
                                                Syms (Id).Params);
                         else
                            if Syms (Id).Bc_Proc = 0 then
@@ -7703,7 +7703,7 @@ package body O2c_Compiler is
                                       (Ada_Id (To_String (Arg_R (3).Text))));
                                  --  Foreign entries 2 and 4: ToInt and
                                  --  ToReal, native ids 6 and 8.
-                                 O2c_BC.Native_Call
+                                 O2c_Ir_Lower.Call_Native
                                    ((if Eq_No_Case (To_String (MName),
                                                     "ToInt")
                                      then 6 else 8), 3);
@@ -7829,7 +7829,7 @@ package body O2c_Compiler is
                                     end;
                                  end loop;
                                  --  Native ids 11 and 12: foreign 7 and 8.
-                                 O2c_BC.Native_Call
+                                 O2c_Ir_Lower.Call_Native
                                    ((if Eq_No_Case (To_String (MName),
                                                     "Get")
                                      then 11 else 12), 2);
@@ -7932,7 +7932,7 @@ package body O2c_Compiler is
                                  end;
                                  --  Ids 20-25: String, Name, Char, Int,
                                  --  LongInt, Real.
-                                 O2c_BC.Native_Call
+                                 O2c_Ir_Lower.Call_Native
                                    ((if Eq_No_Case (To_String (MName),
                                                     "String") then 20
                                      elsif Eq_No_Case (To_String (MName),
@@ -9436,7 +9436,7 @@ package body O2c_Compiler is
                         if Syms (Idx).Foreign_Native /= 0 then
                            --  A foreign procedure: CALL_NATIVE rather than a
                            --  call to a body it does not have.
-                           O2c_BC.Native_Call (Syms (Idx).Foreign_Native,
+                           O2c_Ir_Lower.Call_Native (Syms (Idx).Foreign_Native,
                                                Syms (Idx).Params);
                         else
                            O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);

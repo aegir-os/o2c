@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         362
+    commits         363
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2565,6 +2565,33 @@ Verified: `ffi` prints 42 / 2.500 / 1234 matching its golden, plus `filesintr`,
 
 **Next**: the six remaining dynamic sites, one at a time - each needs its text read,
 since their id and arity are expressions rather than literals.
+
+### 3bi. M4g (iii) COMPLETE - 20 of 21 native sites, and the dynamic six were one token
+
+**The whole family surface now goes through the IR**: 14 literal sites and 6 dynamic
+ones, with exactly one raw emitter call left - the `(4, 1)` inside the print loop,
+which is M4f part 2.  Both counts are asserted, and the survivor is named.
+
+**The dynamic six were a one-token substitution.**  `O2c_BC.Native_Call` became
+`O2c_Ir_Lower.Call_Native` with the ARGUMENT EXPRESSIONS LEFT TEXTUALLY UNTOUCHED:
+the ten-line `if/elsif` chain that derives `In`'s id from the member name, the
+`(if Two then (if Eq_No_Case (Nm, "FREAD") then 27 else 28) else 29)` pair, and
+`Syms (Idx).Foreign_Native` with `Syms (Idx).Params` for the FFI path.  That is the
+payoff for choosing the helper's signature to MATCH the emitter's `(Id, Arity)` before
+writing any site - the opposite of M4d and M4e, where the arithmetic had to be spelled
+out at each site and generalising it later introduced 3bh's off-by-one.
+
+**The one site to skip was identified by its CONTEXT, not its line number**: the call
+whose preceding line is `O2c_BC.Load_Local (V_Sl)`.  Line numbers move; the loop's
+surroundings do not.
+
+Verified: 20 `Call_Native` calls, exactly one `O2c_BC.Native_Call` left, asserted and
+named; `ffi`, `filesintr`, `lenopen`, `sum` all match their goldens - and `ffi` is the
+one that exercises four of the six dynamic sites, since `Convert`'s ids are computed
+from the member name.  All seven suites green, 52 corroborated.
+
+**What is left in the whole native surface is one loop.**  M4f part 2 now has every
+piece it was missing except two of its own: `Op_Discard` and the indexed byte load.
 
 ## 4. Method — what worked, and what did not
 
