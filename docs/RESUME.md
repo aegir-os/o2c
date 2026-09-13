@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         359
+    commits         360
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2445,6 +2445,49 @@ All seven suites green, 52 fixtures corroborated by both backends, zero warnings
 run - `Out.Char` (one argument) then `Out.Int` (two) - and then the other families.
 Each is a route through machinery that is already verified, which is the point of
 doing the lowering first.
+
+### 3bf. M4f part 2 RE-SIZED - the loop needs a type CLASS, not just more ops
+
+Measured, and it is a stage of its own rather than one member's migration.  The
+`Out.String` loop's emission uses:
+
+    Load_Local x5   Jump x4   Bin x4   Push_Int x3   Store_Local x2   Mark x2
+    Jnz / Jmp x2    Native_Call   Lt   Load_Idx_B   Load_Addr_G   Global_Array
+    Eq              Add
+
+Beyond the five lowerings that exist, it needs:
+
+1. **A TYPE CLASS on IR values.**  The emitter has separate ops per width - `Add`,
+   `Sub`, `Mul`, `IDiv`, `IMod`, `Neg` with `Eq`/`Ne`/`Lt`/`Le`/`Gt`/`Ge` for
+   integers, and `Radd`, `Rsub`, `Rmul`, `Rdiv`, `Rneg` with `Req`/`Rne`/`Rlt`/...
+   for reals.  The IR carries `Typ : Natural`, an OPAQUE id the front end issues -
+   and an opaque id cannot choose between `Add` and `Radd`.  That is a DESIGN GAP
+   in M1, found by measuring the next consumer: the lowering needs the width, and
+   "the front end resolves the rest" was not enough.
+2. Integer comparison and arithmetic lowerings (`Op_Lt`, `Op_Eq`, `Op_Add`, ...).
+3. An INDEXED BYTE LOAD.  `Load_Idx_B` takes [base, index] and scales by one byte;
+   `Op_Load` is "d := *s1", a different shape - so a new op, not a reuse.
+4. `Op_Discard`: the loop DROPS the address the designator chain pushed, because it
+   derives its own.  In a fully-IR world that push would not happen; during a
+   migration it does, so the drop has to be expressible.
+5. The loop itself as six to eight quads, with that fixup interplay.
+
+**So it is deferred, and "one member's migration" was wrong**: the type class is a
+design addition, not a member wiring.
+
+**Revised order:**
+
+    i    the type class, plus the integer comparison/arithmetic lowerings - small,
+         reusable, and the first thing ANY expression work needs;
+    ii   a RUN-net for the FFI families: their bytecode_gaps probes only COMPILE,
+         so before migrating them they need a fixture that runs;
+    iii  the other families, mechanical once their arguments fit the ops;
+    iv   Out.String's loop LAST - the biggest piece, with the thickest net, since
+         every fixture prints through the paths around it.
+
+Nothing in code this round: the measurement said the target was a stage, not a
+member, and that is the second time in this session the sizing changed on contact
+(3d was the first).
 
 ## 4. Method — what worked, and what did not
 
