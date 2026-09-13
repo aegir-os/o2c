@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         441
+    commits         442
     fixtures        92 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -5693,6 +5693,36 @@ different frames (0 and 1), so a record for the nested procedure looks duplicate
 provisional record `Reserve_Proc` writes and the one `End_Proc` fills in, or a second reserve.  It did not
 affect the emitted code, and it should be understood before the depth violation is chased, since a
 verifier walks records.
+
+Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (still 0; want 42).
+
+### 3ej. The "duplicate record" is a bodyless declaration - and the depth violation is what is left
+
+3ei's second question is answered, and the answer is that there was no duplicate.  The emitter, traced at
+reserve/open/end, is authoritative:
+
+    E reserve id=29 npar=0 len=2326 frameproc=0
+    E end     id=29 slots=0 len=2326          <- bodyless: length UNCHANGED, offset stays provisional
+    E reserve id=30 npar=0 len=2326 frameproc=0     <- Outer
+    E reserve id=31 npar=1 len=2326 frameproc=30    <- Bump, nested in 30
+    E end     id=31 slots=1 len=2351               <- Bump's body: 2326 -> 2351
+    E end     id=30 slots=1 len=2378               <- Outer's body: 2351 -> 2378
+    E reserve id=32 npar=0 len=2378 frameproc=30    <- the module body
+
+id 29 is declared and ended without a body, so its `Buf_Off` stays where `Reserve_Proc` provisionally put
+it - the code length at that moment, 2326 - and 2326 is exactly where Bump's body begins.  Two records
+with one offset, and no duplication.  Note also `frameproc=30` at id 31: the nested reserve correctly sees
+Outer as the enclosing frame, which is what `Up_Level_Slot` searches.
+
+**That is the fourth instrument error in this stretch**, and the same species as the third: reading a
+table by offset without checking what the offsets are relative to.  The emitter print is what settled it,
+in one run.
+
+**What is left is the depth violation, and only that.**  With the image now correct - enclosing body under
+its own id and frame, module call reaching it, nested call with its link, up-level access through the
+link - the VM's verifier rejects one procedure's operand stack.  The next measurement is a depth trace with
+a correct table (`LOAD_CONST` = +1, and the call's pop is the CALLEE's `NParams`, which the record now
+carries correctly since the reserve and the end agree).
 
 Tree green, `run_bc` PASS; committed state is 3eb; fixture at /tmp/nestproc.ob2 (still 0; want 42).
 
