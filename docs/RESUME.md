@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         398
+    commits         399
     fixtures        89 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4215,6 +4215,37 @@ suite's ok/blocked - it shows each probe reached the site it was written for.
 **So the Math flip is BLOCKED, not pending**: the transcendentals need natives and VM arms
 (append-only ids) before the flip is anything but a wrong answer.  That is a feature, not a bug
 hunt - and finding it before the flip rather than after is the whole reason to audit first.
+
+### 3cs. The disassembler, and a blocker that is now one measurement wide
+
+3co asked for a byte comparison of `New` between the builtin and user-library images and 3cp found
+no instrument for it: the image carries no name map.  So the instrument was built -
+`tools/bc_disasm.py`, whose opcode table is parsed out of `docs/obc-image.md` rather than copied, so
+it cannot drift from the spec.  104 opcodes, procedure table and bodies, operands decoded.
+
+**What it showed, and it is all negative - which is worth as much:**
+
+    Files.New   (builtin image):  LOAD_L 3, DROP, ALLOC_NEW 1, STORE_L 3, ...  identical in shape
+    Lib2.New    (user-library):   LOAD_L 3, DROP, ALLOC_NEW 21, STORE_L 3, ...  to Files.New
+    Files.Old   (builtin image):  ... LOAD_L 0, CALL_NATIVE (26, 1), STORE_FLD_I 72 ...
+
+The native ids are RIGHT, on both paths, against the VM's own table: `Max_Natives = 5`, so id =
+entry + 4, and entry 5 `o2c_fdel` = 9, entry 6 `o2c_frename` = 10, entry 22 `o2c_fstat` = 26, 23
+`o2c_fread` = 27, 24 `o2c_fwrite` = 28, 25 `o2c_fclose` = 29.  The compiler's comments ("Native id 9
+(o2c_fdel)", "Native id 10 (o2c_frename)") and the builtin path's emission (`FStat` -> 26) both agree
+with the table.  I called this "found it" mid-measurement and it was not found; the ids check out.
+
+**And that leaves exactly one difference between the two `New`s:**
+
+    Files.New allocates ALLOC_NEW 1        Lib2.New allocates ALLOC_NEW 21
+
+Everything else is the same sequence.  So the remaining blocker is one question, and it is one
+measurement wide: **is descriptor 1 in that image actually `FileDesc`** - 64 chars plus a longint, 72
+bytes, field `size` at offset 72 - **or is it something else the image declared first?**  If it is
+not, `new (f)` allocates the wrong size, the loop's writes land outside the object, and every
+Files symptom follows: the garbage name the host filesystem saw, and `Length` reading 0 because the
+two fields overlap instead of sitting 72 bytes apart.  Listing the TYPES descriptors with their
+sizes and name refs settles it, and that is the next command, not the next turn's design.
 
 ## 4. Method — what worked, and what did not
 
