@@ -1,0 +1,79 @@
+   --  The locals pool is CHUNKED so that a slot's ADDRESS is stable.  Push_Frame
+   --  used to reallocate one big array on a deeper call, which silently destroyed
+   --  every VAR parameter's address - the very thing LOAD_ADDR_L hands out, and
+   --  the reason that opcode went unimplemented (3dg).
+   Locals_Chunk_Shift : constant := 12;                    --  4096 words
+   Locals_Chunk_Len   : constant := 2 ** Locals_Chunk_Shift;
+   type Locals_Chunk is array (0 .. Locals_Chunk_Len - 1) of U64;
+   type Locals_Chunk_Access is access Locals_Chunk;
+   type Locals_Chunks is array (Natural range <>) of Locals_Chunk_Access;
+   type Locals_Chunks_Access is access Locals_Chunks;
+
+   --  Materialise every chunk a slot range needs, so a frame can READ a slot it
+   --  has not written.  Called exactly where the old code grew the array.  A
+   --  chunk is ordinary heap, and is never freed or moved; the TABLE of pointers
+   --  may be replaced, which costs nothing because no address points into it.
+   procedure Ensure_Locals (C : in out Context; Up_To : Natural) is
+   begin
+      if C.Chunks /= null and then Up_To / Locals_Chunk_Len <= C.Chunks'Last
+      then
+         null;
+      else
+         declare
+            Cap   : Natural :=
+              (if C.Chunks = null then 1 else C.Chunks'Length * 2);
+            Newer : Locals_Chunks_Access;
+         begin
+            while Cap <= Up_To / Locals_Chunk_Len loop
+               Cap := Cap * 2;
+            end loop;
+            Newer := new Locals_Chunks (0 .. Cap - 1 => null);
+            if C.Chunks /= null then
+               Newer (0 .. C.Chunks'Length - 1) := C.Chunks.all;
+            end if;
+            C.Chunks := Newer;
+         end;
+      end if;
+      for I in 0 .. Up_To / Locals_Chunk_Len loop
+         if C.Chunks (I) = null then
+            C.Chunks (I) := new Locals_Chunk'(others => 0);
+         end if;
+      end loop;
+   end Ensure_Locals;
+
+   function Get_Local (C : Context; I : Natural) return U64 is
+     (C.Chunks (I / Locals_Chunk_Len) (I mod Locals_Chunk_Len));
+
+   procedure Set_Local (C : in out Context; I : Natural; V : U64) is
+   begin
+      C.Chunks (I / Locals_Chunk_Len) (I mod Locals_Chunk_Len) := V;
+   end Set_Local;
+
+   function Addr_Of_Local (C : Context; I : Natural) return U64 is
+     (U64 (System.Storage_Elements.To_Integer
+             (C.Chunks (I / Locals_Chunk_Len)
+                      (I mod Locals_Chunk_Len)'Address)));
+
+== The sites to change (exact strip, each unique in vm/obc_vm.adb) ==
+   Locals      : U64_Array_Access := null;                   -> Chunks : Locals_Chunks_Access := null;
+   Locals      : U64_Array_Access renames Ctx.Locals;        -> a comment (no array to rename)
+   if Base + Img.Procs (Callee).Frame_Slots > Locals'Length then ... end if;
+                                                             -> if ... > 0 then Ensure_Locals (Ctx, Base + Frame_Slots - 1); end if;
+   Locals (Base + K) := Pop;                                 -> Set_Local (Ctx, Base + K, Pop);
+   Mark_Word (C.Locals (K));                                 -> Mark_Word (Get_Local (C, K));
+   Push (Locals (Addr));                                     -> Push (Get_Local (Ctx, Addr));
+   Locals (Addr) := Pop;                                     -> Set_Local (Ctx, Addr, Pop);
+   Locals (Base + Slot) := From;                             -> Set_Local (Ctx, Base + Slot, From);
+   Locals (Base + Limit) := To;                              -> Set_Local (Ctx, Base + Limit, To);
+   Locals (Base + Limit + 1) :=                              -> Set_Local (Ctx, Base + Limit + 1,
+   V := To_I64 (Locals (Base + Slot));                       -> V := To_I64 (Get_Local (Ctx, Base + Slot));
+   Lim := To_I64 (Locals (Base + Limit));                     -> Lim := To_I64 (Get_Local (Ctx, Base + Limit));
+   if Locals (Base + Limit + 1) = 1 then                     -> if Get_Local (Ctx, Base + Limit + 1) = 1 then
+   Locals (Base + Slot) := To_U64 (V);                       -> Set_Local (Ctx, Base + Slot, To_U64 (V));
+   More := (if Locals (Base + Limit + 1) = 1 then V <= Lim   -> More := (if Get_Local (...) then V <= Lim
+   Locals      =>                                            (its continuation line goes too)
+                                                             -> Chunks      => null,
+   Locals      => new U64_Array (0 .. Max_VM_Locals - 1),    -> Chunks      => null,
+
+Leave alone: Max_VM_Locals (becomes unused), Locals_Used/Pool_Used (a COUNT, not storage),
+and the comments at 2122/2166.

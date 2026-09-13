@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         415
+    commits         416
     fixtures        90 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -4850,6 +4850,37 @@ ONE element it is in the list.
 **So the next attempt's method matters more than its patch**: enumerate first (the list above), edit
 bottom-up, shift by elements and not lines, assert the content of every line touched - and prefer the
 editor tool that shows the lines and refuses an ambiguous edit over a blind text substitution.
+
+### 3dj. Five attempts at the chunked store, five reverts, and the instrument was the problem
+
+The design is settled (3dh) and the site list is complete (3di).  Five scripted attempts to apply it
+failed, each for a different reason and every one of them mine:
+
+    1. ambiguous text anchors - the edits landed in the wrong Context record
+    2. shifted line numbers after an insert, because `L.insert` with a multi-line STRING adds one
+       ELEMENT, and I shifted by the block's line count
+    3. line numbers guessed from a `sed` window instead of taken from a grep
+    4. an enumeration grep whose pattern (`Locals =>`) did not match `Locals      =>` - so a site was
+       missing from the list I was patching from
+    5. `find` by substring hitting a longer line (`if Locals (Base + Limit + 1) = 1 then` matched
+       inside `More := (if Locals (Base + Limit + 1) = 1 then V <= Lim`), then an exact-strip rule
+       applied to a line whose strip is the WHOLE line (`Locals      : U64_Array_Access renames
+       Ctx.Locals;`), which of course does not equal `renames Ctx.Locals;`
+
+The VM was never left half-changed: each attempt aborted before writing, or was restored from a copy
+taken first, and the tree is green (`run_vm` PASS, `run_bc` PASS, `git diff` empty for obc_vm.adb).
+
+**The conclusion is about the INSTRUMENT, not the design.**  A 3000-line Ada file where `Locals`
+appears as a field, a renames, a local renames, an assignment target, three array forms and two
+Context constructions is not something to patch by scripted text substitution - not by me, and not
+by a script that has to keep re-deriving uniqueness.  It wants the editor tool that shows the lines
+it is changing and refuses an ambiguous match, one site per edit, with the build run once at the end
+(the refactor cannot be built half-applied: removing the field breaks every site at once).
+
+**What is now reusable, and committed**: `docs/chunked-locals.txt` holds the exact helper block -
+the chunk types, `Ensure_Locals`, `Get_Local`, `Set_Local`, `Addr_Of_Local` - and the strips of every
+site to change, so the next attempt starts from a written patch rather than from a description of
+one.  Then `LOAD_ADDR_L`, then 3df's parts 2 and 3, and `fres.ob2` prints `c=[h]`.
 
 ## 4. Method — what worked, and what did not
 
