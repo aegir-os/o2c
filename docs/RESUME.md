@@ -6834,6 +6834,23 @@ call as the right-hand side of a by-ref store is therefore the suspect - the sam
 up-level work earlier, and the disassembler is the instrument that settles it: the In probe's body shows
 whether the call sits before or after the store's base and index.
 
+**The probe's own output sharpens it further, without any new instrumentation.**  The fixture is
+
+    In.Open; In.String (s); Out.String (s);
+    In.Name (n);  Out.String (n);
+    In.Int (i);   Out.Int (i, 0);
+    In.Char (c);  Out.Int (ORD (c), 0);
+    In.Real (r);  Out.Real (r, 0)
+
+and it printed `helloworld` - so String and Name WORK.  The three that produce nothing differ from them in
+one place, and it is not the arm: `In.String`'s body is `InString (str)`, a PLAIN CALL, while `In.Int`'s is
+
+    x := InInt()
+
+an ASSIGNMENT whose right-hand side is the call.  `String`'s parameter is by-ref too, so by-ref passing is
+not the difference - a call on the right of an assignment is.  That is the suspect, narrowed to one shape,
+and it is the same shape a caller writes as `i := SomeFunction ()`.
+
 Also worth recording: an unrelated `run_bc: host build failed` appeared in one background run and did not
 reproduce on a re-run - the suites each build the host tool, and one of them raced.  Noted rather than chased;
 if it recurs, that is the thing to look at.
