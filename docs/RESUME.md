@@ -7094,6 +7094,38 @@ though, and the check is one grep per builtin.
 Six consecutive turns ended with two emissions side by side; this one ended with a grep, and the grep was
 possible only because the six had narrowed it to a single line of source.
 
+### 3gc. The sweep: one real problem, and it says why the others work
+
+Every flipped builtin, scanned for names in call position that nothing declares:
+
+    Strings            (none)
+    Input              (none)
+    Files              fdel frename fstat fread fwrite fclose      <- the Files FFI surface
+    Args               argget                                      <- handled by 3fs's arm
+    Texts, Term        int                                         <- to check
+    Reals              rparse                                      <- THE BUG
+
+The result is more useful than the bug it found.  Every FFI name in the list - Files' six, Args' one - is
+HANDLED: each has an arm that emits something.  So an undeclared name is not itself the fault; an undeclared
+name with no arm is.  That is exactly why Files, Args, Input and In work while Reals does not, and it is a
+completeness property of the FFI surface rather than of the corpus.
+
+It also means the compiler fix is safe and specific: refusing an unresolved name in CALL POSITION would refuse
+`rparse` and nothing else in the flipped set.  The six Files names and `argget` never reach the fallback -
+they are handled before it.  So the rule the project already states - a construct that silently yields a wrong
+answer must refuse - can be applied to the one construct that has been silently yielding one, at no cost to
+anything that works.
+
+`int` in Texts and Term is the one unknown left.  It may be a conversion the language spells as a call, or a
+method-style call the scanner sees as one; it is one grep to settle and it is not obviously wrong.
+
+**Two things to do, in order:**
+
+1. grep Texts and Term for `int` to classify it - one command, and it either clears or joins the list.
+2. `rparse` itself: either give `Reals.ConvertTo` a real body for it, or an FFI helper with an arm and a
+   native, the way In's InChar has.  Which one is a design question about a test builtin - and the compiler
+   refusal should land regardless, because a future builtin will make the same mistake.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
