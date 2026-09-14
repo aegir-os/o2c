@@ -6858,6 +6858,37 @@ if it recurs, that is the thing to look at.
 Reverted, tree green: run_bc PASS and bytecode_gaps PASS.  What is left for In is the by-ref store with a call
 on the right, measured the same way the last four defects were.
 
+### 3fu. The suspect was wrong: the ASSIGNMENT emission is correct, the CALLEE returns 0
+
+The suspicion from 3ft was a call on the right of an assignment.  It is testable without In at all, because
+Reals is flipped and samples/hello.ob2 calls Reals.Expo:
+
+    x := Reals.Expo (1.0);  Out.Real (x, 2)
+
+compiles, runs, and prints 0.000 - the value is lost.  So the shape reproduces in a plain user module.
+
+**But the disassembly says the assignment is innocent:**
+
+    5964 LOAD_CONST_R [286]     push 1.0
+    5969 CALL         [4856]    Reals.Expo
+    5974 STORE_G      [3]       x := result
+    5979 LOAD_G       [3]       load x
+    5984 LOAD_CONST   [287]
+    5989 CALL_NATIVE  [3, 2]    Out.Real
+
+Argument pushed, call made, result stored, result reloaded - and no depth error, so the stack balanced.
+The only way that prints 0.000 is that **Reals.Expo RETURNED 0.0**.  The bug is in the callee's return path,
+not in the store that consumes it - and the same explanation covers In.Int, whose body is `x := InInt()` and
+which also produced nothing.
+
+That is the fifth time in this stretch that dumping the bytes has overturned a confident reading - and the
+second time the overturned reading was my own from the previous turn.  The rule keeps earning its place: when
+an expression produces a wrong value, look at what the producer emitted before suspecting the consumer.
+
+**Next**: Reals.Expo's own body - a function returning 0. The suspects are its return path (RET against
+RET_VOID), the native it calls, or the arithmetic in between - and the disassembler answers it the same way,
+on the SAME fixture, with no flip needed: Reals is already in.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
