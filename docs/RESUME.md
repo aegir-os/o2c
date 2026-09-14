@@ -6543,6 +6543,43 @@ Reverted, not landed: an inert branch is not a landing, and the tree is green at
 measurement is one grep for the plain-procedure export path - and it is the last thing between Input and
 being usable from a program rather than merely compiling.
 
+### 3fl. LANDED: the parameterless qualified call - Input is usable, and the marker was the place
+
+The branch went in at MARKER_BARE_REFUSAL (the marker whose own comment already named `XYplane.Key`, a
+parameterless qualified call the backend knows), resolving the member instead of refusing it:
+
+    if Xs (XI).Kind = S_Proc and then Xs (XI).Bc /= 0 then
+       Add_BW (Ada_Id (FNm));                      --  the Ada side's WITH
+       O2c_Ir_Lower.Call_Proc (Xs (XI).Bc, 0);     --  the bytecode side's call
+       R.Text := "Mod.Member";  R.Typ := ...;  R.Lit := False;  R.Folds := False;
+
+and it works: a program calling `Input.Available` and `Input.Read` compiles and runs, printing `00` - which
+is what the Ada helpers return with no input.
+
+Three findings from getting here, each worth more than the patch:
+
+* **no arity test is needed**: reaching the BARE marker means there were no parentheses, so a member with
+  parameters cannot be here.  The first version tested `N_A = 0` and did not compile, because `N_A` does not
+  exist on this path - the compiler said so in one line, which is the fastest correction of the session.
+* **`Xs (XI).Bc` carries the id** - probed rather than assumed, after a wrong guess that the export had not
+  received it: `E Input.Available psym= 2 sym_bc= 30 E.bc= 30`.  The signal is documented on the field and it
+  is delivered.
+* **there are TWO markers with the same text** (a query marker and the bare one), and patching the first left
+  the behaviour unchanged - which is the third time a line number misled a reading.  Line numbers belong to a
+  revision, and mine move under my own patches.
+
+`run_bc` and `bytecode_gaps` pass, and `differential` passes again once the fixture is withdrawn.
+
+**The one blocker left, named exactly**: a fixture for this shape cannot pass `differential` yet, because the
+emitted Ada for the BUILTIN `Input` references `Aegir_User.CLI` - a guest RTS unit the host differential build
+does not have:
+
+    inputuse ada WILL NOT BUILD: input.adb:3:06: error: file "aegir_user-cli.ads" not found
+
+That is the category the suite calls "a recorded, reasoned Ada-side limit" (tests/differential.sh:296-329),
+and recording it is a one-line entry there.  It is also a limit that retires itself: the Ada backend is being
+removed, which is the whole reason the bytecode backend exists.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

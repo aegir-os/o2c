@@ -4139,10 +4139,34 @@ package body O2c_Compiler is
                                                                    "Key"))
                               then
                                  --  MARKER_BARE_REFUSAL: a bare call with no
-                                 --  emission, same default as everywhere else.
-                                 raise O2c_BC.Wrong_Construct with
-                                   "bytecode backend: " & FNm & "."
-                                   & MName & " is not yet supported";
+                                 --  emission.  The guard above already names
+                                 --  XYplane.Key, a parameterless qualified call
+                                 --  this backend knows; the same shape now has a
+                                 --  GENERAL answer, because a member whose code
+                                 --  is in the image is an ordinary call:
+                                 --  `Input.Available`.  Bare names are idiomatic
+                                 --  Oberon - a builtin's own body is written in
+                                 --  them throughout - so this is the case a
+                                 --  backend should expect, not the exception.
+                                 --  No arity test is needed: reaching the bare
+                                 --  marker at all means there were no
+                                 --  parentheses, so a member with parameters
+                                 --  simply cannot be here.
+                                 if Xs (XI).Kind = S_Proc
+                                   and then Xs (XI).Bc /= 0
+                                 then
+                                    Add_BW (Ada_Id (FNm));
+                                    O2c_Ir_Lower.Call_Proc (Xs (XI).Bc, 0);
+                                    R.Text := To_Unbounded_String
+                                      (Ada_Id (FNm) & "." & Ada_Id (MName));
+                                    R.Typ := Xs (XI).Typ;
+                                    R.Lit := False;
+                                    R.Folds := False;
+                                 else
+                                    raise O2c_BC.Wrong_Construct with
+                                      "bytecode backend: " & FNm & "."
+                                      & MName & " is not yet supported";
+                                 end if;
                               end if;
                               --  A bare function call: XYplane.Key is the
                               --  one, and it returns a CHAR - the same
