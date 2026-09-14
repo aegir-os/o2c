@@ -7126,6 +7126,34 @@ method-style call the scanner sees as one; it is one grep to settle and it is no
    native, the way In's InChar has.  Which one is a design question about a test builtin - and the compiler
    refusal should land regardless, because a future builtin will make the same mistake.
 
+### 3gd. The compiler ALREADY refuses an unknown name - so why not RParse
+
+`int` is cleared (it is `Out.Int (...)`, a false positive in my scanner), leaving `rparse` as the sweep's only
+real hit.  So the refusal was written - an unresolved name in `Bc_Load` raises instead of becoming a global -
+and it built and passed run_bc, bytecode_gaps and differential.
+
+**Then the check that should have come first**: does an undeclared name already refuse?  It does.
+
+    module Und; import Out; begin Out.Int (Nope (1), 0) end Und.
+    o2c error: unknown variable or constant 'Nope' (line 4)
+
+So the compiler has that guard already, and the `Bc_Load` refusal is REDUNDANT - dead code on a path the
+front end never lets through.  It is reverted, and the useful question it leaves is better than the change:
+**`RParse` should have been caught by `unknown variable or constant` and was not.**
+
+That narrows the real bug to the path that skips the check - the BUILTIN's own body.  `Oak_Reals_Src` is
+compiled in a package/scoped mode the corpus never uses, and something in that path resolves a name it cannot
+find without complaining.  Where exactly is one measurement: compile the same two lines as a builtin rather
+than as a user module and see whether the message appears; if it does not, the guard has a context it does not
+cover, and that is the fix - which is the same shape as every other completion in this work: the guard exists,
+and one path was added that does not go through it.
+
+Lesson, and it cost one build and one revert: **check whether the guard already exists before writing one**.
+The sweep had already told me the answer - an undeclared name is only a fault when nothing handles it - and I
+read that as "the compiler must handle it" when it meant "the compiler already does".
+
+Tree green, no change landed.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
