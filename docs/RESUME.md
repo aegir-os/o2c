@@ -7031,6 +7031,38 @@ reading either one.  The instrument is cheap and the comparison is what carries 
 
 Tree green, no compiler change.
 
+### 3ga. ROOT CAUSE: ConvertTo's body stores an ADDRESS into the real
+
+The two bodies side by side, and the difference is not subtle once the pool is read:
+
+    Reals.ConvertTo   4716 LOAD_L[0]  LOAD_CONST[190]  LOAD_L[1]  STORE_IDX_I  RET_VOID
+    Args.Get          3819 LOAD_L[0]  LOAD_L[1]  LOAD_L[3]  LOAD_CONST[119]  LOAD_IDX_I  ...
+
+and pool[190] = 0, pool[119] = 0 - both indices are ZERO, which is what a by-ref access wants.  So
+ConvertTo's first instruction group is
+
+    *(slot0 + 0) := slot1
+
+read literally: **store the contents of slot 1 through the address in slot 0**.  For
+`ConvertTo (var x: real; s: array of char)` the slots are x's ADDRESS (0), s's ADDRESS (1) and s's LENGTH
+(2) - so the body's first operation writes S'S ADDRESS INTO X.  A pointer-sized write into a real, at the
+start of the procedure, before any parsing happens.
+
+That is why `r` stays 0.000 and why nothing crashes: the write goes through x's address, which is valid, and
+puts address bits in it.  `Out.Real` then prints whatever those bits mean - 0.000 here.
+
+**And Args.Get has the same stray prefix but no store at the end of it**, which is exactly the difference
+between the two: one body STORES the stray computation, the other leaves it on the stack where a later call
+sweeps it up.  That also explains the `LOAD_G n; DROP` pair at the call sites - the same by-ref machinery,
+there in a harmless form.
+
+So the fault is in whatever emits that opening store for a body whose FIRST parameter is a to-var scalar
+followed by an open array: it treats the array's address as a value to assign.  Two probes would pin it -
+a local `procedure T (var v: real; s: array of char)` whose body does nothing but `v := 1.5` (already known
+to work, so the difference is the BODY's shape) against `ConvertTo`'s actual body, which begins by assigning.
+
+Six consecutive turns have ended by putting two emissions side by side.  It is now the method, not a trick.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
