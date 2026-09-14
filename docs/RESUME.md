@@ -6954,6 +6954,30 @@ Two things worth keeping:
 Reverted, tree green.  Next: the by-ref convention across a module boundary - what the caller pushes for a
 flipped module's to-var parameter.
 
+### 3fx. Reproduced without In, without a crash, and narrowed to `real`
+
+The by-ref-across-a-boundary question is testable with no flip and no builtin, because Reals is already in.
+Two fixtures, both run by hand with stderr shown - which is the habit 3fw established:
+
+    Reals.ConvertTo (r, "3.25");   Out.Real (r, 2)      ->  0.000   WANT 3.25
+    Args.Get (1, buf, n);          Out.Int (n, 0)       ->  -1      CORRECT
+
+The second is the control, and it is a control that PASSES: `n` is a module-level global, so it starts at 0,
+and printing -1 means the callee DID write through the caller's address.  So `Args.Get`'s to-var INTEGER
+parameter works, and `Reals.ConvertTo`'s to-var REAL parameter does not.
+
+**That narrows it to the scalar type.**  Both procedures take an `ARRAY OF CHAR` alongside the to-var
+parameter, so the array is not the difference and neither is the boundary: the difference is INTEGER against
+REAL.  The next probes are cheap and pin it exactly - a to-var LONGINT and a to-var CHAR would say whether it
+is "real" alone or "anything but integer", and both need no flip either.
+
+Note also what did NOT happen: **no crash**, unlike In's STORAGE_ERROR.  So these are two different faults
+that the suite reported with the same line, which is the reason 3fw's point matters - the report and the fault
+have not been the same thing for four turns now.
+
+Reverted nothing: no compiler change was made for this, and the tree is green.  The probe fixtures are in /tmp
+and will become tests when they pass.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
