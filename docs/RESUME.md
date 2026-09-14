@@ -7736,6 +7736,52 @@ for that group rather than at four separate bugs.  That is the next item.
 Fixtures landed for 3gu-3gx: wholecopy, qrecvar(+lib), ptrfun(+lib), varptr, emptyset, mathconst;
 mathln updated.  Fast suites green after each fix: run_bc, run_vm, bytecode_gaps.
 
+### 3gy. The four wrong values were FOUR bugs; hello.ob2 is now fully correct
+
+3gx guessed "all four are VAR out-parameters, one convention".  Wrong - they shared a symptom
+class and nothing else:
+
+1. **Input.TimeUnit: the library body was never called.**  A library's module body is compiled
+   into the image as a parameterless procedure, but the header's entry runs only the MAIN body,
+   so `Input`'s `TimeUnit := 1000` sat in the image unexecuted.  The compiler now records every
+   library body opened in the same compilation (`Init_Procs`, via new `O2c_BC.Open_Body_Id` /
+   `Insn_Count` getters) and the main body CALLs each one before its own statements; compile
+   order is already topological, so callees' bodies are recorded before the main body opens.
+   Two sub-faults surfaced the moment the call existed: an EMPTY body emitted nothing, so its
+   recorded offset aliased the next procedure's (the main body called itself; empty bodies are
+   now skipped), and a body procedure had no RET - the main body gets HALT, real procedures get
+   RET via the `END` path, and library bodies got nothing, so the first called body fell
+   through into the next procedure (`local slot out of range` in a 0-slot frame).  Library
+   bodies now end with `Return_Void`.
+
+2. **Convert.ToInt: the FFI arm and the program disagreed about WHERE `n` lived.**  A
+   module-global used as a FOR control variable is interned into the enclosing frame
+   (`O2c_BC.Local` at the FOR), so normal reads used frame slot 0 - but the arm resolved the
+   actual by raw text with `Addr_Global` and wrote global 4.  The arm also DOUBLE-EMITTED:
+   `Parse_Actual` had already pushed every actual, and the arm then pushed its own copies,
+   leaking the dead ones.  Fixes: `Push_Var_Addr` (frame-aware: by-ref formal -> `Load_Local`,
+   frame local -> `Load_Addr_L`, else `Addr_Global`) for every address actual,
+   `Drop_Dead_Actuals` after each `Call_Native`, and `Bc_Push_Arg` for value actuals - the
+   FromInt arm's `Bc_Load ("(- 123)")` had minted a zero global, which is why the string came
+   out "0".  Applied at ToInt/ToReal, FromInt, Files.Delete/Rename, Env.Get/Set, Args.Get,
+   In.*, Err.Write, Addr_Str_Actual; XYplane.Dot's re-push loop deleted (its `Parse_Actual`
+   pushes ARE the arguments).
+
+3. **Reals.ConvertTo: `RParse` emitted nothing.**  The builtin branch produced an Ada-only
+   `R.Text` and no opcode, so the enclosing store took the string's ADDRESS as the REAL.
+   Fixed the FStat way: new native id 47 (`o2c_strtoreal`, foreign entry 43), implemented in
+   `vm/obc_vm.adb` as a byte-for-byte port of the Ada backend's `O2c_StrToReal` parse (spaces,
+   one sign, digits, one dot, E exponent, anything else ends the scan, no digits is 0.0), and
+   the branch now emits `Call_Native (47, 1)` once the argument's address is on the stack.
+
+    hello.ob2 on the host VM: 94 lines, exit 0, and every line correct -
+    3.250, 8003, 8310, -123 where 3gx listed 0.000, 8013, 8319, "0".
+
+Fixtures: modinit(+lib) (a library body must run before main, and return), realsto (ConvertTo:
+plain, negative, exponent), convffi (ToInt after a FOR on the same global; FromInt with an
+expression actual).  Also this session: `docs/obc-image.md` gained the `STR_ADDR` 0x74 row -
+the only VM opcode missing from the spec; the flat disassembler stalled on it.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

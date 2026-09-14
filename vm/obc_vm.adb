@@ -629,6 +629,10 @@ package body OBC_VM is
       --  Entry 41 is id 45, entry 42 is id 46.  Appended, never renumbered.
       41 => (Sym => new String'("o2c_errwrite"), Pops => 1),
       42 => (Sym => new String'("o2c_errwriteln"), Pops => 0),
+      --  Reals.ConvertTo's RParse half: the ADDRESS of a NUL-terminated
+      --  string in, the REAL it names out.  Entry 43, i.e. id 47.  Appended,
+      --  never renumbered.
+      43 => (Sym => new String'("o2c_strtoreal"), Pops => 1),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -676,6 +680,7 @@ package body OBC_VM is
       39 => 1,    --  o2c_math_arctan
       40 => 2,    --  o2c_math_arctan2
       45 => 1,    --  o2c_errwrite: the address of a NUL-terminated string
+      47 => 1,    --  o2c_strtoreal: the string's address
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -711,6 +716,7 @@ package body OBC_VM is
       42 => True,
       43 => True,
       44 => True,
+      47 => True,   --  o2c_strtoreal returns the parsed REAL
       others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
@@ -1775,12 +1781,118 @@ package body OBC_VM is
                      end;
                   end loop;
                end;
-            else
-               VM_Platform.New_Line_Err;
-            end if;
-            return Ok;
+             else
+                VM_Platform.New_Line_Err;
+             end if;
+             return Ok;
 
-         when Max_Natives + 21 .. Max_Natives + 24 =>
+          when Max_Natives + 42 =>
+             --  o2c_strtoreal (47): Reals.ConvertTo's RParse half.  The
+             --  argument is the ADDRESS of a NUL-terminated string, exactly
+             --  as o2c_conv_toint's first argument is; the result is the
+             --  REAL it names.  The parse mirrors the Ada backend's
+             --  O2c_StrToReal - leading spaces, one sign, digits, one dot,
+             --  an E exponent, anything else ends the scan, and no digits at
+             --  all is 0.0 - because a program written against that
+             --  behaviour has to behave the same.
+             declare
+                function Byte_At (A : U64; N : Natural) return Byte is
+                   B : Byte with Address =>
+                     System.Storage_Elements.To_Address
+                       (System.Storage_Elements.Integer_Address (A)
+                        + System.Storage_Elements.Integer_Address (N));
+                begin
+                   return B;
+                end Byte_At;
+                S       : String (1 .. 64);
+                Len     : Natural := 0;
+                V       : Long_Float := 0.0;
+                Frac    : Long_Float := 0.1;
+                Neg     : Boolean := False;
+                Dot     : Boolean := False;
+                Seen    : Boolean := False;
+                K       : Natural;
+                Exp     : Integer := 0;
+                Exp_Neg : Boolean := False;
+             begin
+                while Len < S'Last loop
+                   declare
+                      B : constant Byte := Byte_At (Args (0), Len);
+                   begin
+                      exit when B = 0;
+                      Len := Len + 1;
+                      S (Len) := Character'Val (Natural (B));
+                   end;
+                end loop;
+                K := 1;
+                while K <= Len and then S (K) = ' ' loop
+                   K := K + 1;
+                end loop;
+                if K <= Len and then S (K) = '-' then
+                   Neg := True;
+                   K := K + 1;
+                elsif K <= Len and then S (K) = '+' then
+                   K := K + 1;
+                end if;
+                Scan : loop
+                   exit Scan when K > Len;
+                   declare
+                      C : constant Character := S (K);
+                   begin
+                      if C in '0' .. '9' then
+                         Seen := True;
+                         if Dot then
+                            V := V + Long_Float (Character'Pos (C)
+                                                 - Character'Pos ('0'))
+                              * Frac;
+                            Frac := Frac / 10.0;
+                         else
+                            V := V * 10.0
+                              + Long_Float (Character'Pos (C)
+                                            - Character'Pos ('0'));
+                         end if;
+                         K := K + 1;
+                      elsif C = '.' and then not Dot then
+                         Dot := True;
+                         K := K + 1;
+                      elsif C = 'e' or else C = 'E' then
+                         K := K + 1;
+                         if K <= Len and then S (K) = '-' then
+                            Exp_Neg := True;
+                            K := K + 1;
+                         elsif K <= Len and then S (K) = '+' then
+                            K := K + 1;
+                         end if;
+                         while K <= Len and then S (K) in '0' .. '9' loop
+                            Exp := Exp * 10
+                              + (Character'Pos (S (K)) - Character'Pos ('0'));
+                            K := K + 1;
+                         end loop;
+                         exit Scan;
+                      else
+                         exit Scan;
+                      end if;
+                   end;
+                end loop Scan;
+                if Seen then
+                   for I in 1 .. Exp loop
+                      if Exp_Neg then
+                         V := V / 10.0;
+                      else
+                         V := V * 10.0;
+                      end if;
+                   end loop;
+                   if Neg then
+                      V := -V;
+                   end if;
+                else
+                   V := 0.0;
+                end if;
+                Result := (Pushes => True, Value => R64_To_U64 (V));
+             end;
+             return Ok;
+
+          when Max_Natives + 21 .. Max_Natives + 24 =>
             --  o2c_fstat (26), o2c_fread (27), o2c_fwrite (28), o2c_fclose (29):
             --  the positioned file primitives the Files module is built on.
             --  All four RETURN a value - unlike Delete/Rename, which report

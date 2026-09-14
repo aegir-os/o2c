@@ -244,7 +244,20 @@ package O2c_BC is
    --  Open the module body.  Called when the statement part begins, after
    --  every declared procedure has been closed, so the body's code is
    --  contiguous and last.
-   procedure Begin_Body;
+    procedure Begin_Body;
+
+    --  The procedure id Begin_Body just opened.  A Compile_Multi run compiles
+    --  every module into one image, so a library's body is a procedure like
+    --  any other - and the main module's body has to CALL it, because the
+    --  header's entry runs only the main one.  The compiler records each
+    --  library's id here and emits the calls at the start of the main body.
+    function Open_Body_Id return Natural;
+
+    --  Instructions emitted so far, cumulative over the image.  The compiler
+    --  uses the delta across a module body to tell an EMPTY body (which
+    --  aliases the next procedure's code offset) from a real one.
+    function Insn_Count return Natural;
+
 
    --  Closes the frame Begin_Body opened, if it is still open.  A module's
    --  body frame used to be left open for good, and that is not harmless: the

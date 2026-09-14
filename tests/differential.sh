@@ -205,6 +205,10 @@ usercall	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so
 #  Both are VM-side subjects, checked by output.
 ptrfun	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
 qrecvar	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
+#  modinit is the same shape again - it imports its own .lib.ob2 library, and
+#  its subject is VM-side: a library's module body must be CALLED before the
+#  main body's statements, and must RETURN rather than fall through.
+modinit	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
 #  recactual passes a record to a procedure and writes through it - the fixture
 #  for 3cj, and its subject is the VM side (the callee has to resolve a record
 #  formal's own slot).  The Ada side emits Ada that will not build: "w"

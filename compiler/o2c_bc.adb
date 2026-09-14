@@ -752,6 +752,10 @@ package body O2c_BC is
       Body_Proc := Begin_Proc (0, 0);
    end Begin_Body;
 
+   function Open_Body_Id return Natural is (Body_Proc);
+
+   function Insn_Count return Natural is (N_Insns);
+
    procedure End_Body is
    begin
       --  Only the BODY frame: a procedure frame left open is a different bug,

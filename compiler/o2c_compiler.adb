@@ -168,6 +168,18 @@ package body O2c_Compiler is
    Provided : array (1 .. Max_Prov) of Unbounded_String := (others => <>);
    N_Prov   : Natural := 0;
 
+   --  The bytecode procedure ids of the module BODIES compiled so far in a
+   --  Compile_Multi run, in compile order.  Every module opens a body, but
+   --  the header's entry runs only the main one, so the main body's first
+   --  statements call these - Oberon's "an imported module is initialized
+   --  before its importer".  Compile order is already topological (builtins
+   --  first, then user libraries, which must be provided before use), so the
+   --  list is the order.  Without it a library's initializer never ran:
+   --  Input's `TimeUnit := 1000` was emitted as a procedure nothing called.
+   Max_Init : constant := 32;
+   Init_Procs   : array (1 .. Max_Init) of Natural := (others => 0);
+   N_Init_Procs : Natural := 0;
+
    --  export catalog (M19): the visible symbols of library modules
    --  compiled so far; importers resolve qualified names against it.
    Max_X : constant := 512;
@@ -1789,7 +1801,10 @@ package body O2c_Compiler is
    --
    --  One global per literal OCCURRENCE, not per line: `Env.Set ("a", "b")`
    --  materializes two and they must not share a slot.
-   procedure Addr_Str_Actual (Text_Form : String; What : String);
+    procedure Addr_Str_Actual (Text_Form : String; What : String);
+
+   --  Forward: the body follows Bc_Whole_Copy, with the other address helpers.
+   procedure Push_Var_Addr (Name : String; Slots : Natural);
 
    N_Lit_Global : Natural := 0;
 
@@ -1797,8 +1812,9 @@ package body O2c_Compiler is
       SId : constant Natural := Find (Text_Form);
    begin
       if SId /= 0 and then Syms (SId).UT /= 0 then
-         O2c_Ir_Lower.Addr_Global (Ada_Id (Text_Form),
-                                   Total_Slots (Syms (SId).UT));
+         --  Not necessarily a global: a FOR control variable is a frame
+         --  local, and a VAR formal's slot holds the caller's address.
+         Push_Var_Addr (Text_Form, Total_Slots (Syms (SId).UT));
       elsif Text_Form'Length >= 2
         and then Text_Form (Text_Form'First) = '"'
         and then Text_Form (Text_Form'Last) = '"'
@@ -1960,7 +1976,56 @@ package body O2c_Compiler is
           O2c_Ir_Lower.Load_Fld (K * 8, O2c_Ir_Lower.Fld_Int);
           O2c_Ir_Lower.Store_Fld (K * 8, O2c_Ir_Lower.Fld_Int);
        end loop;
-    end Bc_Whole_Copy;
+     end Bc_Whole_Copy;
+
+    --  Push the ADDRESS of a variable an FFI native reads or writes through.
+    --  The FFI arms resolve the actual by its TEXT, which names a global -
+    --  but a FOR control variable is interned into the enclosing frame (the
+    --  loop opcodes address frame slots), and a VAR formal's slot holds the
+    --  caller's address rather than the variable.  Resolve the way
+    --  Parse_Actual does; resolving by text alone wrote the global while the
+    --  program read the frame slot, which is how `Convert.ToInt ("8311", n,
+    --  res)` set the global n and the check read a different n entirely.
+    procedure Push_Var_Addr (Name : String; Slots : Natural) is
+       Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Name));
+       Id : constant Natural := Find (Name);
+    begin
+       if Sl >= 0 then
+          if Id /= 0 and then Syms (Id).Kind = S_Var
+            and then Syms (Id).By_Ref
+          then
+             --  A by-ref formal forwarded: its slot holds the address.
+             O2c_Ir_Lower.Load_Local (Natural (Sl));
+          else
+             O2c_Ir_Lower.Load_Addr_L (Natural (Sl));
+          end if;
+       else
+          O2c_Ir_Lower.Addr_Global (Ada_Id (Name), Slots);
+       end if;
+    end Push_Var_Addr;
+
+    --  Parse_Actual pushed every actual before an FFI arm re-pushed what its
+    --  native wants, so the native's call leaves the FIRST push of each
+    --  actual dead on the operand stack: one slot per actual, two for an
+    --  open ARRAY formal (address and length).  Drop them after the call -
+    --  left in place they pile up under everything the rest of the module
+    --  does, and the stack_max accounting with them.  An arm that CALLS with
+    --  Parse_Actual's pushes (XYplane.Dot) has nothing dead and must not
+    --  call this.
+    procedure Drop_Dead_Actuals (XI : Natural; N_A : Natural) is
+    begin
+       for K in 1 .. N_A loop
+          declare
+             F : constant Param_Rec := X_Formal (XI, K);
+          begin
+             O2c_Ir_Lower.Discard;
+             if F.Open then
+                O2c_Ir_Lower.Discard;
+             end if;
+          end;
+       end loop;
+    end Drop_Dead_Actuals;
+
 
    function Parse_Rec_Ptr_Chain (Base_Name : String;
                                  Base_UT   : Natural)
@@ -3901,10 +3966,19 @@ package body O2c_Compiler is
                   if A.Typ /= T_Str then
                      raise O2c_Error with "RParse needs an ARRAY OF CHAR";
                   end if;
-                  Expect (Lex.Tok_RParen, "')'");
-                  Next;
-                  R.Text := To_Unbounded_String
-                    ("O2c_StrToReal (" & To_String (A.Text) & ")");
+                   Expect (Lex.Tok_RParen, "')'");
+                   Next;
+                   if O2c_BC.Bytecode_Mode then
+                      --  Id 47 (o2c_strtoreal): the string's address is on
+                      --  the stack - Parse_Expr left it there, exactly as
+                      --  FStat's name address is - and the native returns the
+                      --  REAL.  Before this existed the branch emitted NO
+                      --  opcode, so the enclosing store took the string's
+                      --  ADDRESS as the value (Reals.ConvertTo answered 0).
+                      O2c_Ir_Lower.Call_Native (47, 1);
+                   end if;
+                   R.Text := To_Unbounded_String
+                     ("O2c_StrToReal (" & To_String (A.Text) & ")");
                end;
                R.Typ := T_Real;
                R.Lit := False;
@@ -8594,51 +8668,52 @@ package body O2c_Compiler is
                                           O2c_Ir_Lower.Addr_Global
                                             (Ada_Id (Gnm), Words);
                                        end;
-                                    else
-                                       O2c_Ir_Lower.Addr_Global
-                                            (Ada_Id (SNm),
-                                             Total_Slots (Syms (SId).UT));
-                                    end if;
-                                 end;
-                                 O2c_Ir_Lower.Addr_Global
-                                      (Ada_Id (To_String (Arg_R (2).Text)), 1);
-                                 O2c_Ir_Lower.Addr_Global
-                                      (Ada_Id (To_String (Arg_R (3).Text)), 1);
-                                 --  Foreign entries 2 and 4: ToInt and
-                                 --  ToReal, native ids 6 and 8.
-                                 O2c_Ir_Lower.Call_Native
-                                   ((if Eq_No_Case (To_String (MName),
-                                                    "ToInt")
-                                     then 6 else 8), 3);
+                                     else
+                                        Push_Var_Addr
+                                          (SNm, Total_Slots (Syms (SId).UT));
+                                     end if;
+                                  end;
+                                  Push_Var_Addr (To_String (Arg_R (2).Text), 1);
+                                  Push_Var_Addr (To_String (Arg_R (3).Text), 1);
+                                  --  Foreign entries 2 and 4: ToInt and
+                                  --  ToReal, native ids 6 and 8.
+                                  O2c_Ir_Lower.Call_Native
+                                    ((if Eq_No_Case (To_String (MName),
+                                                     "ToInt")
+                                      then 6 else 8), 3);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "Convert")
                                 and then Eq_No_Case
                                   (To_String (MName), "FromInt")
                                 and then N_A = 2
-                              then
-                                 --  Value first, then the buffer address:
-                                 --  FromInt reads its argument and writes its
-                                 --  digits, where ToInt only writes.
-                                 Bc_Load
-                                   (Ada_Id (To_String (Arg_R (1).Text)));
-                                 declare
-                                    SNm : constant String :=
-                                      To_String (Arg_R (2).Text);
-                                    SId : constant Natural := Find (SNm);
-                                 begin
-                                    if SId = 0
-                                      or else Syms (SId).UT = 0
-                                    then
-                                       raise O2c_BC.Wrong_Construct with
-                                         "bytecode backend: Convert.FromInt "
-                                         & "needs a declared ARRAY OF CHAR "
-                                         & "variable";
-                                    end if;
-                                    O2c_Ir_Lower.Addr_Global
-                                         (Ada_Id (SNm),
-                                          Total_Slots (Syms (SId).UT));
-                                 end;
-                                 --  Native id 7: the third foreign entry.
-                                 O2c_Ir_Lower.Call_Native (7, 2);
+                               then
+                                  --  Value first, then the buffer address:
+                                  --  FromInt reads its argument and writes its
+                                  --  digits, where ToInt only writes.  The
+                                  --  value goes through Bc_Push_Arg: a literal
+                                  --  pushes its constant - Bc_Load on its TEXT
+                                  --  minted a zero global named "(- 123)",
+                                  --  which is why FromInt (-123, fl) wrote "0".
+                                  Bc_Push_Arg (Arg_R (1));
+                                  declare
+                                     SNm : constant String :=
+                                       To_String (Arg_R (2).Text);
+                                     SId : constant Natural := Find (SNm);
+                                  begin
+                                     if SId = 0
+                                       or else Syms (SId).UT = 0
+                                     then
+                                        raise O2c_BC.Wrong_Construct with
+                                          "bytecode backend: Convert.FromInt "
+                                          & "needs a declared ARRAY OF CHAR "
+                                          & "variable";
+                                     end if;
+                                     Push_Var_Addr
+                                       (SNm, Total_Slots (Syms (SId).UT));
+                                  end;
+                                  --  Native id 7: the third foreign entry.
+                                  O2c_Ir_Lower.Call_Native (7, 2);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "Files")
                                 and then Eq_No_Case
                                   (To_String (MName), "Delete")
@@ -8652,20 +8727,20 @@ package body O2c_Compiler is
                                       To_String (Arg_R (1).Text);
                                     SId : constant Natural := Find (SNm);
                                  begin
-                                    if SId = 0
-                                      or else Syms (SId).UT = 0
-                                    then
-                                       raise O2c_BC.Wrong_Construct with
-                                         "bytecode backend: Files.Delete "
-                                         & "needs a declared ARRAY OF CHAR "
-                                         & "variable";
-                                    end if;
-                                    O2c_Ir_Lower.Addr_Global
-                                         (Ada_Id (SNm),
-                                          Total_Slots (Syms (SId).UT));
-                                 end;
-                                 --  Native id 9: foreign entry 5.
-                                 O2c_Ir_Lower.Call_Native (9, 1);
+                                     if SId = 0
+                                       or else Syms (SId).UT = 0
+                                     then
+                                        raise O2c_BC.Wrong_Construct with
+                                          "bytecode backend: Files.Delete "
+                                          & "needs a declared ARRAY OF CHAR "
+                                          & "variable";
+                                     end if;
+                                     Push_Var_Addr
+                                       (SNm, Total_Slots (Syms (SId).UT));
+                                  end;
+                                  --  Native id 9: foreign entry 5.
+                                  O2c_Ir_Lower.Call_Native (9, 1);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "Files")
                                 and then Eq_No_Case
                                   (To_String (MName), "Rename")
@@ -8678,8 +8753,9 @@ package body O2c_Compiler is
                                       (To_String (Arg_R (K).Text),
                                        "Files.Rename");
                                  end loop;
-                                 --  Native id 10: foreign entry 6.
-                                 O2c_Ir_Lower.Call_Native (10, 2);
+                                  --  Native id 10: foreign entry 6.
+                                  O2c_Ir_Lower.Call_Native (10, 2);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "Env")
                                 and then (Eq_No_Case
                                             (To_String (MName), "Get")
@@ -8696,11 +8772,12 @@ package body O2c_Compiler is
                                       (To_String (Arg_R (K).Text),
                                        "Env." & To_String (MName));
                                  end loop;
-                                 --  Native ids 11 and 12: foreign 7 and 8.
-                                 O2c_Ir_Lower.Call_Native
-                                   ((if Eq_No_Case (To_String (MName),
-                                                    "Get")
-                                     then 11 else 12), 2);
+                                  --  Native ids 11 and 12: foreign 7 and 8.
+                                  O2c_Ir_Lower.Call_Native
+                                    ((if Eq_No_Case (To_String (MName),
+                                                     "Get")
+                                      then 11 else 12), 2);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "Args")
                                 and then Eq_No_Case
                                   (To_String (MName), "Get")
@@ -8726,23 +8803,23 @@ package body O2c_Compiler is
                                     --  pushes its constant, anything else
                                     --  loads by name.  Bc_Load alone would
                                     --  look up a global called "1".
-                                    if Arg_R (1).Lit
-                                      and then Arg_R (1).Typ = T_Int
-                                      and then Arg_R (1).Folds
-                                    then
-                                       O2c_Ir_Lower.Push_Int (Arg_R (1).Val);
-                                    else
-                                       Bc_Load
-                                         (Ada_Id
-                                            (To_String (Arg_R (1).Text)));
-                                    end if;
-                                    O2c_Ir_Lower.Addr_Global
-                                         (Ada_Id (BN),
-                                          Total_Slots (Syms (BID).UT));
-                                    O2c_Ir_Lower.Addr_Global (Ada_Id (RN), 1);
-                                    --  Native id 13: foreign entry 9.
-                                    O2c_Ir_Lower.Call_Native (13, 3);
-                                 end;
+                                     if Arg_R (1).Lit
+                                       and then Arg_R (1).Typ = T_Int
+                                       and then Arg_R (1).Folds
+                                     then
+                                        O2c_Ir_Lower.Push_Int (Arg_R (1).Val);
+                                     else
+                                        Bc_Load
+                                          (Ada_Id
+                                             (To_String (Arg_R (1).Text)));
+                                     end if;
+                                     Push_Var_Addr
+                                       (BN, Total_Slots (Syms (BID).UT));
+                                     Push_Var_Addr (RN, 1);
+                                     --  Native id 13: foreign entry 9.
+                                     O2c_Ir_Lower.Call_Native (13, 3);
+                                     Drop_Dead_Actuals (XI, N_A);
+                                  end;
                               elsif Eq_No_Case (MNm, "In")
                                 and then (Eq_No_Case
                                             (To_String (MName), "String")
@@ -8777,47 +8854,48 @@ package body O2c_Compiler is
                                          & To_String (MName)
                                          & " needs a declared variable";
                                     end if;
-                                    if Is_B then
-                                       if Syms (AId).UT = 0 then
-                                          raise O2c_BC.Wrong_Construct with
-                                            "bytecode backend: In."
-                                            & To_String (MName) & " needs a "
-                                            & "declared ARRAY OF CHAR "
-                                            & "variable";
-                                       end if;
-                                       O2c_Ir_Lower.Addr_Global
-                                            (Ada_Id (ANm),
-                                             Total_Slots (Syms (AId).UT));
-                                    else
-                                       --  The converters write a scalar
-                                       --  through the slot's address.
-                                       O2c_Ir_Lower.Addr_Global (Ada_Id (ANm), 1);
-                                    end if;
+                                     if Is_B then
+                                        if Syms (AId).UT = 0 then
+                                           raise O2c_BC.Wrong_Construct with
+                                             "bytecode backend: In."
+                                             & To_String (MName) & " needs a "
+                                             & "declared ARRAY OF CHAR "
+                                             & "variable";
+                                        end if;
+                                        Push_Var_Addr
+                                          (ANm, Total_Slots (Syms (AId).UT));
+                                     else
+                                        --  The converters write a scalar
+                                        --  through the slot's address.
+                                        Push_Var_Addr (ANm, 1);
+                                     end if;
                                  end;
                                  --  Ids 20-25: String, Name, Char, Int,
                                  --  LongInt, Real.
-                                 O2c_Ir_Lower.Call_Native
-                                   ((if Eq_No_Case (To_String (MName),
-                                                    "String") then 20
-                                     elsif Eq_No_Case (To_String (MName),
-                                                       "Name") then 21
-                                     elsif Eq_No_Case (To_String (MName),
-                                                       "Char") then 22
-                                     elsif Eq_No_Case (To_String (MName),
-                                                       "Int") then 23
-                                     elsif Eq_No_Case (To_String (MName),
-                                                       "LongInt") then 24
-                                     else 25), 1);
+                                  O2c_Ir_Lower.Call_Native
+                                    ((if Eq_No_Case (To_String (MName),
+                                                     "String") then 20
+                                      elsif Eq_No_Case (To_String (MName),
+                                                        "Name") then 21
+                                      elsif Eq_No_Case (To_String (MName),
+                                                        "Char") then 22
+                                      elsif Eq_No_Case (To_String (MName),
+                                                        "Int") then 23
+                                      elsif Eq_No_Case (To_String (MName),
+                                                        "LongInt") then 24
+                                      else 25), 1);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "XYplane")
                                 and then Eq_No_Case
                                   (To_String (MName), "Dot")
                                 and then N_A = 3
-                              then
-                                 --  Dot (x, y, mode): three values.
-                                 for K in 1 .. 3 loop
-                                    Bc_Push_Arg (Arg_R (K));
-                                 end loop;
-                                 O2c_Ir_Lower.Call_Native (16, 3);
+                               then
+                                  --  Dot (x, y, mode): three values, already
+                                  --  on the operand stack - Parse_Actual
+                                  --  pushed every actual, and re-pushing them
+                                  --  left one copy of each on the stack for
+                                  --  the rest of the run.
+                                  O2c_Ir_Lower.Call_Native (16, 3);
                               elsif Eq_No_Case (MNm, "Err")
                                 and then Eq_No_Case
                                   (To_String (MName), "Write")
@@ -8826,9 +8904,10 @@ package body O2c_Compiler is
                                  --  Err.Write (s): native 45.  The arm gives
                                  --  it an ADDRESS through Addr_Str_Actual, so
                                  --  a literal works as well as a variable.
-                                 Addr_Str_Actual
-                                   (To_String (Arg_R (1).Text), "Err.Write");
-                                 O2c_Ir_Lower.Call_Native (45, 1);
+                                  Addr_Str_Actual
+                                    (To_String (Arg_R (1).Text), "Err.Write");
+                                  O2c_Ir_Lower.Call_Native (45, 1);
+                                  Drop_Dead_Actuals (XI, N_A);
                               elsif Eq_No_Case (MNm, "Err")
                                 and then Eq_No_Case
                                   (To_String (MName), "WriteLn")
@@ -11014,10 +11093,18 @@ package body O2c_Compiler is
       end loop;
    end Capture_Methods;
 
-procedure Compile_Module (Source : String; Is_Lib : Boolean;
+   procedure Compile_Module (Source : String; Is_Lib : Boolean;
                              Main_Txt : out Unbounded_String;
                              Spec_Txt : out Unbounded_String;
                              Body_Txt : out Unbounded_String) is
+
+      --  Instruction count at the moment this module's body is opened: an
+      --  EMPTY body emits nothing, so its code offset aliases the next
+      --  procedure's and it must not be recorded as an initializer (the
+      --  alias would call whatever follows - the main body itself, when the
+      --  empty body is the last library: an infinite recursion).
+      Body_Insn_At_Open : Natural := 0;
+
 
       --  Shared per-unit preamble items: open-array bases, the SET
       --  type, and the O2c_Put_* console helpers (emitted inside the
@@ -11361,13 +11448,39 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  Opening it conditionally left Body_Proc at 0 and crashed Encode with
       --  an index check on the procedure table, which is what a missing
       --  BEGIN did to every such module.
-      if O2c_BC.Bytecode_Mode then
-         O2c_BC.Begin_Body;
-      end if;
-      if Cur.Kind = Lex.Tok_Begin then
-         Next;
-         Statement_Seq;
-      end if;
+       if O2c_BC.Bytecode_Mode then
+          Body_Insn_At_Open := O2c_BC.Insn_Count;
+          O2c_BC.Begin_Body;
+          if not Is_Lib then
+             --  The main body initializes every imported module first, in
+             --  compile order (already topological - see Init_Procs).
+             for I in 1 .. N_Init_Procs loop
+                O2c_Ir_Lower.Call_Proc (Init_Procs (I), 0);
+             end loop;
+          end if;
+       end if;
+       if Cur.Kind = Lex.Tok_Begin then
+          Next;
+          Statement_Seq;
+       end if;
+       if O2c_BC.Bytecode_Mode and then Is_Lib then
+          if O2c_BC.Insn_Count > Body_Insn_At_Open then
+             --  A library's NON-EMPTY body is a procedure the main body must
+             --  call - the header's entry runs only the main one.  An empty
+             --  body is skipped: it emitted nothing, so its code offset is
+             --  the next procedure's, and recording it would call that
+             --  procedure.
+             N_Init_Procs := N_Init_Procs + 1;
+             if N_Init_Procs > Max_Init then
+                raise O2c_Error with "too many module initializers";
+             end if;
+             Init_Procs (N_Init_Procs) := O2c_BC.Open_Body_Id;
+          end if;
+          --  A library body RETURNS to its caller (the main body); only the
+          --  main body HALTs.  Without this the body's procedure fell
+          --  through into whatever procedure followed it in the image.
+          O2c_BC.Return_Void;
+       end if;
 
       Expect (Lex.Tok_End, "'END'");
       Next;
@@ -13236,6 +13349,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    begin
       N_X := 0;
       N_Prov := 0;
+      N_Init_Procs := 0;
       Multi_Ok := True;
 
       --  Collect imports first (see Emits).
