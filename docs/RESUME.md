@@ -6978,6 +6978,31 @@ have not been the same thing for four turns now.
 Reverted nothing: no compiler change was made for this, and the tree is green.  The probe fixtures are in /tmp
 and will become tests when they pass.
 
+### 3fy. Three more probes, all passing - and the residual is a to-var REAL across the boundary
+
+Every local guess is now excluded by a fixture that PASSES:
+
+    to-var REAL in one module                         ->  3.250
+    to-var INTEGER control                            ->  7
+    to-var REAL + ARRAY OF CHAR param + a literal     ->  1.500   (the ConvertTo shape exactly)
+
+So the scalar type is not it, the array parameter is not it, the literal argument is not it, and two
+parameters of mixed kinds are not it.  What is left is the only thing the passing fixtures do not have:
+
+    Args.Get's      to-var INTEGER across the module boundary   ->  -1     WORKS
+    ConvertTo's     to-var REAL    across the module boundary   ->  0.000  FAILS
+
+Both are qualified calls to flipped modules with a by-ref parameter; they differ in the parameter's TYPE.  So
+the suspect is now the by-ref convention for a REAL - the export's `Typ` and `By_Ref` together, or the size
+the caller passes - and the measurement that separates them is a disassembly of the two CALL SITES, side by
+side: one that works and one that does not, in the same image, from the same compiler.
+
+That is what the last several turns have been converging on, and it is now a comparison of two known-good
+compilations rather than a hunt.  Three probes this turn, all passing, is the pattern to note: the faults get
+narrowed by fixtures that FAIL, but the shape of the fault gets narrowed by fixtures that PASS.
+
+None of this needed a flip or a builtin, and no compiler change was made - the tree is green.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
