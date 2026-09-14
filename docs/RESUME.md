@@ -6323,6 +6323,20 @@ The line number moved between readings (10042 then ~10016) because the first was
 arm applied, before the revert: another reminder that a line number is only meaningful next to the revision
 it was read from.
 
+**One more measurement, and it changes the shape of the fix.**  `return` itself is handled inside
+`Statement_Seq` (7513) and calls `Parse_Expr` for its operand - and the raise, at 10017, is in
+`Statement_Seq` TOO.  So `Parse_Expr` returned WITHOUT consuming `InAvail`, and the statement loop then met
+the bare name and tried to treat it as a statement.
+
+That contradicts the note from earlier in this work that an unresolved name falls back to a module global -
+here it is not falling back to anything.  Which means the bare-name fix may not be "add recognition at the
+factor" at all, but "why does the factor decline a name that is not a symbol": the next measurement is a
+print at the factor's identifier handling for an unresolved name, and the answer decides whether the fix is
+one `if` or something structural.
+
+Worth stating plainly: `Input` has now cost five measurements and no landed compiler change, and the
+measurements have each removed a wrong theory rather than adding code.  The next step is that print.
+
 Then flip / fixture / gate, and the fixture can be deterministic: with no stdin, `Available` is 1 (the
 terminator) and `Read` gives `Character'Val (0)`, which is what the Ada helper returns.
 
