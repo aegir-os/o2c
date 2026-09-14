@@ -7534,6 +7534,28 @@ this failure a location is the same move that turned "only INTEGER/CHAR/REAL com
 The compile metric is met and that was worth having; the semantics are a new question and this is its first
 measurement, not its answer.
 
+### 3gq. The phase-3 fault now says WHERE - and it is offset 8595, opcode 35
+
+The catch-all in Run_Buffer reported an exception name and the phase, which is why the hello.ob2 fault could not
+be located at all.  The Context was handed to Run_Context as an anonymous `new Context'(...)` ARGUMENT, so it
+was out of scope in the handler; binding it to a local and returning from a block puts it in scope.
+
+    vm: internal error in phase 3 at code offset 8595 (opcode 35): STORAGE_ERROR
+
+**Offset AND opcode**, because a fault in an interpreter is nearly always a mis-emission and which instruction
+was executing is what makes it findable.  Bounds are checked on the opcode read: when the fault is a runaway
+branch the PC can be past the end, and a diagnostic that itself raises would be worse than none.
+
+One syntax slip on the way: removing `Run_Context (...)` from the aggregate left its closing parenthesis behind
+("extra ")" ignored").  Obvious in hindsight, invisible while writing, and the compiler named the line.
+
+run_vm PASSes, so the change is a diagnostic and nothing else - the messages it reports are the same ones, one
+of them now carrying the location.
+
+Four times now, "make the failure say where" has moved the work forward: the comparison rule, the whole
+`type mismatch assigning` family, Err's two natives, and this.  It is the single highest-yield habit in the
+stretch.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

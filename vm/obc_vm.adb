@@ -3933,9 +3933,15 @@ package body OBC_VM is
       Phase := 3;
       --  The interpreter's root-bearing state, sized once the image has
       --  been read.  One context today; a nested Execute will push another.
-      return Run_Context
-        (Data, Img,
-         new Context'(Stack       => new U64_Array (0 .. Max_Stack - 1),
+      --
+      --  It is bound to a LOCAL and returned from inside a block rather than
+      --  handed over as an aggregate argument, so that a fault can name where
+      --  it happened.  "phase 3" plus an exception name tells you neither the
+      --  instruction nor the source - which is why the STORAGE_ERROR that
+      --  stopped hello.ob2 could not be located at all.  An aggregate
+      --  argument is out of scope in the handler; a local is not.
+      declare
+         Ctx : constant Context_Access := new Context'(Stack       => new U64_Array (0 .. Max_Stack - 1),
                       SP          => 0,
                       Chunks      => null,
                       Pool_Used   => 0,
@@ -3958,7 +3964,30 @@ package body OBC_VM is
                       Frame_Slots =>
                         new Natural_Array'(0 .. Max_Frames - 1 => 0),
                       Return_PC   =>
-                        new Natural_Array'(0 .. Max_Frames - 1 => 0)));
+                        new Natural_Array'(0 .. Max_Frames - 1 => 0));
+      begin
+         return Run_Context (Data, Img, Ctx);
+      exception
+         when E : others =>
+            --  The offset AND the opcode at it: a fault is nearly always a
+            --  mis-emission, and which instruction was being executed is what
+            --  makes it findable.  Bounds are checked because the PC may be
+            --  past the end when the fault is a runaway branch.
+            declare
+               Where : constant String :=
+                 (if Ctx.PC < Img.Code'Length
+                  then " at code offset" & Natural'Image (Ctx.PC)
+                    & " (opcode" & Natural'Image (Natural (Img.Code (Ctx.PC)))
+                    & ")"
+                  else " at code offset" & Natural'Image (Ctx.PC)
+                    & " (past the end)");
+            begin
+               Note ("internal error in phase 3" & Where & ": "
+                     & Ada.Exceptions.Exception_Name (E)
+                     & " (" & Ada.Exceptions.Exception_Message (E) & ")");
+            end;
+            return Bad_Code;
+      end;
    exception
       --  A malformed image must be *rejected*, never crash the VM: the
       --  spec's verification rules are checked, but a bug in the checks
