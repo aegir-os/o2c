@@ -7154,6 +7154,39 @@ read that as "the compiler must handle it" when it meant "the compiler already d
 
 Tree green, no change landed.
 
+### 3ge. ROOT CAUSE: the RParse arm has no refusal - the one the 3cr audit missed
+
+`RParse` occurs three times in the compiler, and two of them are an ARM:
+
+    3766  if To_String (Mod_Name) = "Reals" and then Eq_No_Case (..., "RPARSE") then
+    3773     Expect (Lex.Tok_LParen, "'(' after RParse");
+    3777     raise O2c_Error with "RParse needs an ARRAY OF CHAR";
+    12575 S := S & "  x := RParse(str)"        <- the builtin's source
+
+and the arm produces Ada text and NOTHING ELSE:
+
+    R.Text := To_Unbounded_String ("O2c_StrToReal (" & A.Text & ")");
+    R.Typ := T_Real;  R.Lit := False;  return R;
+
+No refusal, no emission.  So inside a flipped Reals, `x := RParse(str)` consumes the name, the parens and the
+argument, produces no bytecode for the value, and the assignment then stores whatever was left on the stack -
+which is the argument's address.  That is the address-into-a-real, and it is the class exactly.
+
+**It is the arm the 3cr audit missed.**  Every comparable arm - Args', In's, Input's, Files' - carries a
+refusal with this comment: "this arm appends Ada text and makes no bytecode call, so a flipped builtin's own
+body would compile, run, and quietly do nothing.  Refuse instead."  RParse's does not, and nothing checks that
+a given arm has one.
+
+**And my sweep was flawed**, which is worth stating plainly: it looked for names with no DECLARATION, and
+`RParse` is exactly that - but its own conclusion was "an undeclared name with no ARM is the fault".  It never
+checked for arms.  One grep for `RParse` in the compiler would have shown the arm on the first turn of this
+hunt; instead the sweep's output was read as a verdict.
+
+**The fix, and the immediate one is small:** give that arm the refusal its siblings have, which converts a
+silent wrong answer into a named one - the rule the project states.  Then, separately, decide whether
+`O2c_StrToReal` should exist as a native so ConvertTo works, which is the same question In's natives answered.
+The refusal alone is one edit and it retires the class member the audit missed.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
