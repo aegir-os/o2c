@@ -6613,8 +6613,23 @@ against Input's three arms and three natives.  Reverted rather than started, bec
 five-part change is not something to begin under a spent budget - but the plan above is read off the code, not
 guessed, and that is the difference the last five modules taught.
 
-`In` (3677, `InChar/InInt/InLong/InReal`) is the same family and should be measured the same way before it is
-written.
+**Both remaining unknowns are now measured, and both come out easy:**
+
+* **the argument count is available on BOTH platforms.**  The aegir `Arg_Get` guards with
+  `N > Aegir_User.CLI.Arg_Count`, so the guest has the count directly; the host's `Arg_Get` already computes
+  `Ada.Command_Line.Argument_Count - 1` because its own argument 1 is the image.  So `VM_Platform.Arg_Count`
+  is two lines per body and no new concept - which was the one thing that could have made Args expensive.
+* **`ArgGet`'s bytecode marshalling ALREADY EXISTS**: `O2c_Ir_Lower.Call_Native (13, 3)` at 8411, in another
+  arms' shape, with the address convention the three arguments need.  So the `ARGGET` arm is a copy of a
+  working arm, not a design.
+
+So Args reduces to: the `Arg_Count` seam (2 + 2 lines), native 44 appended (Pops 0, Pushes true - id 44 is
+entry 40), the `ARGCOUNT` arm switched from refuse to emit, the `ARGGET` arm copied from 8411, then flip /
+fixture / gate.  Nothing in it is unmeasured now, which is the state worth reaching before writing rather
+than after reverting.
+
+`In` (3677, `InChar/InInt/InLong/InReal`) is the same family and should be measured the same way first - and
+its four names suggest four arms and possibly a native, which the same kind of reading will settle.
 
 ## 4. Method — what worked, and what did not
 
