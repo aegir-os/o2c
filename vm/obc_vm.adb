@@ -1092,15 +1092,30 @@ package body OBC_VM is
 
    --  ---- verification ---------------------------------------------------
    --
-   --  Linear verification, as specified for v1: decode the body, check
-   --  that every instruction and operand fits, that global/constant
-   --  references are in range, that jump targets stay inside the payload,
-   --  and that the operand-stack depth never leaves 0 .. Stack_Max.  A
-   --  control-flow-aware verifier (per-branch depth and type agreement)
-   --  arrives with frames.
+   --  Linear verification, as specified for v1: decode the code, ONE
+   --  procedure at a time, and check that every instruction and operand
+   --  fits, that global/constant references are in range, that jump
+   --  targets stay inside the procedure, and that the operand-stack
+   --  depth never leaves 0 .. Stack_Max.  A control-flow-aware verifier
+   --  (per-branch depth and type agreement) arrives with frames.
+   --
+   --  The walk is per procedure because it used to start at Body_Off -
+   --  the module body, emitted LAST - and so verified the body and
+   --  nothing else: an illegal opcode in an uncalled procedure passed
+   --  verification and the image RAN (measured on a patched modinit.obc),
+   --  which is also why Input.Mouse's unbalanced store was never seen
+   --  statically.  The table is NOT in code order - a nested procedure's
+   --  id precedes its parent's but its code is emitted inside the
+   --  parent's - so a procedure's window ends at the next higher code
+   --  offset in the table, not at the next table row.
    function Verify (Code : Byte_Array; Img : Image_Info) return Status is
-      PC    : Natural := Img.Body_Off;
-      Depth : Integer := 0;
+      PC        : Natural := 0;
+      Depth     : Integer := 0;
+      --  The procedure being walked: its stack bound, and the window its
+      --  jump targets must stay inside.
+      Limit     : Natural := 0;
+      Win_First : Natural := 0;
+      Win_Last  : Natural := 0;
       --  The instruction the depth check is about: kept across the case
       --  because the arms advance PC past it.
       This_Op : Natural := 0;
@@ -1109,408 +1124,426 @@ package body OBC_VM is
         (Off + N <= Code'Length);
 
       function Depth_Ok return Boolean is
-        (Depth >= 0 and then Depth <= Integer (Img.Stack_Max));
+        (Depth >= 0 and then Depth <= Integer (Limit));
    begin
-      while PC < Code'Length loop
-         --  Captured BEFORE the case: the arms advance PC, so by the time the
-         --  depth check runs, Code (PC) is the NEXT instruction.  Reporting
-         --  that one names the wrong instruction - which is exactly the kind of
-         --  off-by-one this diagnostic exists to stop.
-         This_Op := Natural (Code (PC));
-         case Code (PC) is
-            when Op_Nop | Op_Halt =>
-               PC := PC + 1;
-            when Op_Dup =>
-               Depth := Depth + 1;
-               PC := PC + 1;
-            when Op_Drop =>
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Trap =>
-               if not Fits (PC + 1, 1) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (Code (PC + 1)) > 5 then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               PC := PC + 2;
-            when Op_Assert_Fail =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (LE32 (Code, PC + 1)) >= Img.Consts_Len /
-                 Const_Slot
-               then
-                  return Bad_Const;
-               end if;
-               PC := PC + 5;
-            when Op_Load_G =>
-               if not Fits (PC + 1, 4)
-                 or else Natural (LE32 (Code, PC + 1)) >= Img.N_Globals
-               then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               Depth := Depth + 1;
-               PC := PC + 5;
-            when Op_Store_G =>
-               if not Fits (PC + 1, 4)
-                 or else Natural (LE32 (Code, PC + 1)) >= Img.N_Globals
-               then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 5;
-            when Op_Load_Const | Op_Load_Const_P =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if (Natural (LE32 (Code, PC + 1)) + 1) * Const_Slot
-                 > Img.Consts_Len
-               then
-                  return Bad_Const;
-               end if;
-               Depth := Depth + 1;
-               PC := PC + 5;
-            when Op_Add | Op_Sub | Op_Mul | Op_Div | Op_Mod =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Neg | Op_Abs | Op_Btest | Op_Ord | Op_Chr =>
-               if Depth < 1 then
-                  return Bad_Stack;
-               end if;
-               PC := PC + 1;
-            when Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Band | Op_Bor =>
-               --  [a, b] -> [bool]: two in, one out, like a comparison.
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Jmp =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (LE32 (Code, PC + 1)) >= Code'Length
-                 or else Natural (LE32 (Code, PC + 1)) < Img.Body_Off
-               then
-                  return Bad_Target;
-               end if;
-               PC := PC + 5;
-            when Op_Jz | Op_Jnz =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (LE32 (Code, PC + 1)) >= Code'Length
-                 or else Natural (LE32 (Code, PC + 1)) < Img.Body_Off
-               then
-                  return Bad_Target;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 5;
-            when Op_Call_Native =>
-               if not Fits (PC + 1, 3) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               declare
-                  Idx   : constant Natural :=
-                    Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
-                  NArgs : constant Natural := Natural (Code (PC + 3));
-               begin
-                  if Idx >= Native_Count or else NArgs /= Native_Pops (Idx) then
-                     return Bad_Native;
-                  end if;
-                  Depth := Depth - Integer (NArgs);
-                  if Native_Pushes (Idx) then
-                     Depth := Depth + 1;
-                  end if;
-               end;
-               PC := PC + 4;
-            when Op_Load_L | Op_Store_L | Op_Load_Addr_L =>
-               --  Frame slot bounds are checked by the interpreter, which
-               --  knows the current frame; the linear walk here only needs
-               --  the stack effect.
-               if not Fits (PC + 2, 1) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Code (PC) = Op_Load_L or else Code (PC) = Op_Load_Addr_L then
+      for P in 1 .. Img.N_Procs loop
+         Win_First := Img.Procs (P).Code_Off;
+         Win_Last  := Code'Length;
+         for Q in 1 .. Img.N_Procs loop
+            if Img.Procs (Q).Code_Off > Win_First
+              and then Img.Procs (Q).Code_Off < Win_Last
+            then
+               Win_Last := Img.Procs (Q).Code_Off;
+            end if;
+         end loop;
+         if Win_First >= Win_Last then
+            Note_At ("malformed code", Win_First);
+            return Bad_Code;
+         end if;
+         PC := Win_First;
+         Depth := 0;
+         Limit := Img.Procs (P).Stack_Max;
+         while PC < Win_Last loop
+            --  Captured BEFORE the case: the arms advance PC, so by the time the
+            --  depth check runs, Code (PC) is the NEXT instruction.  Reporting
+            --  that one names the wrong instruction - which is exactly the kind of
+            --  off-by-one this diagnostic exists to stop.
+            This_Op := Natural (Code (PC));
+            case Code (PC) is
+               when Op_Nop | Op_Halt =>
+                  PC := PC + 1;
+               when Op_Dup =>
                   Depth := Depth + 1;
-               else
+                  PC := PC + 1;
+               when Op_Drop =>
                   Depth := Depth - 1;
-               end if;
-               PC := PC + 3;
-            when Op_Call =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               declare
-                  Target : constant Natural := Natural (LE32 (Code, PC + 1));
-                  Found  : Boolean := False;
-               begin
-                  for P in 1 .. Img.N_Procs loop
-                     if Img.Procs (P).Code_Off = Target then
-                        Found := True;
-                        Depth := Depth
-                          - Integer (Img.Procs (P).NParams)
-                          + Integer (Img.Procs (P).NResults);
-                     end if;
-                  end loop;
-                  if not Found then
-                     return Bad_Target;
+                  PC := PC + 1;
+               when Op_Trap =>
+                  if not Fits (PC + 1, 1) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
                   end if;
-               end;
-               PC := PC + 5;
-            when Op_Ret | Op_Ret_Void =>
-               --  This walk is linear, and by construction the code after a
-               --  return is the next procedure in the payload, so the
-               --  frame's depth is not carried across: reset it.  The
-               --  interpreter, which actually returns, has no need of this.
-               if Depth < 0 then
-                  return Bad_Stack;
-               end if;
-               Depth := 0;
-               PC := PC + 1;
-            when Op_Load_Addr_G =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               Depth := Depth + 1;
-               PC := PC + 5;
-            when Op_Str_Addr =>
-               --  One word in, one address out.
-               if Depth < 1 then
-                  return Bad_Stack;
-               end if;
-               PC := PC + 1;
-            when Op_Copy_Str =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 2;
-               PC := PC + 1;
-            when Op_Str_Cmp =>
-               --  Two addresses in, one result out.
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Load_Idx_B =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Store_Idx_B =>
-               --  Three: the value, the index and the base - the same shape
-               --  as Store_Idx_I.  This said two, which is why the verifier
-               --  and the emitter disagreed: the verifier walked a loop body
-               --  once with a depth one too high, and rejected the loop.
-               if Depth < 3 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 3;
-               PC := PC + 1;
-            when Op_Load_Idx_I =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Store_Idx_I =>
-               if Depth < 3 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 2;
-               PC := PC + 1;
-            when Op_Type_Test | Op_Guard =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               PC := PC + 5;
-            when Op_Dispatch =>
-               --  u16 method idx, u8 arg count, u8 result count.  The counts
-               --  are static, so the depth change is too.
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               declare
-                  NArgs : constant Natural := Natural (Code (PC + 3));
-                  NRes  : constant Natural := Natural (Code (PC + 4));
-               begin
-                  if Depth < NArgs + 1 then
+                  if Natural (Code (PC + 1)) > 5 then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  PC := PC + 2;
+               when Op_Assert_Fail =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Natural (LE32 (Code, PC + 1)) >= Img.Consts_Len /
+                    Const_Slot
+                  then
+                     return Bad_Const;
+                  end if;
+                  PC := PC + 5;
+               when Op_Load_G =>
+                  if not Fits (PC + 1, 4)
+                    or else Natural (LE32 (Code, PC + 1)) >= Img.N_Globals
+                  then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  Depth := Depth + 1;
+                  PC := PC + 5;
+               when Op_Store_G =>
+                  if not Fits (PC + 1, 4)
+                    or else Natural (LE32 (Code, PC + 1)) >= Img.N_Globals
+                  then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 5;
+               when Op_Load_Const | Op_Load_Const_P =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if (Natural (LE32 (Code, PC + 1)) + 1) * Const_Slot
+                    > Img.Consts_Len
+                  then
+                     return Bad_Const;
+                  end if;
+                  Depth := Depth + 1;
+                  PC := PC + 5;
+               when Op_Add | Op_Sub | Op_Mul | Op_Div | Op_Mod =>
+                  if Depth < 2 then
                      return Bad_Stack;
                   end if;
-                  Depth := Depth - NArgs - 1 + NRes;
-               end;
-               PC := PC + 5;
-            when Op_Spawn =>
-               --  Consumes the procedure id and leaves the new thread's
-               --  handle.  Net zero, but stated as the two steps because that
-               --  is what happens.
-               Depth := Depth + 0;
-               PC := PC + 1;
-            when Op_Thread_Id =>
-               Depth := Depth + 1;
-               PC := PC + 1;
-            when Op_Mutex_Lock | Op_Mutex_Unlock =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               --  The slot is an operand, so the stack is untouched.
-               PC := PC + 5;
-            when Op_Join =>
-               --  Consumes the handle.
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Call_Indirect =>
-               --  The callee is not statically known, so the depth effect
-               --  comes from the type: parameterless and resultless, so only
-               --  the procedure id is consumed.
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Yield =>
-               PC := PC + 1;
-            when Op_Desc_Of =>
-               PC := PC + 1;
-            when Op_Alloc_New =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               --  The reference is a byte offset into TYPES, where kind,
-               --  flags and the object size are the first four bytes.
-               if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               Depth := Depth + 1;
-               PC := PC + 5;
-            when Op_Load_Fld_I | Op_Load_Fld_R | Op_Load_Fld_P =>
-               if not Fits (PC + 1, 2) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Depth < 1 then
-                  return Bad_Stack;
-               end if;
-               PC := PC + 3;
-            when Op_Store_Fld_I | Op_Store_Fld_R | Op_Store_Fld_P =>
-               if not Fits (PC + 1, 2) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 2;
-               PC := PC + 3;
-            --  REAL and LONGREAL share the 8-byte slot, so these move words
-            --  and the depth is all the verifier tracks.
-            when Op_Load_Const_R =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               Depth := Depth + 1;
-               PC := PC + 5;
-            when Op_Radd | Op_Rsub | Op_Rmul | Op_Rdiv
-               | Op_Req | Op_Rne | Op_Rlt | Op_Rle | Op_Rgt | Op_Rge =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Rneg | Op_Rabs | Op_I2R | Op_R2I_Round | Op_R2I_Trunc =>
-               if Depth < 1 then
-                  return Bad_Stack;
-               end if;
-               PC := PC + 1;
-            --  The verifier models the operand stack as Depth, not SP: it
-            --  does not keep values, only their count.
-            when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
-               | Op_Set_Symdiff | Op_Set_Eq | Op_Set_Ne | Op_Set_In =>
-               if Depth < 2 then
-                  return Bad_Stack;
-               end if;
-               Depth := Depth - 1;
-               PC := PC + 1;
-            when Op_Set_Single =>
-               if Depth < 1 then
-                  return Bad_Stack;
-               end if;
-               PC := PC + 1;
-            when Op_For_Enter =>
-               --  u16 var slot, i32 step, u16 limit slot, u32 else target.
-               --  from and to are consumed; frame-slot bounds are the
-               --  interpreter's business.
-               if not Fits (PC + 3, 10) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (LE32 (Code, PC + 9)) > Code'Length then
-                  return Bad_Target;
-               end if;
-               Depth := Depth - 2;
-               PC := PC + 13;
-            when Op_For_Next =>
-               --  u16 var slot, i32 step, u16 limit slot, u32 body target.
-               if not Fits (PC + 3, 10) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               if Natural (LE32 (Code, PC + 9)) > Code'Length then
-                  return Bad_Target;
-               end if;
-               PC := PC + 13;
-            when others =>
-               Note_At ("verification stopped: opcode not implemented in this "
-                   & "slice", PC);
-               return Not_Implemented;
-         end case;
-         if not Depth_Ok then
-            --  The NUMBER, not only the offset.  "operand-stack depth
-            --  violation" names a symptom and leaves two candidates - a depth
-            --  below zero and one above the image's stack_max - which want
-            --  OPPOSITE fixes, so a hunt that sees only the offset guesses
-            --  between them.  One Put_Line inside Value_At is what found 3bt's
-            --  bug after two wrong guesses; this is that move made permanent,
-            --  in the place the hunt keeps arriving.
-            Ada.Text_IO.Put_Line
-              (Ada.Text_IO.Standard_Error,
-               "vm: operand-stack depth violation at code offset"
-               & Natural'Image (PC) & ": depth" & Integer'Image (Depth)
-               & ", limit" & Integer'Image (Integer (Img.Stack_Max))
-               & ", opcode" & Natural'Image (This_Op));
-            return Bad_Stack;
-         end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Neg | Op_Abs | Op_Btest | Op_Ord | Op_Chr =>
+                  if Depth < 1 then
+                     return Bad_Stack;
+                  end if;
+                  PC := PC + 1;
+               when Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge =>
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Band | Op_Bor =>
+                  --  [a, b] -> [bool]: two in, one out, like a comparison.
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Jmp =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Natural (LE32 (Code, PC + 1)) >= Win_Last
+                    or else Natural (LE32 (Code, PC + 1)) < Win_First
+                  then
+                     return Bad_Target;
+                  end if;
+                  PC := PC + 5;
+               when Op_Jz | Op_Jnz =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Natural (LE32 (Code, PC + 1)) >= Win_Last
+                    or else Natural (LE32 (Code, PC + 1)) < Win_First
+                  then
+                     return Bad_Target;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 5;
+               when Op_Call_Native =>
+                  if not Fits (PC + 1, 3) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  declare
+                     Idx   : constant Natural :=
+                       Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
+                     NArgs : constant Natural := Natural (Code (PC + 3));
+                  begin
+                     if Idx >= Native_Count or else NArgs /= Native_Pops (Idx) then
+                        return Bad_Native;
+                     end if;
+                     Depth := Depth - Integer (NArgs);
+                     if Native_Pushes (Idx) then
+                        Depth := Depth + 1;
+                     end if;
+                  end;
+                  PC := PC + 4;
+               when Op_Load_L | Op_Store_L | Op_Load_Addr_L =>
+                  --  Frame slot bounds are checked by the interpreter, which
+                  --  knows the current frame; the linear walk here only needs
+                  --  the stack effect.
+                  if not Fits (PC + 2, 1) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Code (PC) = Op_Load_L or else Code (PC) = Op_Load_Addr_L then
+                     Depth := Depth + 1;
+                  else
+                     Depth := Depth - 1;
+                  end if;
+                  PC := PC + 3;
+               when Op_Call =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  declare
+                     Target : constant Natural := Natural (LE32 (Code, PC + 1));
+                     Found  : Boolean := False;
+                  begin
+                     for P in 1 .. Img.N_Procs loop
+                        if Img.Procs (P).Code_Off = Target then
+                           Found := True;
+                           Depth := Depth
+                             - Integer (Img.Procs (P).NParams)
+                             + Integer (Img.Procs (P).NResults);
+                        end if;
+                     end loop;
+                     if not Found then
+                        return Bad_Target;
+                     end if;
+                  end;
+                  PC := PC + 5;
+               when Op_Ret | Op_Ret_Void =>
+                  --  A return ends its frame's accounting; whatever follows it
+                  --  in this procedure's window is dead code or the next
+                  --  procedure, so the depth is not carried past it.  The
+                  --  interpreter, which actually returns, has no need of this.
+                  if Depth < 0 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := 0;
+                  PC := PC + 1;
+               when Op_Load_Addr_G =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  Depth := Depth + 1;
+                  PC := PC + 5;
+               when Op_Str_Addr =>
+                  --  One word in, one address out.
+                  if Depth < 1 then
+                     return Bad_Stack;
+                  end if;
+                  PC := PC + 1;
+               when Op_Copy_Str =>
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 2;
+                  PC := PC + 1;
+               when Op_Str_Cmp =>
+                  --  Two addresses in, one result out.
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Load_Idx_B =>
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Store_Idx_B =>
+                  --  Three: the value, the index and the base - the same shape
+                  --  as Store_Idx_I.  This said two, which is why the verifier
+                  --  and the emitter disagreed: the verifier walked a loop body
+                  --  once with a depth one too high, and rejected the loop.
+                  if Depth < 3 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 3;
+                  PC := PC + 1;
+               when Op_Load_Idx_I =>
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Store_Idx_I =>
+                  if Depth < 3 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 2;
+                  PC := PC + 1;
+               when Op_Type_Test | Op_Guard =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  PC := PC + 5;
+               when Op_Dispatch =>
+                  --  u16 method idx, u8 arg count, u8 result count.  The counts
+                  --  are static, so the depth change is too.
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  declare
+                     NArgs : constant Natural := Natural (Code (PC + 3));
+                     NRes  : constant Natural := Natural (Code (PC + 4));
+                  begin
+                     if Depth < NArgs + 1 then
+                        return Bad_Stack;
+                     end if;
+                     Depth := Depth - NArgs - 1 + NRes;
+                  end;
+                  PC := PC + 5;
+               when Op_Spawn =>
+                  --  Consumes the procedure id and leaves the new thread's
+                  --  handle.  Net zero, but stated as the two steps because that
+                  --  is what happens.
+                  Depth := Depth + 0;
+                  PC := PC + 1;
+               when Op_Thread_Id =>
+                  Depth := Depth + 1;
+                  PC := PC + 1;
+               when Op_Mutex_Lock | Op_Mutex_Unlock =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  --  The slot is an operand, so the stack is untouched.
+                  PC := PC + 5;
+               when Op_Join =>
+                  --  Consumes the handle.
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Call_Indirect =>
+                  --  The callee is not statically known, so the depth effect
+                  --  comes from the type: parameterless and resultless, so only
+                  --  the procedure id is consumed.
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Yield =>
+                  PC := PC + 1;
+               when Op_Desc_Of =>
+                  PC := PC + 1;
+               when Op_Alloc_New =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  --  The reference is a byte offset into TYPES, where kind,
+                  --  flags and the object size are the first four bytes.
+                  if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  Depth := Depth + 1;
+                  PC := PC + 5;
+               when Op_Load_Fld_I | Op_Load_Fld_R | Op_Load_Fld_P =>
+                  if not Fits (PC + 1, 2) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Depth < 1 then
+                     return Bad_Stack;
+                  end if;
+                  PC := PC + 3;
+               when Op_Store_Fld_I | Op_Store_Fld_R | Op_Store_Fld_P =>
+                  if not Fits (PC + 1, 2) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 2;
+                  PC := PC + 3;
+               --  REAL and LONGREAL share the 8-byte slot, so these move words
+               --  and the depth is all the verifier tracks.
+               when Op_Load_Const_R =>
+                  if not Fits (PC + 1, 4) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  Depth := Depth + 1;
+                  PC := PC + 5;
+               when Op_Radd | Op_Rsub | Op_Rmul | Op_Rdiv
+                  | Op_Req | Op_Rne | Op_Rlt | Op_Rle | Op_Rgt | Op_Rge =>
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Rneg | Op_Rabs | Op_I2R | Op_R2I_Round | Op_R2I_Trunc =>
+                  if Depth < 1 then
+                     return Bad_Stack;
+                  end if;
+                  PC := PC + 1;
+               --  The verifier models the operand stack as Depth, not SP: it
+               --  does not keep values, only their count.
+               when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
+                  | Op_Set_Symdiff | Op_Set_Eq | Op_Set_Ne | Op_Set_In =>
+                  if Depth < 2 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - 1;
+                  PC := PC + 1;
+               when Op_Set_Single =>
+                  if Depth < 1 then
+                     return Bad_Stack;
+                  end if;
+                  PC := PC + 1;
+               when Op_For_Enter =>
+                  --  u16 var slot, i32 step, u16 limit slot, u32 else target.
+                  --  from and to are consumed; frame-slot bounds are the
+                  --  interpreter's business.
+                  if not Fits (PC + 3, 10) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Natural (LE32 (Code, PC + 9)) > Code'Length then
+                     return Bad_Target;
+                  end if;
+                  Depth := Depth - 2;
+                  PC := PC + 13;
+               when Op_For_Next =>
+                  --  u16 var slot, i32 step, u16 limit slot, u32 body target.
+                  if not Fits (PC + 3, 10) then
+                     Note_At ("malformed code", PC);
+                     return Bad_Code;
+                  end if;
+                  if Natural (LE32 (Code, PC + 9)) > Code'Length then
+                     return Bad_Target;
+                  end if;
+                  PC := PC + 13;
+               when others =>
+                  Note_At ("verification stopped: opcode not implemented in this "
+                      & "slice", PC);
+                  return Not_Implemented;
+            end case;
+            if not Depth_Ok then
+               --  The NUMBER, not only the offset.  "operand-stack depth
+               --  violation" names a symptom and leaves two candidates - a depth
+               --  below zero and one above the image's stack_max - which want
+               --  OPPOSITE fixes, so a hunt that sees only the offset guesses
+               --  between them.  One Put_Line inside Value_At is what found 3bt's
+               --  bug after two wrong guesses; this is that move made permanent,
+               --  in the place the hunt keeps arriving.
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "vm: operand-stack depth violation at code offset"
+                  & Natural'Image (PC) & ": depth" & Integer'Image (Depth)
+                  & ", limit" & Integer'Image (Integer (Limit))
+                  & ", opcode" & Natural'Image (This_Op));
+               return Bad_Stack;
+            end if;
+         end loop;
       end loop;
       return Ok;
    end Verify;

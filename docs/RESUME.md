@@ -7736,6 +7736,31 @@ for that group rather than at four separate bugs.  That is the next item.
 Fixtures landed for 3gu-3gx: wholecopy, qrecvar(+lib), ptrfun(+lib), varptr, emptyset, mathconst;
 mathln updated.  Fast suites green after each fix: run_bc, run_vm, bytecode_gaps.
 
+### 3gz. The verifier scanned ONLY the module body - and 3gx's explanation was wrong
+
+3gx said the `{}` fault slipped past static checks because hello's image "carried an inflated
+stack_max for the proc".  Wrong mechanism (the inflation is real, but it is not what masked
+the fault).  Measured instead: `Verify` started at `Img.Body_Off` - the module body, which the
+emitter writes LAST - and walked to the end of the code.  In modinit.obc that is a 41-byte
+window at offset 6015; the other 59 procedures (offsets 1444..6015) were never decoded at all.
+`Input.Mouse` is a procedure, so its unbalanced store was invisible statically; the small probe
+reproduced the fault in the main body, which is the one window that was walked.
+
+Proof of the hole (before touching anything): a byte patched to the reserved opcode 0xF1 in a
+NEVER-CALLED procedure - the image verified, ran, and printed 42, exit 0.  The same byte in the
+called library body died at RUN time, not at verification.  The checker, not the artefact.
+
+Fix: `Verify` walks one procedure at a time.  A procedure's window is [its code offset, the
+next HIGHER code offset in the table) - not the next table row, which was the first false
+rejection: a nested procedure's id precedes its parent's but its code is emitted inside the
+parent's, so table order is not code order ("malformed code at code offset 4267" on the good
+image).  Jump targets must stay inside the window (the old rule only forbade targets below the
+body); the depth bound is the procedure's OWN Stack_Max field - still the module high-water
+mark today, per-procedure when the emitter's side lands (that is the inflation fix, a separate
+step).  Fixtures in run_vm.sh's byte-patch harness: ghost.asm (positive control - a legal
+uncalled procedure must RUN), ghostbad (0xF1 in it -> "not implemented"), ghoststack
+(NOP -> DROP -> "operand-stack depth violation").  Both negatives were accepted pre-fix.
+
 ### 3gy. The four wrong values were FOUR bugs; hello.ob2 is now fully correct
 
 3gx guessed "all four are VAR out-parameters, one convention".  Wrong - they shared a symptom

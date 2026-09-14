@@ -62,6 +62,21 @@ else
    bad "bc_emit failed: $(cat "$WORK/emit.log")"
 fi
 
+#  ---- positive: a legal procedure the body never calls -------------------
+#  The control for the two ghost* negatives below: verification walks every
+#  procedure now, called or not, and a legal uncalled one is not an error.
+python3 "$ASM" "$ROOT/tests/vm/ghost.asm" "$WORK/ghost.obc" >/dev/null || \
+   { echo "run_vm: assembly failed" >&2; exit 1; }
+if timeout 60 "$VM" "$WORK/ghost.obc" >"$WORK/ghost.out" 2>"$WORK/ghost.err"; then
+   if diff -u "$ROOT/tests/vm/ghost.out" "$WORK/ghost.out"; then
+      note "positive: ghost.asm (an uncalled procedure) matches the golden output"
+   else
+      bad "ghost.asm output differs from tests/vm/ghost.out"
+   fi
+else
+   bad "ghost.asm did not run: $(cat "$WORK/ghost.err")"
+fi
+
 #  ---- negative: malformed images must be rejected -------------------------
 python3 - "$WORK" <<'PY'
 import struct, sys, os
@@ -119,9 +134,34 @@ b = bytearray(base)
 i = find_code(bytes([0xC3, 0x02, 0x00, 0x00]))            # Out.Ln, 0 args
 b[i + 3] = 1
 put("badnative.obc", bytes(b), "bad native call")
+
+#  Faults inside a procedure the body never CALLS.  Verification walks every
+#  procedure one at a time, so these must be rejected at LOAD; before the
+#  walk was per-procedure only the body - emitted last - was verified, and
+#  both of these RAN (measured on a patched modinit.obc, which printed 42
+#  with an illegal opcode sitting in an uncalled procedure).
+gbase = open(os.path.join(work, "ghost.obc"), "rb").read()
+g_sec = struct.unpack_from("<H", gbase, 12)[0]
+gcode = None
+for i in range(g_sec):
+    sid, _fl, off, size = struct.unpack_from("<IIQQ", gbase, 64 + 24 * i)
+    if sid == 6:
+        gcode = off
+assert gcode
+#  ghost is the first procedure record: its code offset names the byte
+g_first = struct.unpack_from("<I", gbase, gcode + 4)[0]
+
+b = bytearray(gbase)
+b[gcode + g_first] = 0xF1     # a reserved opcode, in an uncalled procedure
+put("ghostbad.obc", bytes(b), "not implemented")
+
+b = bytearray(gbase)
+b[gcode + g_first] = 0x03     # NOP -> DROP: the depth goes to -1 at once
+put("ghoststack.obc", bytes(b), "operand-stack depth violation")
 PY
 
-for img in badmagic futurever badsize badjump notimpl badnative; do
+for img in badmagic futurever badsize badjump notimpl badnative \
+           ghostbad ghoststack; do
    want="$(cat "$WORK/$img.obc.want")"
    if timeout 60 "$VM" "$WORK/$img.obc" >"$WORK/$img.out" 2>"$WORK/$img.err"; then
       bad "$img was accepted but must be rejected"
