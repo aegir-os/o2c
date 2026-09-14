@@ -10015,7 +10015,13 @@ package body O2c_Compiler is
                            if A.Typ = T_LReal then
                               M := A.Text;
                            elsif A.Typ = T_Int
-                             or else (A.Typ = T_Real and then A.Lit)
+                             --  As at the assignment site: a REAL VALUE, not
+                             --  only a REAL LITERAL.  `lre` is declared
+                             --  LONGREAL and arrives here typed REAL, and both
+                             --  are the same 64-bit slot (M4e), so the widening
+                             --  is `Long_Float (...)`.  Requiring a literal
+                             --  refused the ordinary `Out.LongReal (lre, 0)`.
+                             or else A.Typ = T_Real
                            then
                               M := To_Unbounded_String
                                 ("Long_Float (" & To_String (A.Text) & ")");

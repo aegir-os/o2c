@@ -7268,6 +7268,31 @@ is green (run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_str
 hands it the right type and the refusal is about the compiler's VIEW of the argument rather than the source's.
 That is one grep at the `Out.LongReal` guard, and it is the next thing to measure.
 
+### 3gi. LANDED: Out.LongReal takes a REAL value too - and the metric reached Convert
+
+The `Out.LongReal` guard was the SAME condition verbatim (`A.Typ = T_Int or else (A.Typ = T_Real and then A.Lit)`),
+so it refused `Out.LongReal (lre, 0)` - where `lre` is declared `longreal` at hello.ob2:27.  Worth noting what
+that tells us: the ARGUMENT arrives typed REAL even though the declaration says LONGREAL, so a read of a
+LONGREAL module variable is being typed REAL somewhere upstream.  The widening is still correct (M4e: same
+64-bit slot, `Long_Float (...)` on the Ada side, no bytecode op needed), so the fix is the same one condition -
+and the read-typing question is recorded as a follow-up rather than chased here.
+
+Metric: `Out.LongReal needs a LONGREAL argument` -> `bytecode backend: Convert.ToInt needs a declared ARRAY OF
+CHAR variable`.  Both run_bc and the full gate are green.
+
+**The metric is now four advances ahead of where this stretch started**, all landed:
+    ...pointers compare only with NIL (line 470)   (9)
+    type mismatch assigning lre (line 478)
+    Out.LongReal needs a LONGREAL argument
+    Convert.ToInt needs a declared ARRAY OF CHAR variable   <- NEW, and it is in Convert
+
+**And a family, not a singleton**: the `T_Real and then ...Lit` restriction occurs at four sites - 3376 and
+5037 (arithmetic), 10018 (patched here), and 9102 as its INVERSE (`T_Real and then not V.Lit`).  Each needs the
+same M4e question asked of it individually; none was touched beyond the one the metric reached, which is why
+this stays a measured advance rather than a sweep.
+
+The new barrier is a bytecode-mode refusal in Convert, and `hello.ob2` calls `Convert.ToInt`.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
