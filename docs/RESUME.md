@@ -6586,6 +6586,36 @@ is short: a builtin's own body is written in BARE names, so the marker that refu
 the backend's general answer belongs - and it took a probe rather than a reading to find, because the two
 markers share their text and my line numbers move under my own patches.
 
+### 3fm. Args: the same shape, and now a measured plan rather than an investigation
+
+`Oak_Args_Src` is nine lines and calls two bare runtime names:
+
+    module Args;
+    var count*: integer;
+    procedure Get*(n: integer; var arg: array of char; var res: integer);
+    begin  ArgGet(n, arg, res)  end Get;
+    begin  count := ArgCount  end Args.
+
+Flipped, it refuses twice over and `run_bc` goes to FAIL (151) - the same signature as Input before its arms
+were fixed - and the metric names the second one: `Args.ArgGet are not yet supported`.
+
+**Both arms are now measured, so this is mechanical next time:**
+
+* the `ARGCOUNT` arm EXISTS (mirroring Input's `InAvail` arm exactly: same guard, same refusal, same `Next`,
+  same Ada text).  It needs the same treatment - in bytecode mode, emit instead of refusing.
+* there is NO `ARGGET` arm.  That is the refusal in the metric, and it needs writing.
+* `o2c_argget` ALREADY EXISTS in the VM (foreign id 13, Pops => 3), so `Get` needs no VM work at all - which
+  is most of it.
+* `o2c_argcount` does not exist.  One native to append, id 44.
+
+So Args is Input's shape with one arm already present and one native already present: two arms and one native,
+against Input's three arms and three natives.  Reverted rather than started, because the tree was red and a
+five-part change is not something to begin under a spent budget - but the plan above is read off the code, not
+guessed, and that is the difference the last five modules taught.
+
+`In` (3677, `InChar/InInt/InLong/InReal`) is the same family and should be measured the same way before it is
+written.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
