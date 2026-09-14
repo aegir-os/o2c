@@ -7361,6 +7361,41 @@ Ruled out along the way, by reading rather than guessing, so nobody repeats it:
     isolation - it is simply for a different value kind.
   - `Bad_Code` comes from the VERIFIER (site 1008 and 1119-1158), not the runtime `Note_At` sites (1118/1122).
 
+### 3gl. The native's own comment settles it: it wants a real ADDRESS
+
+vm/obc_vm.adb:2223, the arm for `o2c_conv_toint` (native id 6, foreign slot 2):
+
+    --  The three arguments are addresses into the VM's own Globals,
+    --  which is what Load_Addr_G pushed.
+
+and the body dereferences each one:
+
+    function Byte_At (A : U64; N : Natural) return Byte is ... end;   --  raw address + offset
+    ...
+    if Byte_At (Str, 0) = Byte (Character'Pos ('-')) then ...
+    loop
+       B := Byte_At (Str, I);
+       exit when B = 0;                       --  NUL-terminated, read in place
+       exit when B < Zero or else B > Nine;
+
+So the first argument is a NUL-TERMINATED CHARACTER BUFFER AT A REAL ADDRESS, and the native reads it in place.
+`Push_Str` gives a pool OFFSET relative to the CONST payload and its own lowering says so ("its pool word holds
+the offset of the text inside the CONST payload, which is what the VM's string ops consume") - a value the VM's
+string ops translate, and one a raw dereference cannot use.  The two representations are incompatible for this
+call, which is exactly why the image verified as malformed with a syntactically perfect push.
+
+Also confirmed: the pool entry IS `text & NUL` (O2c_BC.Push_Str appends `Character'Val (0)`), so the DATA shape
+matches - only the ADDRESSABILITY does not.  That is the whole gap.
+
+**The fix shape**: the arm must hand the native an address of real storage holding the literal's characters and
+NUL.  Two candidate routes, and the first is the one to try:
+  1. Materialize the literal into a compiler-made global slot, then Addr_Global it.  This needs to be checked
+     against how the image stores globals (do they carry initializers?) before writing code.
+  2. Teach the native the pool-offset form as well - rejected as the first choice, because "is this word an
+     address or an offset" would then be a question at every string native rather than at the point of origin.
+
+Recorded with the fixture still parked at /tmp/convint_pending.ob2, which is what caught the first attempt.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
