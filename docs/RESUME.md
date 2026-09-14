@@ -6437,6 +6437,35 @@ The three builtins at 3527/3677/4091 stay on the list, but they are one shape - 
 a qualified name outside it - and this entry says what the outside half actually needs: the parameterless
 qualified call, handled once.
 
+### 3fh. The parameterless qualified call: the site, and what the fix has to do in both backends
+
+The path is the imported-module-member handler (3896):
+
+    if Imported_Mod (FNm) then
+       ... if T1.Kind = Tok_Dot then Next; Next; Expect (Tok_Ident); ...
+           if Xs (XI).Kind = S_Const then ... R.Text := "Mod.Member"; return R;
+           if Xs (XI).Kind = S_Var and then ... then ... R.Text := ...; return R;
+           if Xs (XI).Kind = S_Var then  --  M20f: exported RECORD VARIABLE
+
+It has a branch for a CONST, two for a VAR (plain and record), and the `S_Proc` handling below them assumes a
+CALL WITH PARENTHESES.  A parameterless qualified call - `Input.Available` - therefore reaches none of them
+and falls through to MARKER_EXPR_REFUSAL.  That is the whole gap, and it is one branch, at one place, for
+every module rather than for Input.
+
+**What the branch must do, in both backends**, and this is the part worth writing down before it is written:
+
+* BYTECODE: the member is a CALL, so it takes the road a call takes - the procedure id and the arity - via
+  `Call_Proc (id, 0)`, with `Params /= 0` refused because a member that takes arguments needs parentheses
+  and reaching here means there are none.  The result stays on the stack, as every call's does.
+* ADA: the same expression must ALSO produce its Ada text, `Mod.Member`, exactly as the CONST and VAR
+  branches above do.  That text is valid Ada here - the builtin's own module IS emitted (11463), so
+  `Input.Available` names the generated procedure, which in turn calls `O2c_In_Avail`.  This is the one
+  branch where the two backends need different things from one place, which is why it is worth not guessing.
+
+Not written: reading the existing `S_Proc` arm below (3975+) is the last step, so the new branch matches its
+conventions rather than inventing its own - and the last three attempts at this file are the argument for
+reading it first.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
