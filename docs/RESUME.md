@@ -6699,6 +6699,31 @@ patched was not the one firing.  The probe answered it here (no print appeared a
 which sent the grep to the third string), and the probe is now removed.  The `Args` arms and the native stay,
 additive and verified, with the flip off - the same staging `Clock_Ms` went through.
 
+### 3fp. The Args stack bug, disassembled - a bounds-check prefix with no check
+
+`tools/bc_disasm.py` on the fixture's image shows it in one screen.  `proc 36` is `Args.Get` (npar=4: three
+parameters plus the open array's length slot), and it contains TWO overlapping sequences:
+
+    proc 36 (frame=4 npar=4)
+       0 LOAD_L[0]  LOAD_L[1]  LOAD_L[3]  LOAD_CONST[119]  LOAD_IDX_I     <- stray
+      15 LOAD_L[0]  LOAD_L[1]  LOAD_L[3]                                  <- the three loads
+      24 CALL_NATIVE [13, 3]                                              <- pops 3
+      28 RET_VOID
+
+The first group is the PREFIX of an indexed-access bounds check - the shape that normally reads
+`DUP, LOAD_CONST n, IGE, JNZ, TRAP, ...` and leaves exactly ONE value behind - with everything after
+`LOAD_IDX_I` missing.  So an indexed access emitted its address-and-index part and then nothing, leaving the
+operand stack deeper than the native call expects, which is precisely the `depth-1` the VM reported.
+
+That is the whole of the bug: something in `Args.Get`'s body emits a bounds-check prefix and then stops.  The
+body is `ArgGet (n, arg, res)`, and `arg` is an `ARRAY OF CHAR` PARAMETER - so the indexed-access path for an
+open-array parameter is the suspect, and it is the same path whose up-level and by-ref variants took three
+separate fixes earlier in this work.  The disassembly is the right instrument for it: it shows the emission,
+not the intent.
+
+Reverted so the tree is green; the Args arms and native stay staged.  The remaining work is this emission in
+the open-array-parameter path, and it would affect any builtin indexing such a parameter.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
