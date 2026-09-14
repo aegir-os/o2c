@@ -524,6 +524,42 @@ package body OBC_VM is
    --  past the 36 in use and leaves room for the rest of the Oakwood surface.
    --  If the FFI surface ever becomes open-ended, this should become a growing
    --  table like the rest of the VM's.
+   --  Input's OWN buffer, and deliberately a second one.  The buffer above is
+   --  the In MODULE's: it loads once, joins lines with SPACES and is walked as
+   --  tokens.  Input's primitives join lines with LF and walk CHARACTERS, which
+   --  is why the Ada backend keeps In_C_* beside In_* rather than sharing - and
+   --  why these are named after it.  Sized like the helper's own 4096.
+   In_C_Max : constant := 4096;
+   In_C_Buf : String (1 .. In_C_Max);
+   In_C_Len : Natural := 0;
+   In_C_Pos : Natural := 1;
+
+   --  The Ada helper O2c_In_Cload, which loops on CLI.Get_Line appending LF
+   --  until end of input - the same call the seam already exposes for the In
+   --  module, so no single-character primitive is needed anywhere.
+   procedure In_C_Load is
+      S : String (1 .. 512);
+      L : Natural;
+      E : Boolean;
+   begin
+      if In_C_Pos <= In_C_Len and then In_C_Len > 0 then
+         return;                    --  characters are still buffered
+      end if;
+      In_C_Pos := 1;
+      In_C_Len := 0;
+      loop
+         VM_Platform.Get_Line (S, L, E);
+         exit when E;
+         exit when In_C_Len + L + 2 > In_C_Max;
+         for I in 1 .. L loop
+            In_C_Len := In_C_Len + 1;
+            In_C_Buf (In_C_Len) := S (I);
+         end loop;
+         In_C_Len := In_C_Len + 1;
+         In_C_Buf (In_C_Len) := ASCII.LF;
+      end loop;
+   end In_C_Load;
+
    Max_Foreign : constant := 64;
    type Sym_Access is access constant String;
    type Foreign_Rec is record
@@ -579,6 +615,12 @@ package body OBC_VM is
       34 => (Sym => new String'("o2c_math_arccos"), Pops => 1),
       35 => (Sym => new String'("o2c_math_arctan"), Pops => 1),
       36 => (Sym => new String'("o2c_math_arctan2"), Pops => 2),
+      --  Oakwood Input's three primitives - entries 37..39, i.e. ids 41..43
+      --  (a table entry is id - Max_Natives).  They take NO arguments: the
+      --  surface is Available: integer, Read (var ch: char), Time: longint.
+      37 => (Sym => new String'("o2c_in_avail"), Pops => 0),
+      38 => (Sym => new String'("o2c_in_readch"), Pops => 0),
+      39 => (Sym => new String'("o2c_in_time"), Pops => 0),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -655,6 +697,10 @@ package body OBC_VM is
       38 => True,
       39 => True,
       40 => True,
+      --  Input's three, each returning one value.
+      41 => True,
+      42 => True,
+      43 => True,
       others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
@@ -1630,7 +1676,7 @@ package body OBC_VM is
                end if;
                return Ok;
             end;
-         when Max_Natives + 25 .. Max_Natives + 35 =>
+         when Max_Natives + 25 .. Max_Natives + 38 =>
             --  Math and MathL's transcendentals.  Every one of them RETURNS a
             --  value, so each sets Result and the interpreter pushes it.  The
             --  arguments are REALs in the slot the VM keeps a 64-bit double in,
@@ -1669,6 +1715,25 @@ package body OBC_VM is
                   Result.Value :=
                     R64_To_U64
                       (VM_Math.ArcTan2 (To_R64 (Args (0)), To_R64 (Args (1))));
+               when Max_Natives + 36 =>
+                  --  o2c_in_avail: buffered characters PLUS the terminator, the
+                  --  same count the Ada helper returns (In_C_Len - In_C_Pos + 1).
+                  In_C_Load;
+                  Result.Value := U64 (In_C_Len - In_C_Pos + 1);
+               when Max_Natives + 37 =>
+                  --  o2c_in_readch: past the end is Character'Val (0), which is
+                  --  what the Ada helper returns rather than an error.
+                  In_C_Load;
+                  if In_C_Pos > In_C_Len then
+                     Result.Value := 0;
+                  else
+                     Result.Value := U64 (Character'Pos (In_C_Buf (In_C_Pos)));
+                     In_C_Pos := In_C_Pos + 1;
+                  end if;
+               when Max_Natives + 38 =>
+                  --  o2c_in_time: milliseconds, from the seam's clock - the same
+                  --  units and the same epoch as the Ada backend's Read_Clock.
+                  Result.Value := U64 (VM_Platform.Clock_Ms);
                when others =>
                   return Bad_Native;
             end case;

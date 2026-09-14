@@ -6249,6 +6249,34 @@ than a name read out of generated text.
 appended); the compiler's arm changed from the 3602 refusal to emitting those natives in bytecode mode,
 which is the M48 FFI pattern sitting immediately below it; then flip, fixture and gate.
 
+### 3fb. Input, piece 2: the VM's three natives - and two traps in the VM's own tables
+
+Landed: `o2c_in_avail` / `o2c_in_readch` / `o2c_in_time`, appended as ids 41..43 with `Pops => 0` (the surface
+takes no arguments) and `Native_Pushes => True` (each returns one, or the pushed result reads as a stack
+imbalance).  Their implementations mirror the Ada helpers exactly - the LF-joined buffer, the terminator in
+the count, `Character'Val (0)` past the end, and milliseconds from the seam's clock.
+
+**Two traps, both found by the compiler rather than by reasoning, and both worth recording.**
+
+1. **The `Foreign` table is ENTRY-indexed, not id-indexed**: ids 30..40 are entries 26..36, so the entry for
+   a new id is `id - Max_Natives`.  The new natives are entries **37..39**, while their ARM offsets are
+   `Max_Natives + 36 .. +38` - two different numbers for the same three natives, in two tables that look
+   alike.  The patch asserted on the wrong anchor, so nothing was written, which is the failure mode this
+   habit exists for.
+2. **The VM already had an input buffer, and it is the WRONG one.**  `In_Buf`/`In_Pos`/`In_Len` exist for the
+   `In` module: they load ONCE, join lines with SPACES, and are walked as TOKENS.  `Input`'s primitives join
+   with LF and walk CHARACTERS.  That is exactly why the Ada backend keeps `In_C_*` beside `In_*` rather
+   than sharing, so the VM needs the same split - and mine are named `In_C_*` to say so.
+
+**Verified**: both builds clean (`vm-host` and `vm-aegir`), and the FULL gate green - run_vm, run_bc,
+bytecode_gaps, coverage, differential, run_m1, run_stress.  The natives are inert until the compiler emits
+them, which is the honest caveat: the arm cannot be reached from source yet.
+
+**Still to do**: the compiler's 3602 arm switched from refuse to emitting these three ids in bytecode mode
+(the M48 FFI pattern below it); exercising the natives - `vm/fixture/` holds hand-written images
+(`VmGreet.obc`), so they can be tested before the compiler can name them; then the flip, a fixture, and the
+gate.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
