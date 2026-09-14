@@ -6724,6 +6724,44 @@ not the intent.
 Reverted so the tree is green; the Args arms and native stay staged.  The remaining work is this emission in
 the open-array-parameter path, and it would affect any builtin indexing such a parameter.
 
+### 3fq. Checked the instrument first - and the real bug is a qualified VARIABLE read
+
+3fp read the disassembler's per-proc view and concluded an indexed access emitted a bounds-check prefix and
+stopped.  Before chasing that, the decode was repeated FLAT over the whole code section, and the earlier
+reading dissolved: the per-proc offsets are BASED (the table's `code_off` is `Code_Base + Buf_Off`), so
+slicing by them misaligns - the same artifact class as the "two records share an offset" reading earlier in
+this work.  Twice now, a tool of mine has reported a structure the code does not have.
+
+Flat, at the offset the VM named:
+
+    5989 DROP
+    5990 CALL        [3819]        <- Args.Get
+    5995 LOAD_CONST  [288]
+    6000 CALL_NATIVE [0, 2]       <- Out.Int, with ONE argument pushed
+    6004 LOAD_G      [4]          <- the offset the VM reported
+    6009 LOAD_CONST  [289]
+    6014 CALL_NATIVE [0, 2]
+    6018 CALL_NATIVE [2, 0]
+    6022 HALT
+
+and immediately before the call: `LOAD_CONST 286, LOAD_ADDR_G 3, LOAD_ADDR_G 4, LOAD_G 4, DROP`.  The
+`LOAD_G 4; DROP` pair is the tell.
+
+**The program is `Out.Int (Args.count, 0)`.**  `Args.count` is a QUALIFIED EXPORTED VARIABLE, and its
+imported-member branch produces the Ada text (`R.Text := "Args.count"`) and NO bytecode - exactly the shape
+the refusal arms were guarding against, in a branch that never had a refusal because it looked like a read.
+So the value is never pushed: one argument instead of two, hence `depth-1` at the native that wants both.
+
+That also explains the stray `LOAD_G 4; DROP`: something emitted the load and then discarded it, where the
+argument emission had already moved on.
+
+**This is general, not Args-specific.**  Any qualified variable read - `Args.count`, `Env`'s values, any
+exported `var` - takes that branch, and the branch is Ada-only.  It is the same defect class as the bare and
+qualified call arms, in the one place nobody looked: a READ rather than a call.
+
+Reverted, tree green; the Args arms and native stay staged.  The next step is that branch: emit the bytecode
+load beside the Ada text, the way the call arms now emit beside their Ada text.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
