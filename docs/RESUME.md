@@ -7293,6 +7293,38 @@ this stays a measured advance rather than a sweep.
 
 The new barrier is a bytecode-mode refusal in Convert, and `hello.ob2` calls `Convert.ToInt`.
 
+### 3gj. A metric advance is NOT a proof - the fixture is
+
+The `Convert.ToInt` arm demanded a declared GLOBAL for its first actual, so `Convert.ToInt ("8311", n, res)`
+refused while string literals demonstrably work in bytecode (`Out.String ("hi")` compiles to 8496 bytes;
+`tests/bc/termuse.ob2:9` prints one and passes).  That is the fourth guard-in-a-row that was narrower than the
+machinery, and the literal mechanism is `Push_Str`, called from the literal factor at line 3028.
+
+The arm was changed to fall back to `Push_Str` for a non-global actual, and **the metric moved again** - from
+`Convert.ToInt needs a declared ARRAY OF CHAR variable` to `Env.Set needs declared ARRAY OF CHAR variables`.
+run_bc passed.  Everything about that looked like the last three landings.
+
+**Then the fixture said no:**
+
+    Convert.ToInt ("8311", n, res);
+    ... vm: malformed code: /tmp/ci.obc
+
+The compile succeeds (`8864 bytes`) and the VM rejects the image.  So the emission is wrong - `Push_Str` is not
+a drop-in for `Addr_Global`.  Two things to check before trying again: `Push_Str` has TWO definitions
+(o2c_bc.adb, the label backend, and o2c_ir_lower.adb, the IR one the arm calls), and the IR one emits
+`Op_Copy` of `O2c_Ir.Const_Str (Text)` - so the question is what the native expects on the stack for that
+argument versus what a constant copy leaves there.  Note also that the literal factor passes the RAW SOURCE
+TOKEN (`Cur.Text (1 .. Cur.Len)`, quotes included) while the arm holds the Ada-quoted form, so the argument's
+text form differs between the two callers.
+
+Reverted; the tree is green and unchanged.  The fixture is kept at /tmp/convint_pending.ob2 rather than in
+tests/bc/, because a failing fixture makes run_bc red and the project does not land red.
+
+**The lesson is the one worth keeping**: a moved metric means the COMPILER accepted the program, not that the
+program is right.  Three times in this stretch the metric moved and the gate was green, and the change was
+correct; this time the metric moved and the change was WRONG, and only the fixture could tell the difference.
+That is why the fixtures exist, and it is the argument for writing one FIRST rather than after the metric moves.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
