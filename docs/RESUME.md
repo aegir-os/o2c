@@ -7461,6 +7461,38 @@ landing it, and the suite says so rather than letting the count drift.
 Still to convert to the helper (recorded, not done): Files.Delete and Convert.FromInt.  They work as they are;
 they are duplicated code, which is what the helper exists to remove.
 
+### 3go. LANDED: Err.Write/Err.WriteLn - and the metric command COMPILES
+
+    $ o2c_bc_host samples/hello.ob2 /tmp/h.obc samples/geom.ob2 samples/geo.ob2
+    o2c_bc_host: /tmp/h.obc ( 24104 bytes)
+
+**No refusal.**  Every sample on the command line now compiles, which is what this whole stretch was measuring
+towards.  What that does NOT mean is that the programs are right: the metric is a COMPILE metric, and the
+semantics are only as verified as the fixtures.  Running /tmp/h.obc and checking its golden is the next real
+question, and it is a different one.
+
+Err.Write (native 45) and Err.WriteLn (native 46) are appended, never renumbered, and they needed a platform
+seam: `VM_Platform.Put_Err` / `New_Line_Err`.  Both platforms implement it as `Ada.Text_IO` on Standard_Error -
+the same channel the VM's own notes use, which is why the guest needs no separate syscall for it.
+
+Three details worth keeping:
+  - The parameterless sibling is in a DIFFERENT chain.  `Err.Write (s)` has arguments and lives in the
+    with-arguments site; `Err.WriteLn;` has none and lives in the parameterless one beside XYplane.Open, where
+    the arity is zero by a guard above rather than by an `N_A = 0` test.  The first attempt put both in the
+    first chain and WriteLn still refused.
+  - `Native_Pops` and `Native_Pushes` are indexed by ID, while the Foreign table is indexed by ENTRY.  Entry 41
+    is id 45.  Writing `41 => 1` in Native_Pops made the interpreter report "bad native call" for id 45; the
+    id-indexed `45 => 1` is what was needed.  One off-by-four, and the message named neither number.
+  - Err.Write takes an ADDRESS, so the compiler passes it through Addr_Str_Actual - the helper paid off on its
+    first reuse, since a literal argument works with no new code at all.
+
+And the differential suite put the new fixture in the OTHER bucket: errwrite is GOLDEN_SUSPECT, not ADA_BROKEN
+like envset.  The Ada side builds and runs it - its Err helper does not reach Aegir_User.CLI the way Env's does -
+so all three outputs differ instead.  Recorded with that reason; the open question it raises is whether the
+comparison should carry stderr, since Err writes there and the golden is stdout.
+
+Full gate green: run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_stress.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

@@ -8684,6 +8684,24 @@ package body O2c_Compiler is
                                     Bc_Push_Arg (Arg_R (K));
                                  end loop;
                                  O2c_Ir_Lower.Call_Native (16, 3);
+                              elsif Eq_No_Case (MNm, "Err")
+                                and then Eq_No_Case
+                                  (To_String (MName), "Write")
+                                and then N_A = 1
+                              then
+                                 --  Err.Write (s): native 45.  The arm gives
+                                 --  it an ADDRESS through Addr_Str_Actual, so
+                                 --  a literal works as well as a variable.
+                                 Addr_Str_Actual
+                                   (To_String (Arg_R (1).Text), "Err.Write");
+                                 O2c_Ir_Lower.Call_Native (45, 1);
+                              elsif Eq_No_Case (MNm, "Err")
+                                and then Eq_No_Case
+                                  (To_String (MName), "WriteLn")
+                                and then N_A = 0
+                              then
+                                 --  Err.WriteLn: native 46, no arguments.
+                                 O2c_Ir_Lower.Call_Native (46, 0);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."
@@ -8735,6 +8753,16 @@ package body O2c_Compiler is
                               O2c_Ir_Lower.Push_Int (640);
                               O2c_Ir_Lower.Push_Int (400);
                               O2c_Ir_Lower.Call_Native (14, 2);
+                           elsif Eq_No_Case (MNm, "Err")
+                             and then Eq_No_Case
+                               (To_String (MName), "WriteLn")
+                           then
+                              --  Err.WriteLn: native 46, no arguments.  It is
+                              --  the parameterless sibling of Err.Write (45),
+                              --  which lives in the with-arguments chain above
+                              --  - `Err.WriteLn;` has no parentheses, so it
+                              --  arrives here rather than there.
+                              O2c_Ir_Lower.Call_Native (46, 0);
                            else
                               raise O2c_BC.Wrong_Construct with
                                 "bytecode backend: " & MNm & "."

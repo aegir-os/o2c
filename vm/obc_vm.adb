@@ -623,6 +623,12 @@ package body OBC_VM is
       39 => (Sym => new String'("o2c_in_time"), Pops => 0),
       --  Args.ArgCount - no arguments, one result.  Entry 40, i.e. id 44.
       40 => (Sym => new String'("o2c_argcount"), Pops => 0),
+      --  Err.Write and Err.WriteLn.  Write takes the ADDRESS of a
+      --  NUL-terminated string - the arm passes Addr_Str_Actual's result, and
+      --  Addr_Str_Actual exists because a literal has no address of its own.
+      --  Entry 41 is id 45, entry 42 is id 46.  Appended, never renumbered.
+      41 => (Sym => new String'("o2c_errwrite"), Pops => 1),
+      42 => (Sym => new String'("o2c_errwriteln"), Pops => 0),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -669,6 +675,7 @@ package body OBC_VM is
       38 => 1,    --  o2c_math_arccos
       39 => 1,    --  o2c_math_arctan
       40 => 2,    --  o2c_math_arctan2
+      45 => 1,    --  o2c_errwrite: the address of a NUL-terminated string
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1743,6 +1750,34 @@ package body OBC_VM is
                when others =>
                   return Bad_Native;
             end case;
+            return Ok;
+
+         when Max_Natives + 40 .. Max_Natives + 41 =>
+            --  Err.Write (45) and Err.WriteLn (46), the diagnostics channel.
+            --  Write's argument is an ADDRESS, not a pool offset: the same
+            --  contract o2c_conv_toint's first argument has, which is why the
+            --  compiler passes it through Addr_Str_Actual.
+            if Idx = Max_Natives + 40 then
+               declare
+                  A : constant U64 := Args (0);
+                  I : Natural := 0;
+               begin
+                  loop
+                     declare
+                        B : Byte with Address =>
+                          System.Storage_Elements.To_Address
+                            (System.Storage_Elements.Integer_Address (A)
+                             + System.Storage_Elements.Integer_Address (I));
+                     begin
+                        exit when B = 0;
+                        VM_Platform.Put_Err (String'(1 => Character'Val (B)));
+                        I := I + 1;
+                     end;
+                  end loop;
+               end;
+            else
+               VM_Platform.New_Line_Err;
+            end if;
             return Ok;
 
          when Max_Natives + 21 .. Max_Natives + 24 =>

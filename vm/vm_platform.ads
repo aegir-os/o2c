@@ -113,6 +113,12 @@ package VM_Platform is
    --  How many arguments the INTERPRETED PROGRAM has.  Both platforms know: the
    --  guest guards its Arg_Get with Aegir_User.CLI.Arg_Count, and the host's
    --  own Arg_Get already subtracts one because its argument 1 is the image.
+   --  A string on the diagnostics channel, and a line end.  Err.Write and
+   --  Err.WriteLn go here, and so does every VM note: the same channel the
+   --  VM's own messages use, which is Standard_Error on both platforms.
+   procedure Put_Err (S : String);
+   procedure New_Line_Err;
+
    function Arg_Count return Natural;
 
 end VM_Platform;

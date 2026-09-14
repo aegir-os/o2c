@@ -217,6 +217,16 @@ package body VM_Platform is
          E := True;
    end Get_Line;
 
+   procedure Put_Err (S : String) is
+   begin
+      Ada.Text_IO.Put (Ada.Text_IO.Standard_Error, S);
+   end Put_Err;
+
+   procedure New_Line_Err is
+   begin
+      Ada.Text_IO.New_Line (Ada.Text_IO.Standard_Error);
+   end New_Line_Err;
+
    function Arg_Count return Natural is
      (if Ada.Command_Line.Argument_Count >= 1
       then Ada.Command_Line.Argument_Count - 1

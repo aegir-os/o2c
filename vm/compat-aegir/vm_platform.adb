@@ -1,6 +1,7 @@
 --  Aegir body of VM_Platform: CLI.Init parses the args page (redirection
 --  trailer, cwd) and CLI.Exit_With closes the redirects, so the VM's
 --  output behaves like every other CLI program's.
+with Ada.Text_IO;
 with Aegir_User.CLI;
 with Aegir_User.Files;
 with Aegir_User.Syscalls;
@@ -193,6 +194,16 @@ package body VM_Platform is
       --  reading input behaves identically on both backends.
       Aegir_User.CLI.Get_Line (S, L, E);
    end Get_Line;
+
+   procedure Put_Err (S : String) is
+   begin
+      Ada.Text_IO.Put (Ada.Text_IO.Standard_Error, S);
+   end Put_Err;
+
+   procedure New_Line_Err is
+   begin
+      Ada.Text_IO.New_Line (Ada.Text_IO.Standard_Error);
+   end New_Line_Err;
 
    function Arg_Count return Natural is (Aegir_User.CLI.Arg_Count);
 
