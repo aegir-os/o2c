@@ -12868,7 +12868,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  equivalent LOCAL shape works.  Until that is fixed, scoping a module
       --  would only convert a loud refusal into a silent wrong answer - the
       --  hazard the Math entry above describes.
-      Compile_Builtin (Oak_Files_Src, Scoped => True);   --  probe
+      Compile_Builtin (Oak_Files_Src, Scoped => True);
       if Emits ("Files") then
          --  Files: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12981,7 +12981,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Reals_Src, Scoped => True);   --  re-test (3ev)
+      Compile_Builtin (Oak_Reals_Src, Scoped => True);
       if Emits ("Reals") then
          --  Reals: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12993,7 +12993,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Term_Src, Scoped => True);   --  probe
+      Compile_Builtin (Oak_Term_Src, Scoped => True);
       if Emits ("Term") then
          --  Term: parsed above in every case, emitted
          --  only when something imports it (see Emits).
