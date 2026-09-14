@@ -6889,6 +6889,34 @@ an expression produces a wrong value, look at what the producer emitted before s
 RET_VOID), the native it calls, or the arithmetic in between - and the disassembler answers it the same way,
 on the SAME fixture, with no flip needed: Reals is already in.
 
+### 3fv. Both suspicions dead: the probe was wrong, twice
+
+3ft suspected a call on the right of an assignment.  3fu disproved that from the disassembly and suspected the
+callee's return instead.  Both are wrong, and two fixtures settle it:
+
+    x := Twice (21);           -> 42   a LOCAL function on the right
+    n := Reals.Expo (250.0);   -> 2    a QUALIFIED one, returning its own type
+
+The second is the one that misled me.  `Reals.Expo*(x: real): integer` returns the DECIMAL EXPONENT, not
+e^x - so `Expo (1.0)` is 0 and `Out.Real (x, 2)` printing 0.00 was the right answer to a meaningless
+question.  The corpus agrees: hello.ob2 calls `Out.Int (Reals.Expo (250.0), 0)`, an INTEGER.  And the first
+fixture shows the assignment shape works, so neither the store nor the call is at fault.
+
+**That is the sixth probe of mine to be wrong in this stretch**, and the fourth in a row to be caught by
+running the fixture rather than reading the code.  The rule that keeps being validated is narrower than "dump
+the bytes": it is that a NEGATIVE result from a new fixture needs the same scrutiny as a positive one - three
+times now, a failing fixture turned out to be a failing fixture rather than a failing compiler.
+
+What survives is much narrower, and it is not the assignment or the call as such: `In.Int`'s body is
+`x := InInt()`, where the right-hand side is a NATIVE call and `x` is a BY-REF parameter.  Both halves matter
+- a native on the right of a by-ref store, which takes [base, index, value] with base and index pushed before
+the right-hand side.  `Twice (21)` is a procedure call, not a native, so neither fixture above exercises it,
+and it is reachable only inside a builtin - which is why In is where it shows.
+
+The next probe writes exactly that shape into an ordinary function, with In flipped only to reach it - or
+re-applies the three In arms and disassembles `In.Int`'s own body, which shows whether the native's result
+lands between the store's base/index and its STORE_IDX.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
