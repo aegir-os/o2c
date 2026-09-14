@@ -7587,6 +7587,34 @@ The clauses I read earlier declare `var hx, tx: Geom.Node; var w: Geom.Vec; var 
 record pointer being dereferenced is the natural reading - but it is a hypothesis with a location now, not a
 description of a fault, and that is what the diagnostic was for.
 
+### 3gs. The fault's SHAPE: LOAD_G where a field access needs an ADDRESS
+
+The disassembly pattern, matched against the source:
+
+    8575: LOAD_G   [17]           <- hx
+    8580: CALL     [7294]         <- Geom.Next (a record-valued function that takes one)
+    8585: STORE_G  [18]           <- tx
+    8590: LOAD_G   [17]           <- hx again
+    8595: LOAD_FLD_I [0]         <- a FIELD of it          <- FAULT
+
+hello.ob2:322 is `tx := Geom.Next(hx);` and hello.ob2:342 is
+`Out.Int(Geom.origin.x + Geom.origin.y, 0)`.  `hx` is `Geom.Node` and `Geom.origin` is `Geom.Point`: both are
+RECORDS, and `Geom.origin.x` needs the record's ADDRESS with the field offset applied.
+
+**LOAD_G loads a global's VALUE.  A field access needs its ADDRESS.**  So the emitted code takes the record's
+first word, treats it as a pointer, and dereferences it - which is exactly a STORAGE_ERROR, and exactly why the
+fault lands on the very first field load rather than somewhere random.
+
+This is the SAME shape as the qualified-read fix made earlier in this work: that fix used
+`Load_Global (Ada_Id (MName))` so that `Args.count` and `Input.TimeUnit` would read a module-level variable, and
+it is right for reading a scalar.  A qualified record whose field is then accessed needs the address instead,
+and the field-access site is where that has to be decided - because only there does the compiler know that the
+thing being loaded is about to be indexed.
+
+**Next, and in this order: the fixture FIRST.**  A program with a global record, assigned and then field-read,
+that prints the field.  It fails today; when it passes, the fix is real.  The compiler side is the designator
+that feeds `D.K = D_Field`, where the base is currently whatever the qualified name loaded.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
