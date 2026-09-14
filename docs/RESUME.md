@@ -7615,6 +7615,33 @@ thing being loaded is about to be indexed.
 that prints the field.  It fails today; when it passes, the fix is real.  The compiler side is the designator
 that feeds `D.K = D_Field`, where the base is currently whatever the qualified name loaded.
 
+### 3gt. The fixture FALSIFIED the diagnosis - a plain global record is fine
+
+The shape analysis said "LOAD_G where a field access needs an ADDRESS", and tests/bc/recfld.ob2 was written
+before the fix, as the rule requires: a global record, assigned then field-read, printing 7 + 35.
+
+    o2c_bc_host: /tmp/rf.obc ( 8560 bytes)
+    vm_main /tmp/rf.obc  ->  42
+
+**It passes.**  A plain global record with a field read emits correctly and runs correctly, on BOTH backends -
+`differential` corroborated 68 fixtures afterwards, one more than before, and recfld needed no recorded-limit
+entry because the Ada side agrees.  So the analysis was too broad: the fault is not "a global record", it is
+whichever of the TWO other things hello.ob2 does:
+
+    322:  tx := Geom.Next(hx);                     a record-VALUED function call
+    342:  Out.Int(Geom.origin.x + Geom.origin.y)   a QUALIFIED record, field accessed
+
+Both differ from the fixture in a way that could matter - the qualified name goes through the import machinery
+that an earlier fix gave `Load_Global`, and the record-valued call has to materialize a whole record as a
+result.  Which one it is has not been measured yet.
+
+**The fixture is kept anyway**, because it passes on both backends and covers a shape no fixture did: a global
+record, assigned and field-read, with the value checked.  A fixture earns its place by passing as much as by
+failing, and this is the third time in this stretch that writing one changed the direction of the work - the
+first two were ConvInt catching a wrong emission, and envset needing its differential entry.
+
+Full gate green: run_bc, run_vm, bytecode_gaps, coverage, differential (68), run_m1, run_stress.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
