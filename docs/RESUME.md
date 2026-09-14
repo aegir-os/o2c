@@ -6642,6 +6642,32 @@ example.  The 3-argument parse is the part not yet studied, and that is the next
 `In` (3677, `InChar/InInt/InLong/InReal`) is the same family and should be measured the same way first - and
 its four names suggest four arms and possibly a native, which the same kind of reading will settle.
 
+### 3fn. Args: the VM side is in, the arms are in, and the bare arm still does not fire
+
+Staged and verified: `VM_Platform.Arg_Count` (both bodies - the host from
+`Ada.Command_Line.Argument_Count - 1`, the guest from `Aegir_User.CLI.Arg_Count`, which its own `Arg_Get`
+already guards with), native 44 as foreign entry 40 with `Pops => 0` and a `True` in `Native_Pushes`, the
+`ARGCOUNT` arm switched from refuse to emit, and a new bare `ARGGET` arm beside it.  Both VM targets build
+clean with all of it.
+
+With the flip on, though, the metric still reports
+
+    bytecode backend: Args.ArgGet are not yet supported
+
+which is the MARKER's wording (`FNm & "." & MName`), not the Args arm's own text ("Args.ArgCount in a
+builtin's own body").  So the bare `ArgGet` does not travel through the arm I added beside `ARGCOUNT` - it
+reaches the marker instead, which means the bare name is resolved somewhere else in the factor path than the
+module arm.
+
+**That is the third instance of the same trap in this file**: two refusals with overlapping text, and the
+first one patched is not the one firing.  For Input the answer was a PROBE - printing the condition at the
+marker - after two readings had failed.  The same probe is the next step here, at the marker, printing
+`FNm`, `MName`, `XI` and `Xs (XI).Kind` when it declines: `ArgGet` is not an export, so `Find_X` should
+return 0 and the question is which of the two paths sees it first.
+
+The flip is reverted so the tree is green; the seam, the native and both arms stay, because they are additive
+and both VM targets build with them - the same way `Clock_Ms` waited for its native.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

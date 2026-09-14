@@ -621,6 +621,8 @@ package body OBC_VM is
       37 => (Sym => new String'("o2c_in_avail"), Pops => 0),
       38 => (Sym => new String'("o2c_in_readch"), Pops => 0),
       39 => (Sym => new String'("o2c_in_time"), Pops => 0),
+      --  Args.ArgCount - no arguments, one result.  Entry 40, i.e. id 44.
+      40 => (Sym => new String'("o2c_argcount"), Pops => 0),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -701,6 +703,7 @@ package body OBC_VM is
       41 => True,
       42 => True,
       43 => True,
+      44 => True,
       others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
@@ -1676,7 +1679,7 @@ package body OBC_VM is
                end if;
                return Ok;
             end;
-         when Max_Natives + 25 .. Max_Natives + 38 =>
+         when Max_Natives + 25 .. Max_Natives + 39 =>
             --  Math and MathL's transcendentals.  Every one of them RETURNS a
             --  value, so each sets Result and the interpreter pushes it.  The
             --  arguments are REALs in the slot the VM keeps a 64-bit double in,
@@ -1734,6 +1737,9 @@ package body OBC_VM is
                   --  o2c_in_time: milliseconds, from the seam's clock - the same
                   --  units and the same epoch as the Ada backend's Read_Clock.
                   Result.Value := U64 (VM_Platform.Clock_Ms);
+               when Max_Natives + 39 =>
+                  --  o2c_argcount: how many arguments the program was given.
+                  Result.Value := U64 (VM_Platform.Arg_Count);
                when others =>
                   return Bad_Native;
             end case;

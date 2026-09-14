@@ -110,4 +110,9 @@ package VM_Platform is
    --  platforms share it.
    function Clock_Ms return Long_Integer;
 
+   --  How many arguments the INTERPRETED PROGRAM has.  Both platforms know: the
+   --  guest guards its Arg_Get with Aegir_User.CLI.Arg_Count, and the host's
+   --  own Arg_Get already subtracts one because its argument 1 is the image.
+   function Arg_Count return Natural;
+
 end VM_Platform;

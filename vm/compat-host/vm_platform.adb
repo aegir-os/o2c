@@ -217,6 +217,11 @@ package body VM_Platform is
          E := True;
    end Get_Line;
 
+   function Arg_Count return Natural is
+     (if Ada.Command_Line.Argument_Count >= 1
+      then Ada.Command_Line.Argument_Count - 1
+      else 0);
+
    function Clock_Ms return Long_Integer is
       use type Ada.Calendar.Time;
       --  The same epoch the guest's syscall counts from, so the two agree

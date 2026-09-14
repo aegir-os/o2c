@@ -3522,12 +3522,21 @@ package body O2c_Compiler is
                --  makes no bytecode call, so a flipped builtin's own body would
                --  compile, run, and quietly do nothing.  Refuse instead -
                --  the rule the two aggregates follow.
-               if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Args.ArgCount in a builtin's own body" & " is not yet supported";
-               end if;
-               --  M50 FFI: argument count (builtin Args only)
+               --  M50 FFI: argument count (builtin Args only).  The name is
+               --  consumed HERE and the Ada text produced below, so both
+               --  backends get their answer from one parse.
                Next;
+               if Cur.Kind = Lex.Tok_LParen then
+                  Next;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+               end if;
+               if O2c_BC.Bytecode_Mode then
+                  --  Native 44 (foreign entry 40), no arguments, one result -
+                  --  read from the platform's own count, which the seam answers
+                  --  for host and guest alike.
+                  O2c_Ir_Lower.Call_Native (44, 0);
+               end if;
                if Cur.Kind = Lex.Tok_LParen then
                   Next;
                   Expect (Lex.Tok_RParen, "')'");
@@ -3537,6 +3546,56 @@ package body O2c_Compiler is
                R.Typ := T_Int;
                R.Lit := False;
                return R;
+            end if;
+            if To_String (Mod_Name) = "Args"
+              and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "ARGGET")
+              and then O2c_BC.Bytecode_Mode
+            then
+               --  The builtin's own body: `ArgGet (n, arg, res)`.  Its three
+               --  names are the body's OWN PARAMETERS, and `arg`/`res` are
+               --  by-ref, so loading their slots yields the addresses native 13
+               --  wants - which is why this is three loads and a call, and why
+               --  the arguments are read as plain names rather than expressions.
+               --
+               --  The qualified `Args.Get (n, arg, res)` arm elsewhere is the
+               --  worked example; this is the same call reached by a bare name
+               --  from inside the module, the split 3fl described.
+               declare
+                  Nm2 : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after ArgGet");
+                  Next;
+                  declare
+                     N1 : constant String := Cur.Text (1 .. Cur.Len);
+                  begin
+                     Next;
+                     Expect (Lex.Tok_Comma, "',' after ArgGet's n");
+                     Next;
+                     declare
+                        N2 : constant String := Cur.Text (1 .. Cur.Len);
+                     begin
+                        Next;
+                        Expect (Lex.Tok_Comma, "',' after ArgGet's arg");
+                        Next;
+                        declare
+                           N3 : constant String := Cur.Text (1 .. Cur.Len);
+                        begin
+                           Next;
+                           Expect (Lex.Tok_RParen, "')' after ArgGet");
+                           Next;
+                           Bc_Load (Ada_Id (N1));
+                           Bc_Load (Ada_Id (N2));
+                           Bc_Load (Ada_Id (N3));
+                           O2c_Ir_Lower.Call_Native (13, 3);
+                           R.Text := To_Unbounded_String ("O2c_Arg_Get (...)");
+                           R.Typ := T_Int;
+                           R.Lit := False;
+                           return R;
+                        end;
+                     end;
+                  end;
+               end;
             end if;
             if To_String (Mod_Name) = "XYplane"
               and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "PLANEISDOT")

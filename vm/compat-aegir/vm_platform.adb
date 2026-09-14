@@ -194,6 +194,8 @@ package body VM_Platform is
       Aegir_User.CLI.Get_Line (S, L, E);
    end Get_Line;
 
+   function Arg_Count return Natural is (Aegir_User.CLI.Arg_Count);
+
    function Clock_Ms return Long_Integer is
       use type Aegir_User.Syscalls.U64;
       Sec, Ns : Aegir_User.Syscalls.U64;
