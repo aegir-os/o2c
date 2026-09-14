@@ -7187,6 +7187,34 @@ silent wrong answer into a named one - the rule the project states.  Then, separ
 `O2c_StrToReal` should exist as a native so ConvertTo works, which is the same question In's natives answered.
 The refusal alone is one edit and it retires the class member the audit missed.
 
+### 3gf. The refusal WORKS and cannot land - Reals needs RParse to compile
+
+The refusal its siblings have was added to the RParse arm, and it does exactly what it should:
+
+    the VarP probe, which printed a silent 0.000   ->  o2c error: bytecode backend: Reals.RParse is not yet
+                                                       supported
+
+A silent wrong answer became a named one.  And then the suites said the rest:
+
+    run_bc: FAIL (152)   bytecode_gaps: FAIL (41 entries)   differential: FAIL (112)
+
+**Because Reals ITSELF uses RParse.**  Its ConvertTo is `x := RParse(str)`, so refusing that arm refuses the
+module the flip depends on - and everything importing Reals falls with it.  Same signature as every other
+flipped-builtin breakage, and the same conclusion: the refusal is right and it is not the fix, because the
+module has to COMPILE.
+
+So the fix is the other half of what the siblings got: an IMPLEMENTATION.  The Ada side already names it -
+`O2c_StrToReal` - and on that side it is a generated helper.  The bytecode side needs an equivalent, which
+means a native (a string-to-real parse) or a body in the builtin, and that is the same shape In's natives
+answered: string handling on the guest, in Ada, reachable through the seam.
+
+That is now unambiguous, and it is the last thing between the corpus and `Reals.ConvertTo` working rather than
+lying.  Worth noting where this ended up: four turns of narrowing found the root cause, and the root cause says
+the fix is a missing implementation rather than a missing guard - the guard was the right instinct, and the
+module's own dependency is what makes it insufficient.
+
+Reverted, tree green.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
