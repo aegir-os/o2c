@@ -6312,6 +6312,17 @@ tree does not stand.  The measurement stands, though, and reading the site pins 
   found unwritten for user procedures.  The corpus has now met it twice from opposite directions - a builtin
   written in Oberon is the first source that WANTS it.
 
+**And reading the factor arm again explains why it did not fire.**  That arm is inside the dispatch for
+`Mod_Name`-QUALIFIED members - it recognises `Input.Available`, `Input.Read`, `Input.Time` as written by a
+program that IMPORTS Input.  The builtin's own body never qualifies anything: its source is `return InAvail`,
+a bare name.  So the arm was correct for callers and irrelevant for the body being compiled, and the
+recognition has to exist in the BARE-NAME path as well - which is the same conclusion, reached from the
+other side, and it is why two sites and not one.
+
+The line number moved between readings (10042 then ~10016) because the first was taken with the flip and the
+arm applied, before the revert: another reminder that a line number is only meaningful next to the revision
+it was read from.
+
 Then flip / fixture / gate, and the fixture can be deterministic: with no stdin, `Available` is 1 (the
 terminator) and `Read` gives `Character'Val (0)`, which is what the Ada helper returns.
 
