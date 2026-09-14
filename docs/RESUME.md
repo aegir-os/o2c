@@ -6383,6 +6383,33 @@ each with the same structure: a bare name inside the module, a qualified name ou
 between.  Fixing Input's qualified arm and doing the same for those is one pattern applied three times,
 which is a much better position than three separate investigations.
 
+### 3ff. The qualified refusal is a MARKER, and the right fix is not to add Input to the FFI surface
+
+Reading the arm at 4090 shows it is not a per-member decision at all:
+
+    --  MARKER_EXPR_REFUSAL: default refusal, as on the statement paths.
+    raise O2c_BC.Wrong_Construct with
+      "bytecode backend: " & FNm & "." & MName & " is not yet supported";
+
+It fires because the QUALIFIED dispatch is a hand-written FFI surface - it knows `XYplane.IsDot` and
+`Math_Native` by name - and anything it does not recognise falls through to that marker.
+
+**Which means the right fix is the opposite of adding three entries to it.**  `Input`'s procedures now EXIST
+AS SYMBOLS, because the module compiles (3fe).  So a caller's `Input.Available` should be resolved the
+ordinary way, like any other module's procedure - and one of the three makes that mandatory rather than
+merely tidier:
+
+    procedure Read*(var ch: char);
+
+`Read` takes a VAR parameter.  An FFI native takes addresses, which is how Convert.ToInt manages its two
+var formals - but `Read` does not need to be a native at all, because its own body is `ch := InReadCh`, and
+that resolves through the bare-name arm fixed in 3fe.  Adding `Input.Read` to the FFI surface would duplicate
+a body that already exists and is already compiled.
+
+So the change is to let symbol resolution serve Input's members on the qualified path, not to extend the
+surface.  That is a smaller change than the last three attempts at this file, and a different kind - worth
+recording before anyone starts adding cases to a marker that exists to catch what is missing.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
