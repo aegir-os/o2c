@@ -7429,6 +7429,38 @@ the VM does neither - `" 42"` and `"+7"` would differ between backends.  The pat
 ToInt and ToReal arms share that shape) and so applied to neither; it needs the two sites disambiguated.  The
 fixture does not cover it, and hello.ob2 does not reach it.
 
+### 3gn. LANDED: one helper for "push the address of a string actual"
+
+Five arms demanded a DECLARED ARRAY OF CHAR variable for a string argument and refused a literal:
+Convert.ToInt/ToReal, Convert.FromInt, Files.Delete, Files.Rename, Env.Get/Set, Args.Get.  Convert.ToInt was
+already fixed by materializing the literal; the right move was to stop copying that fix and factor it:
+
+    procedure Addr_Str_Actual (Text_Form : String; What : String);
+       --  a declared global -> Addr_Global of it
+       --  a literal         -> make a global, write the bytes and a NUL, Addr_Global of that
+       --  neither           -> raise, naming the caller
+
+**One global per literal OCCURRENCE, not per line**: `Env.Set ("O2CENV", "hello-env")` materializes two, and a
+line-keyed name would have made them share a slot - the first overwritten before use.  That is what the fixture
+covers, and it is why the fixture passes with both arguments as literals.
+
+Moved into place TWICE: first insert landed before `Ada_Id` (525) and `Total_Slots` (1213) and would not build
+("Find is undefined", "Ada_Id is undefined"), which is the same declaration-order trap this session hit with
+`Find` itself; then a `Statement_Seq` anchor matched both its spec (1829) and its forward declaration (7696), so
+it went before the FIRST.  Both are recorded because both were avoidable.
+
+Metric: `Env.Set needs declared ARRAY OF CHAR variables` -> `Err.Write is an FFI primitive and is not yet
+supported`.  New fixture tests/bc/envset.ob2 (8401).  Full gate green.
+
+**And the differential suite caught the fixture rather than the change**: `envset: ADA_BROKEN, and it is not a
+recorded Ada-side limit`.  That is the SAME environment limit as inputuse/argsuse - the emitted Ada reaches
+Aegir_User.CLI, a guest unit the host build lacks - so envset is recorded beside them, with the reason, and the
+corroborated count moved 66 -> 67.  The lesson: a new fixture makes the Ada-side bookkeeping a required part of
+landing it, and the suite says so rather than letting the count drift.
+
+Still to convert to the helper (recorded, not done): Files.Delete and Convert.FromInt.  They work as they are;
+they are duplicated code, which is what the helper exists to remove.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

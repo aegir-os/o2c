@@ -146,6 +146,7 @@ threadstress	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadyield	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 inputuse	ADA_BROKEN	the ADa side emits the builtin Input, whose body
 argsuse	ADA_BROKEN	the Ada side emits the builtin Args, whose body
+envset	ADA_BROKEN	the Ada side emits the builtin Env, whose body
 #  calls the same Aegir_User.CLI unit - the identical environment limit as
 #  inputuse above, and the same reason it is not a defect: the Ada backend is
 #  being removed.  The fixture stays because run_bc exercises what mattered -
@@ -153,7 +154,13 @@ argsuse	ADA_BROKEN	the Ada side emits the builtin Args, whose body
 #  no bytecode at all.
 #  calls Aegir_User.CLI - a GUEST unit the host differential build does not
 #  have.  A reasoned environment limit, not a defect: the Ada backend is being
-#  removed, which is why the bytecode backend exists.  The fixture stays because
+#  removed, which is why the bytecode backend exists.
+#  envset is the same again, one module further on: the Ada side emits the
+#  builtin Env (o2c_envset/o2c_envget), which reaches Aegir_User.CLI for the
+#  same reason.  The fixture stays because run_bc exercises what mattered - a
+#  string LITERAL passed where the arm demanded a declared variable, twice in
+#  one call, which used to refuse outright.
+#  The fixture stays because
 #  run_bc exercises the shape that mattered here - a parameterless qualified
 #  call - and that is the backend under development.
 #  CASE is the cause of the three "conflicts with a declaration" entries, and

@@ -374,6 +374,8 @@ package body O2c_Compiler is
       end if;
    end Bc_Load;
 
+
+
    procedure Bc_Store (Ada_Name : String) is
       S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
    begin
@@ -1769,6 +1771,63 @@ package body O2c_Compiler is
 
    --  forward specs
    function Parse_Expr return Expr_Rec;
+
+   --  Push the ADDRESS of a string actual, which is what the string natives
+   --  dereference (see o2c_conv_toint's own comment in the VM: "the three
+   --  arguments are addresses into the VM's own Globals").  A declared ARRAY OF
+   --  CHAR global contributes its own address.  A LITERAL has no global, so one
+   --  is made and the characters and their NUL are written into it, one byte
+   --  per store: Store_Idx has no 4-byte form, and a narrower store means no
+   --  packing, no byte order and no ASCII-only restriction.  Push_Str is NOT
+   --  usable here - it pushes a POOL OFFSET into the CONST payload, a different
+   --  kind of value with the same width, which is why a literal used to refuse.
+   --
+   --  One global per literal OCCURRENCE, not per line: `Env.Set ("a", "b")`
+   --  materializes two and they must not share a slot.
+   procedure Addr_Str_Actual (Text_Form : String; What : String);
+
+   N_Lit_Global : Natural := 0;
+
+   procedure Addr_Str_Actual (Text_Form : String; What : String) is
+      SId : constant Natural := Find (Text_Form);
+   begin
+      if SId /= 0 and then Syms (SId).UT /= 0 then
+         O2c_Ir_Lower.Addr_Global (Ada_Id (Text_Form),
+                                   Total_Slots (Syms (SId).UT));
+      elsif Text_Form'Length >= 2
+        and then Text_Form (Text_Form'First) = '"'
+        and then Text_Form (Text_Form'Last) = '"'
+      then
+         declare
+            Lit   : constant String :=
+              Text_Form (Text_Form'First + 1 .. Text_Form'Last - 1);
+            Gnm   : constant String :=
+              "o2c_lit_" & Natural'Image (N_Lit_Global);
+            Words : constant Natural := (Lit'Length + 1) + 1;
+            I     : Natural := 0;
+         begin
+            N_Lit_Global := N_Lit_Global + 1;
+            while I < Lit'Length loop
+               O2c_Ir_Lower.Addr_Global (Ada_Id (Gnm), Words);
+               O2c_Ir_Lower.Push_Int (I);
+               O2c_Ir_Lower.Push_Int (Character'Pos (Lit (Lit'First + I)));
+               O2c_Ir_Lower.Store_Idx (1);
+               I := I + 1;
+            end loop;
+            --  The NUL, written rather than assumed.
+            O2c_Ir_Lower.Addr_Global (Ada_Id (Gnm), Words);
+            O2c_Ir_Lower.Push_Int (Lit'Length);
+            O2c_Ir_Lower.Push_Int (0);
+            O2c_Ir_Lower.Store_Idx (1);
+            --  The base is the argument.
+            O2c_Ir_Lower.Addr_Global (Ada_Id (Gnm), Words);
+         end;
+      else
+         raise O2c_BC.Wrong_Construct with "bytecode backend: " & What
+           & " needs declared ARRAY OF CHAR variables";
+      end if;
+   end Addr_Str_Actual;
+
    procedure Statement_Seq (Stop_On_Else : Boolean := False;
                               Stop_On_Until : Boolean := False;
                               Stop_On_Bar : Boolean := False);
@@ -8481,24 +8540,9 @@ package body O2c_Compiler is
                                  --  Files.Rename (from, to): the exported
                                  --  form of FRename.  Two names, no result.
                                  for K in 1 .. 2 loop
-                                    declare
-                                       ANm : constant String :=
-                                         To_String (Arg_R (K).Text);
-                                       AId : constant Natural := Find (ANm);
-                                    begin
-                                       if AId = 0
-                                         or else Syms (AId).UT = 0
-                                       then
-                                          raise O2c_BC.Wrong_Construct with
-                                            "bytecode backend: Files.Rename "
-                                            & "needs declared ARRAY OF CHAR "
-                                            & "variables";
-                                       end if;
-                                       O2c_Ir_Lower.Addr_Global
-                                            (Ada_Id (ANm),
-                                             Total_Slots
-                                               (Syms (AId).UT));
-                                    end;
+                                    Addr_Str_Actual
+                                      (To_String (Arg_R (K).Text),
+                                       "Files.Rename");
                                  end loop;
                                  --  Native id 10: foreign entry 6.
                                  O2c_Ir_Lower.Call_Native (10, 2);
@@ -8514,25 +8558,9 @@ package body O2c_Compiler is
                                  --  opposite direction, so only the native
                                  --  id differs.
                                  for K in 1 .. 2 loop
-                                    declare
-                                       ANm : constant String :=
-                                         To_String (Arg_R (K).Text);
-                                       AId : constant Natural := Find (ANm);
-                                    begin
-                                       if AId = 0
-                                         or else Syms (AId).UT = 0
-                                       then
-                                          raise O2c_BC.Wrong_Construct with
-                                            "bytecode backend: Env."
-                                            & To_String (MName) & " needs "
-                                            & "declared ARRAY OF CHAR "
-                                            & "variables";
-                                       end if;
-                                       O2c_Ir_Lower.Addr_Global
-                                            (Ada_Id (ANm),
-                                             Total_Slots
-                                               (Syms (AId).UT));
-                                    end;
+                                    Addr_Str_Actual
+                                      (To_String (Arg_R (K).Text),
+                                       "Env." & To_String (MName));
                                  end loop;
                                  --  Native ids 11 and 12: foreign 7 and 8.
                                  O2c_Ir_Lower.Call_Native
