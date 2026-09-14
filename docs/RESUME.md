@@ -6277,6 +6277,31 @@ them, which is the honest caveat: the arm cannot be reached from source yet.
 (`VmGreet.obc`), so they can be tested before the compiler can name them; then the flip, a fixture, and the
 gate.
 
+### 3fc. Input, piece 3: the arm is right, and there is a SECOND site - the bare-name call
+
+The compiler arm was written as designed - the 3602 refusal replaced by three `Call_Native (41..43, 0)`
+emissions, mirroring the Ada branch below it - and the flip turned on.  Two results, and the second is the
+finding.
+
+The metric moved: `Input's InAvail/InReadCh/InTime is not yet supported` became
+
+    o2c error: 'InAvail' is not a declared procedure (line  5)
+
+Line 5 of `Oak_Input_Src` is `return InAvail` - and that message has a single site, at 10042, in the
+PARAMETERLESS-CALL dispatch:
+
+    if Idx = 0 or else Syms (Idx).Kind /= S_Proc then
+       raise O2c_Error with "'" & Head (1 .. H_Len) & "' is not a declared procedure (line " ...
+
+So there are TWO places an FFI name is recognised, and the arm at 3602 is on the FACTOR path.  `return
+InAvail` is a bare name with no parentheses, so it takes the parameterless-call path instead - the same path
+the earlier session had to fix for USER procedures, and for the same reason: the corpus never wrote that
+shape, so nothing exercised it.  `InAvail` is not a symbol, so `Idx = 0` and it refuses.
+
+**Reverted, not landed** - `run_bc` was FAIL (150) while the flip was on without that second site, and a red
+tree does not stand.  The measurement stands, though, and it is the whole of the remaining work: the same
+recognition at the parameterless-call site, then flip / fixture / gate.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
