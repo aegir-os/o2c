@@ -7325,6 +7325,42 @@ program is right.  Three times in this stretch the metric moved and the gate was
 correct; this time the metric moved and the change was WRONG, and only the fixture could tell the difference.
 That is why the fixtures exist, and it is the argument for writing one FIRST rather than after the metric moves.
 
+### 3gk. WHY the literal path failed: a string has TWO representations
+
+`o2c_ir_lower.adb:590` lowers a `V_Const_Str` and its comment is the whole answer:
+
+    elsif I.Kind = V_Const_Str then
+       --  A string constant: its pool word holds the offset of the text inside
+       --  the CONST payload, which is what the VM's string ops consume.
+       O2c_BC.Push_Str (To_String (I.Name));
+
+and `O2c_BC.Push_Str` is the label emitter: `Put_Byte (16#14#)` - LOAD_CONST - plus `Add_Word (0)`, with a
+`Str_Words` entry that Encode patches to the text's offset in the CONST payload.
+
+**So a string has two representations in this VM and they are DIFFERENT KINDS OF VALUE:**
+
+    Push_Str    -> the POOL OFFSET of the text inside the CONST payload   (a literal)
+    Addr_Global -> the ADDRESS of the array's slots                       (a variable)
+
+The Convert.ToInt arm hands its first argument with `Addr_Global`, so the NATIVE expects an ADDRESS.  Replacing
+that with `Push_Str` hands it a POOL OFFSET - a different kind of value with the same bit width, which is why
+the compile succeeds and the verifier rejects the image.  `Push_Str` was never a drop-in for `Addr_Global`; the
+two are not two routes to one value, they are two value kinds.  That is the thing to check before reaching for
+either one again.
+
+**The fix shape, therefore**: for a literal first argument the arm must produce an ADDRESS, which means
+materializing the literal into storage whose address can be taken (a compiler-made global/temp slot), not
+pushing the pool offset.  The alternative - teaching the native the pool-offset form as well - would put the
+distinction into every string native instead of in the one place that creates the value.
+
+Ruled out along the way, by reading rather than guessing, so nobody repeats it:
+  - `Const_Str` emits NO quad (it is only `Add_Value (Kind => V_Const_Str, ...)`), so the argument-to-quad
+    mapping that `Call_Native` uses (`First := Quad_Count - Arity + 1`) is NOT shifted by using Push_Str.
+  - `Push_Str` contributes exactly ONE quad, like `Addr_Global`.
+  - The literal factor at 3028 uses the very same `O2c_Ir_Lower.Push_Str`, so the function is not broken in
+    isolation - it is simply for a different value kind.
+  - `Bad_Code` comes from the VERIFIER (site 1008 and 1119-1158), not the runtime `Note_At` sites (1118/1122).
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
