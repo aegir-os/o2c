@@ -6493,6 +6493,29 @@ run.  Both remaining items are small and named - arrange the Ada `with`, and mat
 refusal text - and both were found by suites rather than by reasoning, which is the third time in this
 stretch that the gate has been the thing that knew.
 
+### 3fj. Both blockers measured - and one of them corrects 3fh
+
+Two greps, and each of the two failures now has a named fix.
+
+**1. `XYplane.Key` USED TO COMPILE.**  The suite's message is "XYplane no longer compiles", and its fixture
+line is `if XYplane.Key = CHR(0) then i := 1 else i := 0 end;` - an ordinary parameterless qualified call.
+So the shape was never missing a branch at all: the FFI surface below the imported-member path HANDLES it for
+the modules it knows.  My branch, placed BEFORE that surface, shadowed `XYplane.Key` and refused it - so
+`bytecode_gaps` was right and 3fh's "the `S_Proc` handling assumes parentheses" was too narrow a reading.
+
+The correct place is therefore not "a new branch beside S_Const" but AT THE MARKER: the marker exists to
+catch what nothing handled, so the fix is to try symbol resolution THERE, before raising.  That is what 3ff
+meant by "let symbol resolution serve Input's members" - and it keeps every FFI entry ahead of it, which is
+exactly what my shadowing branch got wrong.
+
+**2. The Ada `with` has a mechanism already**: `Body_Withs` (203), added-to at 454-462, emitted at 11049, and
+gated for builtins by `Emits (...)` (12810+).  A module using `Input.Available` must get `with Input;` the
+same way - which is a call at the point the usage is recognised, not a new subsystem.
+
+So the remaining change is: at the marker, resolve the member; if it is a procedure with a non-zero `Bc`,
+emit the call AND arrange the `with`; otherwise raise exactly as now.  Two call sites, one condition, and
+both are already-measured mechanisms rather than new ones.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
