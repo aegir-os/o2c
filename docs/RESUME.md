@@ -6811,6 +6811,36 @@ Two notes for the future, both recorded rather than fixed:
 * `differential` records `argsuse` as an Ada-side limit with its reason, the same guest-RTS unit as
   `inputuse` - a limit that retires with the Ada backend.
 
+### 3ft. In: the arms are right and the VALUES are missing - one probe away
+
+Three arms written, mirroring the patterns that landed for Input and Args:
+
+* the `INCHAR`/`ININT`/`INLONG`/`INREAL` bare family: refusal removed, `Call_Native (22..25, 0)` beside the Ada
+  text.  All four natives already existed for the qualified path.
+* `INOPEN`: `Call_Native (19, 0)` beside its `O2c_In_Reset` append.
+* `INSTRING`/`INNAME`: `Call_Native (20 | 21, 1)` with the body's own by-ref ARRAY OF CHAR slot as the address
+  - the Args.ArgGet shape.
+
+With the flip on, `run_bc` PASSES (down from FAIL 152).  But `bytecode_gaps` - which has a probe of its own for
+In - reports:
+
+    In printed 'helloworld', expected helloworld42882.500
+
+**The text is right and the numbers are absent**, so the values never appear: `In.Int` and `In.Real` produce
+nothing.  Their bodies are `x := InInt()` and `x := InReal()` - an assignment to a BY-REF parameter whose
+right-hand side is the native call.  That store takes `[base, index, value]`, with the base and index pushed
+BEFORE the right-hand side is parsed, so the call's result must land between them and the STORE_IDX.  A native
+call as the right-hand side of a by-ref store is therefore the suspect - the same family as the by-ref and
+up-level work earlier, and the disassembler is the instrument that settles it: the In probe's body shows
+whether the call sits before or after the store's base and index.
+
+Also worth recording: an unrelated `run_bc: host build failed` appeared in one background run and did not
+reproduce on a re-run - the suites each build the host tool, and one of them raced.  Noted rather than chased;
+if it recurs, that is the thing to look at.
+
+Reverted, tree green: run_bc PASS and bytecode_gaps PASS.  What is left for In is the by-ref store with a call
+on the right, measured the same way the last four defects were.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
