@@ -7063,6 +7063,37 @@ to work, so the difference is the BODY's shape) against `ConvertTo`'s actual bod
 
 Six consecutive turns have ended by putting two emissions side by side.  It is now the method, not a trick.
 
+### 3gb. ROOT CAUSE FOUND: RParse does not exist, and the compiler made it a global
+
+`ConvertTo`'s body is `x := RParse(str)`, and grepping the whole builtin for `RParse` returns ONE line - the
+call.  Nothing declares it, in Reals or anywhere.
+
+So the fault is not the by-ref store, the array parameter, the scalar type or the module boundary - all of
+which my probes cleared in turn.  It is that **a call to a name that does not exist is silently resolved to a
+module global**, and `RParse(str)` then emits the by-ref actual's address machinery instead of a call, which is
+what puts an address into `x`.
+
+That is the silent-wrong-answer class this project's rules forbid, and it had not been caught anywhere: the
+backend refuses for FFI names it knows are unsupported, and refuses for constructs it cannot lower, but an
+unresolved CALL falls through to a global without a word.
+
+**Two fixes, and they are different in kind:**
+
+* the SOURCE: `Oak_Reals_Src` is a test builtin and its `ConvertTo` should not call a procedure that does not
+  exist.  Either it wants a real body for `RParse`, or - more likely, given the name and its company - it
+  wants an FFI helper the way In wants `InChar`, in which case it needs an arm and a native.
+* the COMPILER: an unresolved name in call position should refuse rather than become a global.  The project
+  has a rule for exactly this shape - a construct that silently produces a wrong answer must be refused - and
+  this is a construct that has been producing one.
+
+**And it is worth asking what else this has been hiding.**  In's STORAGE_ERROR is a different fault (the
+emission there is correct and the address is bad), but the same question applies: `In.Int`'s body calls
+`InInt()`, which the arm handles - so In is not this.  Any builtin that calls an undeclared name would be,
+though, and the check is one grep per builtin.
+
+Six consecutive turns ended with two emissions side by side; this one ended with a grep, and the grep was
+possible only because the six had narrowed it to a single line of source.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
