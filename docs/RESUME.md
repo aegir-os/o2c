@@ -6185,6 +6185,42 @@ only one of them forbids writing to a parameter.
 
 Gate 7/7 PASS; `tests/bc/termuse.out` now carries the 256-colour bytes.
 
+### 3ez. Input is NOT a flip - it is the boundary to the runtime, and the seam already exists
+
+`Input` was the next module in the chain and looked like `Reals` and `Term`.  It is not, and two measurements
+say so before any code.
+
+**It IS compilable Oberon** - `Oak_Input_Src` is 26 lines with real bodies - **but those bodies reference
+three names nothing in them declares**:
+
+    procedure Available*: integer;   begin   return InAvail   end Available;
+    procedure Read*(var ch: char);   begin   ch := InReadCh   end Read;
+    procedure Time*: longint;        begin   return InTime    end Time;
+
+They come from `Aegir_User.Console` - the Ada side `with`s it - so they are the RUNTIME'S input and clock
+services, and the bytecode backend has no equivalent.  Flipping it proves the point: the metric advances
+(`Input's InAvail/InReadCh/InTime is not yet supported`) and `run_bc` goes to **FAIL (150)**, because nearly
+everything imports Input.
+
+**And the refusal is deliberate, with the author's reasoning in the comment**: this arm appends Ada text and
+makes no bytecode call, so a flipped builtin's body would compile, run, and quietly do nothing.  That is the
+same silent-wrong-answer class as 3ec/3eh, already guarded.
+
+**What the job actually is, measured:**
+
+* the VM HAS an Aegir target (`make vm-aegir`, `vm/vm_aegir.gpr`, `compat-aegir/`) - so binding the console
+  is feasible rather than blocked;
+* `VM_Platform` is the established seam: **spec shared, body per platform** (host: files, env, args,
+  `Get_Line`, exit; aegir: the same through `Aegir_Interface` + CLI).  Console input already has a home
+  there, and `InAvail`/`InReadCh`/`InTime` belong beside `Get_Line`;
+* the compiler has an M48 FFI arm immediately below the refusal - so the emission side has a pattern to
+  follow, and the new ids are append-only like every other table.
+
+So the unit is four pieces, none of them a survey: three services in the `VM_Platform` seam (host and aegir
+bodies), three natives appended to the VM's foreign table, the compiler's arm changed from refuse to emit,
+then flip / fixture / gate.  Next run executes it; nothing is landed here beyond the measurement and the
+revert.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
