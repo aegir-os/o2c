@@ -6410,6 +6410,33 @@ So the change is to let symbol resolution serve Input's members on the qualified
 surface.  That is a smaller change than the last three attempts at this file, and a different kind - worth
 recording before anyone starts adding cases to a marker that exists to catch what is missing.
 
+### 3fg. The qualified refusal is NOT Input-specific - it is the parameterless qualified call
+
+3ff concluded the fix was "let symbol resolution serve Input's members".  Measuring where `"Input"` appears
+on the qualified path corrects that: it appears in exactly three places, and none of them is a surface that
+intercepts `Input.X` -
+
+    3589   the bare-name arm (3fe), guarded by Mod_Name = "Input" - inside the module
+    11067  Ada-text generation for the O2c_In_* helpers
+    11463  the same, for the module body
+    12947  Emits ("Input") - the module list
+
+So nothing is intercepting `Input` by name, and `Reals.Convert (r, s)` proves qualified calls to a flipped
+module already work.  The difference is the SHAPE:
+
+    Reals.Convert (r, s)   has parentheses - works
+    Input.Available        has NONE       - falls to the MARKER_EXPR_REFUSAL
+
+**It is the parameterless qualified call**, which is the same gap the earlier session recorded for user
+procedures - "a parameterless FUNCTION has had no fixture anywhere" - now met from the library side.  That
+makes the remaining work a general parser improvement rather than three Input-specific arms, and it is worth
+having found before writing them: the fix that was about to be written would have added cases to a marker for
+a shape that the module list does not even mention.
+
+The three builtins at 3527/3677/4091 stay on the list, but they are one shape - a bare name inside a builtin,
+a qualified name outside it - and this entry says what the outside half actually needs: the parameterless
+qualified call, handled once.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
