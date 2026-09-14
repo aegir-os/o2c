@@ -13,3 +13,5 @@ tools/bin/
 /o2c_lexer.o
 /o2c_bc.ali
 /o2c_bc.o
+__pycache__/
+*.pyc
