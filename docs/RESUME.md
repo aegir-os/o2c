@@ -6221,6 +6221,34 @@ bodies), three natives appended to the VM's foreign table, the compiler's arm ch
 then flip / fixture / gate.  Next run executes it; nothing is landed here beyond the measurement and the
 revert.
 
+### 3fa. Input, piece 1: the seam's clock - and the Ada helpers read at last
+
+The three names were traced to their Ada implementation, which is GENERATED into the emitted program
+rather than living in a package - so reading them defines the job exactly:
+
+    O2c_In_Cload   loops Aegir_User.CLI.Get_Line into a 4096-byte buffer, appending LF each round
+    O2c_In_Avail   Cload; return In_C_Len - In_C_Pos + 1        (buffered chars plus the terminator)
+    O2c_In_ReadCh  Cload; past the end returns Character'Val (0), else take one and advance
+    O2c_In_Time    Aegir_User.Syscalls.Read_Clock (Sec, Ns); return Sec * 1000 + Ns / 1_000_000
+
+**Two consequences, and they make the unit smaller than it looked:**
+
+* the INPUT side needs no new seam function at all.  `Available`/`Read` are LINE-BUFFERED - their Ada
+  helper loops on `Get_Line` - so the seam's existing `Get_Line` is the only primitive they need, and the
+  buffer belongs in the VM where both platforms share it;
+* the CLOCK needs exactly one, and its semantics are fixed by the Ada body: milliseconds since the epoch
+  the guest's syscall counts from.
+
+**Landed: `VM_Platform.Clock_Ms`** - spec plus both bodies, host from `Ada.Calendar` against the same 1970
+epoch, aegir from `Aegir_User.Syscalls.Read_Clock` with the generated helper's own arithmetic.  **Staged**:
+nothing calls it yet.  Verified by building BOTH targets, which is worth more than it looks - the aegir
+build is the only thing that checks the guest body, and it confirms `Read_Clock` is the real API rather
+than a name read out of generated text.
+
+**Still to do, in order**: the VM's line buffer plus three natives (`in_avail`, `in_readch`, `in_time`,
+appended); the compiler's arm changed from the 3602 refusal to emitting those natives in bytecode mode,
+which is the M48 FFI pattern sitting immediately below it; then flip, fixture and gate.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

@@ -1,4 +1,5 @@
 --  Host body of VM_Platform: no runtime bookkeeping, just an exit status.
+with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Direct_IO;
 with Ada.Directories;
@@ -215,6 +216,16 @@ package body VM_Platform is
          L := 0;
          E := True;
    end Get_Line;
+
+   function Clock_Ms return Long_Integer is
+      use type Ada.Calendar.Time;
+      --  The same epoch the guest's syscall counts from, so the two agree
+      --  instead of differing by the age of the machine.
+      Epoch : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (1970, 1, 1);
+      Elapsed : constant Duration := Ada.Calendar.Clock - Epoch;
+   begin
+      return Long_Integer (Elapsed * 1000.0);
+   end Clock_Ms;
 
    procedure Exit_With (Ok : Boolean) is
    begin

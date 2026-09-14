@@ -98,4 +98,16 @@ package VM_Platform is
    --  input genuinely differs between the two.
    procedure Get_Line (S : out String; L : out Natural; E : out Boolean);
 
+   --  Milliseconds on the same clock the Ada backend's generated helper reads,
+   --  because Input.Time must mean the same thing to both backends: the Ada side
+   --  is `Read_Clock (Sec, Ns)` returning `Sec * 1000 + Ns / 1_000_000`, so the
+   --  host answers from its calendar and the guest from the same syscall.
+   --
+   --  The INPUT primitives need nothing new here.  Oakwood's Input.Available /
+   --  Read are line-buffered - their Ada helper loops on Get_Line and hands out
+   --  characters from the buffer - so the seam's Get_Line is already the only
+   --  primitive they need, and the buffer belongs in the VM where both
+   --  platforms share it.
+   function Clock_Ms return Long_Integer;
+
 end VM_Platform;

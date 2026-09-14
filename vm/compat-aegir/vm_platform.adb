@@ -3,6 +3,7 @@
 --  output behaves like every other CLI program's.
 with Aegir_User.CLI;
 with Aegir_User.Files;
+with Aegir_User.Syscalls;
 with Aegir_Interface;
 with Interfaces;
 
@@ -192,6 +193,16 @@ package body VM_Platform is
       --  reading input behaves identically on both backends.
       Aegir_User.CLI.Get_Line (S, L, E);
    end Get_Line;
+
+   function Clock_Ms return Long_Integer is
+      use type Aegir_User.Syscalls.U64;
+      Sec, Ns : Aegir_User.Syscalls.U64;
+   begin
+      --  The Ada backend's generated O2c_In_Time body, called through the seam
+      --  instead of inlined: same syscall, same units.
+      Aegir_User.Syscalls.Read_Clock (Sec, Ns);
+      return Long_Integer (Sec) * 1000 + Long_Integer (Ns / 1_000_000);
+   end Clock_Ms;
 
    procedure Exit_With (Ok : Boolean) is
    begin
