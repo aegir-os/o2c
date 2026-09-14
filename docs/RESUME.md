@@ -6340,6 +6340,28 @@ measurements have each removed a wrong theory rather than adding code.  The next
 Then flip / fixture / gate, and the fixture can be deterministic: with no stdin, `Available` is 1 (the
 terminator) and `Read` gives `Character'Val (0)`, which is what the Ada helper returns.
 
+### 3fd. Input, piece 3: the arm needs a Next - and the whole "second site" theory was wrong
+
+The piece-3 arm was re-applied and failed identically to before, which is the useful result: the error did
+not change, so the arm was not doing what its text said.
+
+**The arm never consumed the identifier.**  The Ada branch immediately below it opens with `Next;` - the
+name is captured and then the lexer is advanced - and my branch returned without it.  So the statement loop
+received back an identifier it had already been given, and `return InAvail`'s own `Parse_Expr` produced a
+value from the arm while the loop then met `InAvail` again as a STATEMENT.  Hence "not a declared procedure"
+at line 5, both with the arm and without it: without it the refusal fired first, with it the refusal's
+replacement did, and the same name was still sitting under the cursor.
+
+**So the "second site" was never needed.**  The `Statement_Seq` raise at 10017 is not a second place that
+must learn the FFI names - it is the first place, seeing a name that the factor arm failed to spend.  That
+also explains why the earlier readings kept moving: they were readings of a bug in my own arm, not of two
+dispatch paths.
+
+The fix is three lines in the arm - capture the name into a local, `Next`, then dispatch on the local,
+exactly as the Ada branch does - and it was not written because the second patch's assertion caught a
+duplicated body and aborted before writing, leaving the tree in its red intermediate state.  Reverted to
+green, `run_bc: PASS`, and the fix is recorded rather than applied under a spent budget.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
