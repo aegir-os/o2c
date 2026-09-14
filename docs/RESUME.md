@@ -6570,15 +6570,21 @@ Three findings from getting here, each worth more than the patch:
 
 `run_bc` and `bytecode_gaps` pass, and `differential` passes again once the fixture is withdrawn.
 
-**The one blocker left, named exactly**: a fixture for this shape cannot pass `differential` yet, because the
-emitted Ada for the BUILTIN `Input` references `Aegir_User.CLI` - a guest RTS unit the host differential build
-does not have:
+**The blocker is resolved, and the fixture is in.**  `tests/differential.sh` has a recorded-limits list
+(a heredoc of `name<TAB>CLASS<TAB>reason`), so `inputuse` went into it - with the reason, because the list is
+read by people:
 
-    inputuse ada WILL NOT BUILD: input.adb:3:06: error: file "aegir_user-cli.ads" not found
+    inputuse  ADA_BROKEN  the Ada side emits the builtin Input, whose body calls Aegir_User.CLI - a GUEST
+              unit the host differential build does not have.  A reasoned environment limit, not a defect:
+              the Ada backend is being removed, which is why the bytecode backend exists.  The fixture stays
+              because run_bc exercises the shape that mattered - a parameterless qualified call.
 
-That is the category the suite calls "a recorded, reasoned Ada-side limit" (tests/differential.sh:296-329),
-and recording it is a one-line entry there.  It is also a limit that retires itself: the Ada backend is being
-removed, which is the whole reason the bytecode backend exists.
+Gate green with it: diff PASS (66 fixtures corroborated by both backends), run_bc PASS, and the other five.
+
+**`Input` is done.**  It taught more than the other five modules together, and the summary of what it taught
+is short: a builtin's own body is written in BARE names, so the marker that refuses bare calls is the place
+the backend's general answer belongs - and it took a probe rather than a reading to find, because the two
+markers share their text and my line numbers move under my own patches.
 
 ## 4. Method — what worked, and what did not
 

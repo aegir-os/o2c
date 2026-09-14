@@ -144,6 +144,12 @@ threadname	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadstart	ADA_REFUSED	refuses: procedure values as variables
 threadstress	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadyield	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
+inputuse	ADA_BROKEN	the ADa side emits the builtin Input, whose body
+#  calls Aegir_User.CLI - a GUEST unit the host differential build does not
+#  have.  A reasoned environment limit, not a defect: the Ada backend is being
+#  removed, which is why the bytecode backend exists.  The fixture stays because
+#  run_bc exercises the shape that mattered here - a parameterless qualified
+#  call - and that is the backend under development.
 #  CASE is the cause of the three "conflicts with a declaration" entries, and
 #  it is worth naming because it is a category, not three coincidences: ADA
 #  identifiers are case-INSENSITIVE and Oberon's are not, so a module with
