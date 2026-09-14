@@ -7242,6 +7242,32 @@ and that parser question is now a named gap of its own.
 So the comparison rule is not the whole set story - and the next step is either the parser's set expressions
 or the `lre` mismatch, whichever hello.ob2 reaches first.
 
+### 3gh. LANDED: REAL value -> LONGREAL target, and five refusals learned to say where
+
+Two advances, both from the same move: **make the refusal name its line**.  Applied to the whole
+`type mismatch assigning` family (five sites), the metric's message went from a bare name to a location
+instantly, exactly as it did for the comparison rule:
+
+    type mismatch assigning lre            ->   type mismatch assigning lre (line 478)
+    hello.ob2:478:  lre := MathL.ln(MathL.e);
+
+`lre` is `longreal` and `MathL.ln` is a NATIVE typed REAL, by the M4e decision that a LONGREAL is the same
+64-bit slot.  The assignment site (10345) accepted `T_Int`, a REAL **literal**, or `T_LReal` - and refused
+everything else:
+
+    if V.Typ = T_Int or else (V.Typ = T_Real and then V.Lit) then ... else raise ... end if;
+
+**Requiring a literal there was simply wrong.**  Both are the same 64-bit slot, the Ada side spells the widening
+`Long_Float (...)`, and the bytecode side needs no op at all.  Dropping `and then V.Lit` is the whole fix, and
+it is the third time in this work that a guard was one condition too narrow.
+
+Metric: `type mismatch assigning lre (line 478)` -> `Out.LongReal needs a LONGREAL argument`, and the full gate
+is green (run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_stress).
+
+**The next barrier is interesting**: `lre` IS declared `longreal` (hello.ob2:27), so `Out.LongReal(lre, 0)`
+hands it the right type and the refusal is about the compiler's VIEW of the argument rather than the source's.
+That is one grep at the `Out.LongReal` guard, and it is the next thing to measure.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

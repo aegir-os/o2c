@@ -8845,7 +8845,8 @@ package body O2c_Compiler is
                                            & ";");
                            else
                               raise O2c_Error with "type mismatch assigning "
-                                & MNm & "." & To_String (MName);
+                                & MNm & "." & To_String (MName)
+ & " (line " & Natural'Image (Cur.Line) & ")";
                            end if;
                         elsif V.Typ = T_Str
                           or else (Xs (XI).Typ /= V.Typ
@@ -8854,7 +8855,8 @@ package body O2c_Compiler is
                                                  and then V.Lit))
                         then
                            raise O2c_Error with "type mismatch assigning "
-                             & MNm & "." & To_String (MName);
+                             & MNm & "." & To_String (MName)
+ & " (line " & Natural'Image (Cur.Line) & ")";
                         else
                            Append_Body ("      " & Ada_Id (MNm) & "."
                                         & Ada_Id (To_String (MName))
@@ -10333,7 +10335,14 @@ package body O2c_Compiler is
                      end if;
                      if Syms (Idx).Typ = T_LReal then
                         if V.Typ = T_Int
-                          or else (V.Typ = T_Real and then V.Lit)
+                          --  A REAL value, not only a REAL LITERAL.  Both
+                          --  are the same 64-bit slot (M4e), so the widening
+                          --  is a conversion Ada spells `Long_Float (...)` and
+                          --  the bytecode needs no op at all - which is why
+                          --  requiring a literal here was wrong: it refused
+                          --  `lre := MathL.ln (MathL.e)`, where the callee is
+                          --  a native typed REAL by the same M4e decision.
+                          or else V.Typ = T_Real
                         then
                            Append_Body ("      " & Head (1 .. H_Len)
                                         & " := Long_Float ("
@@ -10343,7 +10352,8 @@ package body O2c_Compiler is
                                         & " := " & To_String (V.Text) & ";");
                         else
                            raise O2c_Error with "type mismatch assigning "
-                             & Head (1 .. H_Len);
+                             & Head (1 .. H_Len)
+ & " (line " & Natural'Image (Cur.Line) & ")";
                         end if;
                      elsif Syms (Idx).Typ = T_Real then
                         if V.Typ = T_Int then
@@ -10355,7 +10365,8 @@ package body O2c_Compiler is
                                         & " := " & To_String (V.Text) & ";");
                         else
                            raise O2c_Error with "type mismatch assigning "
-                             & Head (1 .. H_Len);
+                             & Head (1 .. H_Len)
+ & " (line " & Natural'Image (Cur.Line) & ")";
                         end if;
                      elsif V.Typ = T_Str
                        or else (Syms (Idx).Typ /= V.Typ
@@ -10364,7 +10375,8 @@ package body O2c_Compiler is
                                               and then V.Lit))
                      then
                         raise O2c_Error with "type mismatch assigning "
-                          & Head (1 .. H_Len);
+                          & Head (1 .. H_Len)
+ & " (line " & Natural'Image (Cur.Line) & ")";
                      else
                         Append_Body ("      " & Head (1 .. H_Len) & " := "
                                      & To_String (V.Text) & ";");
