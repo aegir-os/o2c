@@ -3598,8 +3598,42 @@ package body O2c_Compiler is
                --  compile, run, and quietly do nothing.  Refuse instead -
                --  the rule the two aggregates follow.
                if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Input's InAvail/InReadCh/InTime" & " is not yet supported";
+                  --  The bytecode side of the same three primitives: natives
+                  --  appended as ids 41..43, taking NO arguments and each
+                  --  returning one value.  Result stays on the operand stack
+                  --  where CALL left it, the shape every expression wants.
+                  --
+                  --  This replaced a refusal, which was right when written - the
+                  --  arm appended Ada text and made no bytecode call, so a
+                  --  flipped builtin's body would compile, run and quietly do
+                  --  nothing - and is right no longer now that the natives exist
+                  --  and the seam supplies what they need on both platforms.
+                  --
+                  --  The name is CAPTURED then CONSUMED, exactly as the Ada
+                  --  branch below does: without the Next, the statement loop
+                  --  re-reads the identifier this arm was handed and reports it
+                  --  as "not a declared procedure" - the very message this arm
+                  --  exists to stop producing.
+                  declare
+                     Nm : constant String := Cur.Text (1 .. Cur.Len);
+                  begin
+                     Next;
+                     if Eq_No_Case (Nm, "INAVAIL") then
+                        O2c_Ir_Lower.Call_Native (41, 0);
+                        R.Text := To_Unbounded_String ("O2c_In_Avail");
+                        R.Typ := T_Int;
+                     elsif Eq_No_Case (Nm, "INREADCH") then
+                        O2c_Ir_Lower.Call_Native (42, 0);
+                        R.Text := To_Unbounded_String ("O2c_In_ReadCh");
+                        R.Typ := T_Char;
+                     else
+                        O2c_Ir_Lower.Call_Native (43, 0);
+                        R.Text := To_Unbounded_String ("O2c_In_Time");
+                        R.Typ := T_Long;
+                     end if;
+                     R.Lit := False;
+                     return R;
+                  end;
                end if;
                --  M48 FFI: Input primitives (builtin Input module only)
                declare
@@ -12909,7 +12943,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Input_Src, Scoped => False);
+      Compile_Builtin (Oak_Input_Src, Scoped => True);
       if Emits ("Input") then
          --  Input: parsed above in every case, emitted
          --  only when something imports it (see Emits).

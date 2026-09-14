@@ -6362,6 +6362,27 @@ exactly as the Ada branch does - and it was not written because the second patch
 duplicated body and aborted before writing, leaving the tree in its red intermediate state.  Reverted to
 green, `run_bc: PASS`, and the fix is recorded rather than applied under a spent budget.
 
+### 3fe. LANDED: the arm with its Next, and Input flipped - the sixth module
+
+The three-line fix went in as ONE replacement this time, and the whole picture changed:
+
+* **`run_bc` PASSES with `Input` flipped** - down from 150 failures.  The builtin's body compiles now, which
+  is what the refusal existed to prevent it from doing *silently*;
+* the metric moves again, to a DIFFERENT arm: `Input.Available is not yet supported`.  That is the QUALIFIED
+  form - a program writing `Input.Available` - and it is the other half of the same pair.  The arm just fixed
+  serves the builtin's own body, which writes bare `InAvail`; the qualified arm (4091/4145) serves callers;
+* **the full gate is green**: run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_stress.
+
+So `Input` is module six, and the honest caveat is narrow: the flip makes the MODULE compile and its bare
+names resolve, but no user program can call through it yet, because the qualified arm still refuses.  That is
+a refusal rather than a wrong answer, which is the state this project's rules ask for.
+
+**And the shape is not unique to Input.**  The refusal list shows `Args.ArgCount in a builtin's own body`
+(3527) and `In's InChar/InInt/InLong/InReal` (3677) - two more builtins whose bodies call runtime services,
+each with the same structure: a bare name inside the module, a qualified name outside it, and a refusal in
+between.  Fixing Input's qualified arm and doing the same for those is one pattern applied three times,
+which is a much better position than three separate investigations.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
