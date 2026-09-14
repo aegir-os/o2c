@@ -2269,8 +2269,12 @@ package body OBC_VM is
                   V := -V;
                end if;
                Park (XP, V);
-               --  res is the Oakwood status: 0 for success.
-               Park (RP, 0);
+               --  res is the Oakwood status: 0 for success, -1 when no digit
+               --  was seen at all.  This was Park (RP, 0) unconditionally,
+               --  which made a failed conversion indistinguishable from a
+               --  successful one - "nope" reported success.  O2c_Conv_ToInt
+               --  has always returned -1 here; only the VM disagreed.
+               Park (RP, (if Any then 0 else -1));
                return Ok;
             end;
          when Max_Natives =>

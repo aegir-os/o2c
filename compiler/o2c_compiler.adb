@@ -8332,14 +8332,80 @@ package body O2c_Compiler is
                                     if SId = 0
                                       or else Syms (SId).UT = 0
                                     then
-                                       raise O2c_BC.Wrong_Construct with
-                                         "bytecode backend: Convert.ToInt "
-                                         & "needs a declared ARRAY OF CHAR "
-                                         & "variable";
+                                       --  Not a declared variable: a string
+                                       --  LITERAL.  It cannot be passed as
+                                       --  Push_Str, because that pushes a POOL
+                                       --  OFFSET into the CONST payload while
+                                       --  this native dereferences a real
+                                       --  ADDRESS (its own comment: "the three
+                                       --  arguments are addresses into the VM's
+                                       --  own Globals").  Two value kinds, not
+                                       --  two routes to one value.
+                                       --
+                                       --  So materialize it into a
+                                       --  compiler-made global and take THAT
+                                       --  address.  Four characters per word,
+                                       --  little-endian, matching how the
+                                       --  native reads bytes; a final zero word
+                                       --  supplies the NUL it scans for, and is
+                                       --  written rather than relied upon.
+                                       if SNm'Length < 2
+                                         or else SNm (SNm'First) /= '"'
+                                         or else SNm (SNm'Last) /= '"'
+                                       then
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: Convert.ToInt "
+                                            & "needs a declared ARRAY OF CHAR "
+                                            & "variable";
+                                       end if;
+                                       declare
+                                          Lit : constant String :=
+                                            SNm (SNm'First + 1
+                                                 .. SNm'Last - 1);
+                                          Gnm : constant String :=
+                                            "o2c_lit_"
+                                            & Natural'Image (Cur.Line);
+                                          Words : constant Natural :=
+                                            (Lit'Length + 4) / 4 + 1;
+                                          I : Natural := 0;
+                                          K : Natural := 0;
+                                       begin
+                                          --  ONE BYTE PER STORE.  Store_Idx
+                                          --  has no 4-byte form ("no indexed
+                                          --  store of 4 bytes"), and a
+                                          --  narrower store is the whole of
+                                          --  the fix: no packing means no
+                                          --  Integer overflow, no byte order to
+                                          --  get wrong, and no ASCII-only
+                                          --  restriction.  It costs four
+                                          --  instructions a character, which a
+                                          --  string literal can afford.
+                                          while I < Lit'Length loop
+                                             O2c_Ir_Lower.Addr_Global
+                                               (Ada_Id (Gnm), Words);
+                                             O2c_Ir_Lower.Push_Int (K);
+                                             O2c_Ir_Lower.Push_Int
+                                               (Character'Pos
+                                                  (Lit (Lit'First + I)));
+                                             O2c_Ir_Lower.Store_Idx (1);
+                                             I := I + 1;
+                                             K := K + 1;
+                                          end loop;
+                                          --  The NUL, written not assumed.
+                                          O2c_Ir_Lower.Addr_Global
+                                            (Ada_Id (Gnm), Words);
+                                          O2c_Ir_Lower.Push_Int (K);
+                                          O2c_Ir_Lower.Push_Int (0);
+                                          O2c_Ir_Lower.Store_Idx (1);
+                                          --  The base is argument 1.
+                                          O2c_Ir_Lower.Addr_Global
+                                            (Ada_Id (Gnm), Words);
+                                       end;
+                                    else
+                                       O2c_Ir_Lower.Addr_Global
+                                            (Ada_Id (SNm),
+                                             Total_Slots (Syms (SId).UT));
                                     end if;
-                                    O2c_Ir_Lower.Addr_Global
-                                         (Ada_Id (SNm),
-                                          Total_Slots (Syms (SId).UT));
                                  end;
                                  O2c_Ir_Lower.Addr_Global
                                       (Ada_Id (To_String (Arg_R (2).Text)), 1);

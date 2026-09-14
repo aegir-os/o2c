@@ -7396,6 +7396,39 @@ NUL.  Two candidate routes, and the first is the one to try:
 
 Recorded with the fixture still parked at /tmp/convint_pending.ob2, which is what caught the first attempt.
 
+### 3gm. LANDED: Convert.ToInt takes a string literal - the literal is materialized
+
+Three attempts, and the first two were wrong in instructive ways.  The fixture caught the first; the compiler and
+VM caught the second and third.
+
+**Attempt 1 - `Push_Str`.** Rejected by the VM as "malformed code".  `Push_Str` pushes a POOL OFFSET into the
+CONST payload; this native dereferences a real ADDRESS (its own comment says so).  Two value kinds.
+
+**Attempt 2 - materialize as one packed word per four characters.**  `CONSTRAINT_ERROR: overflow check failed`:
+`S := S * 256` overflows Integer by the fourth byte.  Rewritten with explicit per-byte constants - and then the
+emitter refused it anyway: `no indexed store of 4 bytes`.  Store_Idx has no 4-byte form.
+
+**Attempt 3 - one byte per store.**  No packing, so no overflow, no byte order to get wrong, no ASCII-only
+restriction.  It costs four instructions a character, which a string literal can afford.  This works:
+
+    8310        Convert.ToInt ("8311", n, res) -> n = 8311, res = 0
+
+and then the second case exposed a SECOND bug, in the VM:
+
+    Park (RP, 0);        --  always 0, so a failed conversion reported success
+
+while the generated Ada helper `O2c_Conv_ToInt` has always done `Res := -1` when no digit was seen.  Fixed to
+`Park (RP, (if Any then 0 else -1))`, and the fixture now reads 8310 / 8315 - hello.ob2's own expected values.
+
+Landing together: the compiler change, the VM change, and `tests/bc/convint.ob2` + its golden.  The fixture was
+written BEFORE the fix this time, which is why the first (wrong) attempt was caught rather than landed.
+Full gate green: run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_stress.
+
+**Still divergent, and recorded rather than fixed**: the Ada helper also skips leading spaces and accepts '+',
+the VM does neither - `" 42"` and `"+7"` would differ between backends.  The patch for it matched TWICE (the
+ToInt and ToReal arms share that shape) and so applied to neither; it needs the two sites disambiguated.  The
+fixture does not cover it, and hello.ob2 does not reach it.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
