@@ -6466,6 +6466,33 @@ Not written: reading the existing `S_Proc` arm below (3975+) is the last step, s
 conventions rather than inventing its own - and the last three attempts at this file are the argument for
 reading it first.
 
+### 3fi. The parameterless qualified call WORKS - and two suites say what it still owes
+
+The branch was written (in the imported-member path, before the record-variable case), it built first time
+once it used the right field - `Xs (XI).Bc`, whose own comment gives the rule the branch then followed:
+
+    The bytecode procedure id, when this procedure's code is IN the image.  Zero means "not compiled to
+    bytecode", and that IS the signal a call site uses to choose between calling it and refusing.
+
+**It works.**  `Input.Available` from a user module now compiles and runs, and prints 0 - which is the
+CORRECT value, not a bug: `Available` is `In_C_Len - In_C_Pos + 1`, and with no input that is `0 - 1 + 1`.
+The `+1` is the terminator when there is content.  `run_bc` passes with the new fixture.
+
+**And two suites failed, each naming exactly what the branch still owes:**
+
+* **differential: `inputuse: ADA_BROKEN`** - the emitted Ada contains `Input.Available`, and the Ada program
+  does not `with Input`.  The branch produces the member's Ada text as the CONST and VAR branches above it
+  do, which is right in principle - the builtin's own module IS emitted - but the WITH must be arranged too,
+  and that is a separate mechanism (the emit list).
+* **bytecode_gaps: `XYplane.Key is not compiled to bytecode`** - that suite pins the exact refusal text for
+  gaps, and my new `Bc = 0` refusal replaced the message it expects for `XYplane.Key`.  The refusal is right;
+  its WORDING is now a pinned interface.
+
+Reverted, not landed: the committed state is green and the branch is preserved in this entry for the next
+run.  Both remaining items are small and named - arrange the Ada `with`, and match or update the pinned
+refusal text - and both were found by suites rather than by reasoning, which is the third time in this
+stretch that the gate has been the thing that knew.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
