@@ -6762,6 +6762,27 @@ qualified call arms, in the one place nobody looked: a READ rather than a call.
 Reverted, tree green; the Args arms and native stay staged.  The next step is that branch: emit the bytecode
 load beside the Ada text, the way the call arms now emit beside their Ada text.
 
+### 3fr. The read fix is one call - and the open question is the global's NAME
+
+`Load_Global (Name)` is the right instrument and it is already safe on both paths: its first statement
+returns unless `O2c_BC.Bytecode_Mode`, so the `S_Var` branch can call it unconditionally beside the Ada text,
+exactly as the call arms emit beside theirs.  One call, no new machinery.
+
+**What is NOT settled is the name, and the disassembly says why.**  The two sides disagree:
+
+* the builtin's own `count` is stored to global slot 2 - proc 37 is exactly `CALL_NATIVE [44, 0];
+  STORE_G [2]`, i.e. the module body doing `count := ArgCount` with native 44;
+* the importer's read compiled to global slot 4, under the key `Args.count`.
+
+Two slots, two globals: the builtin interned a global called `count` and the importer asked for one called
+`Args.count`, so the read never sees the write.  `New_Global` keys by NAME, so the fix is to make the two
+sides agree - and which side moves is one measurement, not a guess: what does the builtin's own declaration
+intern, and does any existing qualified read in the corpus already work (which would show the convention).
+
+That is the whole remaining question for Args, and it is small and concrete: one call plus the right key.
+Everything else - the seam clock, the count native, both call arms - is landed and verified, with the flip
+off so the tree stays green.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
