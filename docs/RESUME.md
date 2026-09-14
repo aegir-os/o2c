@@ -7003,6 +7003,34 @@ narrowed by fixtures that FAIL, but the shape of the fault gets narrowed by fixt
 
 None of this needed a flip or a builtin, and no compiler change was made - the tree is green.
 
+### 3fz. The two call sites side by side: identical in structure, so the fault is in the CALLEE
+
+The comparison 3fy asked for, and it clears the caller completely:
+
+    ConvertTo (FAILS):  LOAD_ADDR_G[3]  LOAD_G[3] DROP  LOAD_CONST[286]  LOAD_CONST[287]  CALL[4716]
+    Args.Get  (WORKS):  LOAD_CONST[286] LOAD_ADDR_G[3] LOAD_CONST[287]  LOAD_ADDR_G[4] LOAD_G[4] DROP  CALL[3819]
+
+Reading them:
+
+* both push their arguments in the parameter order the declaration gives, an address for each to-var scalar
+  and address-plus-length for each open array.  ConvertTo gets [addr(r), addr(literal), len(literal)] for
+  `(var x: real; s: array of char)`; Args.Get gets [1, addr(buf), len(buf), addr(n)] for
+  `(n: integer; var arg: array of char; var res: integer)`.  Both are right, and both balance against the
+  callee's parameter count.
+* **both contain the same stray `LOAD_G n; DROP` pair** - the by-ref actual, a wasted load and discard that
+  nets zero.  It is in the working call too, so it is not the fault, but it is worth knowing it exists.
+* they were compiled by the same compiler from the same run.
+
+So the difference is not in the caller, which leaves the callee: `Reals.ConvertTo`'s own body, where `x := ...`
+writes back through the slot the caller filled with an address.  `Args.Get`'s body writes back the same way
+and works, so the two bodies are the next side-by-side - and one of them is a to-var REAL and the other a
+to-var INTEGER, which is the last distinction standing.
+
+This is the third consecutive turn where the answer came from putting two emissions side by side rather than
+reading either one.  The instrument is cheap and the comparison is what carries the information.
+
+Tree green, no compiler change.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
