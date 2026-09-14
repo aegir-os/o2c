@@ -145,6 +145,12 @@ threadstart	ADA_REFUSED	refuses: procedure values as variables
 threadstress	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadyield	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 inputuse	ADA_BROKEN	the ADa side emits the builtin Input, whose body
+argsuse	ADA_BROKEN	the Ada side emits the builtin Args, whose body
+#  calls the same Aegir_User.CLI unit - the identical environment limit as
+#  inputuse above, and the same reason it is not a defect: the Ada backend is
+#  being removed.  The fixture stays because run_bc exercises what mattered -
+#  a qualified READ of an exported variable, which used to emit Ada text and
+#  no bytecode at all.
 #  calls Aegir_User.CLI - a GUEST unit the host differential build does not
 #  have.  A reasoned environment limit, not a defect: the Ada backend is being
 #  removed, which is why the bytecode backend exists.  The fixture stays because

@@ -3986,6 +3986,21 @@ package body O2c_Compiler is
                            if Xs (XI).Kind = S_Var
                              and then Length (Xs (XI).VT_Nm) = 0
                            then
+                              --  A qualified READ of an exported variable.  This
+                              --  branch used to produce the Ada text and no
+                              --  bytecode at all - which is why `Args.count`
+                              --  arrived as one argument where the native wanted
+                              --  two.  Load_Global guards on bytecode mode itself,
+                              --  so it is safe to call on both paths.
+                              --
+                              --  The KEY is the bare member name, because that is
+                              --  what the declaring module interned: a module-level
+                              --  var is stored under `Ada_Id (name)` with no
+                              --  qualifier.  Two modules exporting the same spelling
+                              --  would therefore share one global - latent, not
+                              --  observed, and fixing it means changing both sides
+                              --  and every module's globals with them.
+                              O2c_Ir_Lower.Load_Global (Ada_Id (MName));
                               R.Text := To_Unbounded_String
                                 (Ada_Id (FNm) & "." & Ada_Id (MName));
                               R.Typ := Xs (XI).Typ;
@@ -13070,7 +13085,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Args_Src, Scoped => False);
+      Compile_Builtin (Oak_Args_Src, Scoped => True);
       if Emits ("Args") then
          --  Args: parsed above in every case, emitted
          --  only when something imports it (see Emits).

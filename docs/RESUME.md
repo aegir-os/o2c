@@ -6783,6 +6783,34 @@ That is the whole remaining question for Args, and it is small and concrete: one
 Everything else - the seam clock, the count native, both call arms - is landed and verified, with the flip
 off so the tree stays green.
 
+### 3fs. LANDED: Args - and the bug was a qualified READ, which is GENERAL
+
+Both halves of the question answered by measurement, and both came out clean:
+
+* a module-level var is interned UNQUALIFIED - `Store_Global (Ada_Id (V_Name (1 .. V_len)))`, so the
+  declaring module's key for `count` is just `count`;
+* the corpus already READS qualified library vars: `samples/hello.ob2:476` is `if Input.TimeUnit = 1000 ...`
+  and `:508` is `Out.Int (8200 + Args.count, 0)`.  So `Args.count` is not exotic - the sample does exactly
+  it, and that read was producing Ada text and no bytecode.
+
+The fix is one call in the imported-member `S_Var` branch, using the bare member name to match the
+declaration, with `Load_Global`'s own bytecode-mode guard making it safe on both paths.
+
+**It works**: `Args.count` reads 0 and `res` reads -1 with no arguments, the fixture prints `0-1`, and the
+whole gate is green - run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_stress.
+
+**And the fix is general, not Args-specific.**  Any qualified read of an exported variable took that branch -
+`Input.TimeUnit` included, in the very sample the metric is measured on.  The same turn closed a pinned gap:
+`bytecode_gaps` had `Args.ArgCount, bare` recorded as blocked, and said so in as many words - "is ok, but this
+list says blocked - the list needs updating".
+
+Two notes for the future, both recorded rather than fixed:
+
+* the global KEY is the bare member name, so two modules exporting the same spelling would share one global.
+  Latent, not observed, and fixing it means changing both sides and every module's globals with them.
+* `differential` records `argsuse` as an Ada-side limit with its reason, the same guest-RTS unit as
+  `inputuse` - a limit that retires with the Ada backend.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

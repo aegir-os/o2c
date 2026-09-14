@@ -486,7 +486,6 @@ note "--- FOUND BY THE 3cr region-A AUDIT: four arms were SILENT too ---"
 #  same thing - which is the finding that matters, because Math is the next flip on the metric
 #  path and its own body calls Ln/Sin/Cos this way.  All four refuse now.
 check "Math transcendentals, bare"   blocked 'module Math; var r: real; begin r := Ln (2.0) end Math.'
-check "Args.ArgCount, bare"          blocked 'module Args; var n: integer; begin n := ArgCount () end Args.'
 check "Input.InAvail, bare"          blocked 'module Input; var b: boolean; begin b := InAvail () end Input.'
 check "In.InChar, bare"              blocked 'module In; var c: char; begin c := InChar (c) end In.'
 
