@@ -6516,6 +6516,33 @@ So the remaining change is: at the marker, resolve the member; if it is a proced
 emit the call AND arrange the `with`; otherwise raise exactly as now.  Two call sites, one condition, and
 both are already-measured mechanisms rather than new ones.
 
+### 3fk. At the marker now, and the one value still missing is the exported Bc
+
+The branch went where 3fj said - at the marker, as an `elsif` ahead of the refusal - and the placement is
+proved right by the suite that caught the last attempt:
+
+    bytecode_gaps: PASS (all listed gaps still as recorded)
+
+`XYplane.Key` is back, so every FFI entry keeps its priority and nothing is shadowed.  But the module still
+refuses, which means one of the new branch's three conditions is false.  `XI` cannot be it (the code above
+raises when the member is not exported), and `N_A` cannot be it (there are no arguments to count), so it is
+the third:
+
+    Xs (XI).Kind = S_Proc  and then  Xs (XI).Bc /= 0  and then  N_A = 0
+
+**`Xs (XI).Bc` is 0 for `Input.Available`.**  The field is documented as exactly this signal - "Zero means
+'not compiled to bytecode', and that IS the signal a call site uses to choose between calling it and
+refusing" - so the signal is right and the value is wrong, which means the export never received the id.
+
+Where it should come from is measured: the symbol export aggregate sets `Bc => Syms (PSym).Bc_Proc` (6752),
+and the shared cataloguer that files it is at 606.  So one of two things is true, and the next command tells
+which: either that aggregate is the METHOD export rather than the plain-procedure one, or the export runs
+before the declaration's `Reserve_Proc` has set `Bc_Proc` on the symbol.
+
+Reverted, not landed: an inert branch is not a landing, and the tree is green at 474.  The remaining
+measurement is one grep for the plain-procedure export path - and it is the last thing between Input and
+being usable from a program rather than merely compiling.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
