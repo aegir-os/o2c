@@ -7556,6 +7556,37 @@ Four times now, "make the failure say where" has moved the work forward: the com
 `type mismatch assigning` family, Err's two natives, and this.  It is the single highest-yield habit in the
 stretch.
 
+### 3gr. The fault is located: LOAD_G [17], then LOAD_FLD_I [0] on it
+
+With the offset in hand, the instruction is findable - but only after learning the tool:
+
+**bc_disasm.py's argument is a proc INDEX, not an offset.**  `main` does
+`want = [int(a) for a in argv[1:]]` and then `disassemble (code, table, i)` -> `table[index - 1]`.  Passing
+offsets raises IndexError, and passing five of them in a row raises it five times, which reads exactly like
+"the offset spaces differ".  They do not; the interface was misread.  `--help`-shaped evidence was one `sed`
+away the whole time.
+
+**And it has no flat mode**, so the MODULE BODY - which is not a proc, and is where hello.ob2's fault is
+(entry at 7648, highest proc end 7590) - cannot be inspected at all.  A scratch decoder in /tmp, importing the
+script's own OPS table and walking forward from 7648, is what showed the instruction.  Adding an offset mode to
+the tool is the obvious follow-up; it has now been needed twice in this work.
+
+**What the fault is:**
+
+    8575: LOAD_G   [17]
+    8580: CALL     [7294]
+    8585: STORE_G  [18]      <- the call's result
+    8590: LOAD_G   [17]      <- push global 17
+    8595: LOAD_FLD_I [0]     <- load field 0 of it              <- FAULT
+    8598: LOAD_CONST [387]
+    8603: CALL_NATIVE [0, 2] <- native 0 is Put_Int
+    8607: CALL_NATIVE [2, 0]
+
+So the program is computing `g17.field0` and passing it to Out.Int, and global 17 is not a usable base there.
+The clauses I read earlier declare `var hx, tx: Geom.Node; var w: Geom.Vec; var px: P3`, so an uninitialized
+record pointer being dereferenced is the natural reading - but it is a hypothesis with a location now, not a
+description of a fault, and that is what the diagnostic was for.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
