@@ -190,6 +190,11 @@ package body O2c_Compiler is
       --  to travel with the export, because an importing module resolves an
       --  imported procedure through this record and nothing else.
       Bc     : Natural := 0;
+      --  An exported CONST's literal text (M19 makes exported constants plain
+      --  literals, so the text IS the value).  A constant is not storage and
+      --  the bytecode backend has nothing to load it from, so an importer
+      --  pushes the value itself - which is what Math.pi and Math.e need.
+      Const_Text : Unbounded_String;
    end record;
    Xs  : array (1 .. Max_X) of X_Entry := (others => <>);
    N_X : Natural := 0;
@@ -1930,11 +1935,32 @@ package body O2c_Compiler is
                O2c_Ir_Lower.Push_Int (Nested);
                O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add);
             end if;
-         else
-            O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT), Nested);
-         end if;
-      end;
-   end Bc_Field_Base;
+          else
+             O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT), Nested);
+          end if;
+       end;
+    end Bc_Field_Base;
+
+    --  A whole-record or whole-array copy Dst := Src, one 8-byte slot at a
+    --  time.  Both base addresses come from Bc_Base, so a VAR formal, a
+    --  global and (by refusal) a frame local each get the treatment the field
+    --  paths already have.  The M22 and M28 assignment branches used to
+    --  append only the Ada text - so `b := a` between two records compiled,
+    --  ran, and left b untouched (a probe printed 0 where 42 was right).
+    --  Refusal is not an option here because the construct is ordinary; the
+    --  copy is what the assignment always meant.
+    procedure Bc_Whole_Copy (Dst_Name : String; Src_Name : String; U : Natural) is
+    begin
+       if not O2c_BC.Bytecode_Mode then
+          return;
+       end if;
+       for K in 0 .. Total_Slots (U) - 1 loop
+          Bc_Base (Dst_Name, U);
+          Bc_Base (Src_Name, U);
+          O2c_Ir_Lower.Load_Fld (K * 8, O2c_Ir_Lower.Fld_Int);
+          O2c_Ir_Lower.Store_Fld (K * 8, O2c_Ir_Lower.Fld_Int);
+       end loop;
+    end Bc_Whole_Copy;
 
    function Parse_Rec_Ptr_Chain (Base_Name : String;
                                  Base_UT   : Natural)
@@ -1946,15 +1972,24 @@ package body O2c_Compiler is
       Implied_Deref : Boolean := False;
       Nested : Natural := 0;
    begin
-      if O2c_BC.Bytecode_Mode and then UTypes (UT).Is_Ptr then
-         --  A pointer's value is what it designates, and a bare pointer is a
-         --  value in its own right (p = q, p := q), so push it once here.  A
-         --  field access then needs only its offset: the base is already on
-         --  the stack, and is the record's address rather than the pointer
-         --  variable's - which is why the scalar leaf below must not push an
-         --  address for a pointer base.
-         Bc_Load (Base_Name);
-      end if;
+       if O2c_BC.Bytecode_Mode and then UTypes (UT).Is_Ptr then
+          --  A pointer's value is what it designates, and a bare pointer is a
+          --  value in its own right (p = q, p := q), so push it once here.  A
+          --  field access then needs only its offset: the base is already on
+          --  the stack, and is the record's address rather than the pointer
+          --  variable's - which is why the scalar leaf below must not push an
+          --  address for a pointer base.  A VAR POINTER formal's slot holds
+          --  the CALLER's address, so its value is behind it (By_Ref_Scalar) -
+          --  the same rule as any by-ref scalar (3dl).
+          declare
+             BId : constant Natural := Find (Base_Name);
+          begin
+             Bc_Load (Base_Name,
+                      By_Ref_Scalar =>
+                        BId /= 0 and then Syms (BId).Kind = S_Var
+                        and then Syms (BId).By_Ref);
+          end;
+       end if;
       D.Text := To_Unbounded_String (Base_Name);
       if UTypes (UT).Is_Ptr then
          VK := V_Ptr;
@@ -2721,15 +2756,19 @@ package body O2c_Compiler is
             return A;
          end;
       end if;
-      --  A VAR SCALAR formal is passed as an ADDRESS: the callee's slot holds the
-      --  caller's address and every access goes through it.  Passing the value -
-      --  which is what this used to do - is why an assignment to a by-ref scalar
-      --  in the callee was lost without a word (3dd/3df).  The value parse stays,
-      --  because the type check and the Ada text come from it.
-      declare
-         By_Ref_Scalar : constant Boolean :=
-           O2c_BC.Bytecode_Mode and then Formal.By_Ref
-           and then Formal.UT = 0 and then Cur.Kind = Lex.Tok_Ident;
+       --  A VAR SCALAR formal is passed as an ADDRESS: the callee's slot holds the
+       --  caller's address and every access goes through it.  Passing the value -
+       --  which is what this used to do - is why an assignment to a by-ref scalar
+       --  in the callee was lost without a word (3dd/3df).  The same holds for a
+       --  VAR POINTER formal: `Push(head, x)` must be able to write head back,
+       --  so the caller's address goes on the stack, not the pointer's value.
+       --  The value parse stays, because the type check and the Ada text come
+       --  from it.
+       declare
+          By_Ref_Scalar : constant Boolean :=
+            O2c_BC.Bytecode_Mode and then Formal.By_Ref
+            and then (Formal.UT = 0 or else UTypes (Formal.UT).Is_Ptr)
+            and then Cur.Kind = Lex.Tok_Ident;
       begin
          if By_Ref_Scalar then
             declare
@@ -2927,12 +2966,27 @@ package body O2c_Compiler is
       end if;
    end Emit_Method_Call;
 
-   --  Assign a POINTER value (designator or NIL) to an Ada LHS whose
-   --  pointer user type is LHS_UT; type-check the value first (M8).
-   procedure Assign_Pointer (LHS : String; LHS_UT : Natural) is
-      R    : Expr_Rec := Parse_Expr;
-      Conv : Boolean := False;
-   begin
+    --  Assign a POINTER value (designator or NIL) to an Ada LHS whose
+    --  pointer user type is LHS_UT; type-check the value first (M8).
+    procedure Assign_Pointer (LHS : String; LHS_UT : Natural) is
+       LId : constant Natural := Find (LHS);
+       --  A VAR POINTER formal's slot holds the CALLER's address, so an
+       --  assignment to it goes through that address - the rule 3dl made
+       --  for a by-ref scalar, extended to a pointer.  Stack order matters:
+       --  Store_Idx pops [base, index, value] with the value on top, so the
+       --  base and index are pushed BEFORE the RHS parse.
+       By_Ref : constant Boolean :=
+         O2c_BC.Bytecode_Mode and then LId /= 0
+         and then Syms (LId).Kind = S_Var and then Syms (LId).By_Ref;
+       R    : Expr_Rec;
+       Conv : Boolean := False;
+    begin
+       if By_Ref then
+          O2c_Ir_Lower.Load_Local
+            (Natural (O2c_BC.Local_Slot (Ada_Id (LHS))));
+          O2c_Ir_Lower.Push_Int (0);
+       end if;
+       R := Parse_Expr;
       if R.Typ = T_Nil then
          null;
       elsif R.Typ = T_Ptr then
@@ -2975,7 +3029,11 @@ package body O2c_Compiler is
               & "through the pointer designator '" & LHS
               & "' is not yet supported";
          end if;
-         Bc_Store (LHS);
+         if By_Ref then
+            O2c_Ir_Lower.Store_Idx (8);
+         else
+            Bc_Store (LHS);
+         end if;
       elsif Conv then
          Append_Body ("      " & LHS & " := "
                       & To_String (UTypes (LHS_UT).Name) & " ("
@@ -3238,11 +3296,19 @@ package body O2c_Compiler is
                end loop;
                Expect (Lex.Tok_RBrace, "'}' closing a SET literal");
                Next;
-               if First then
-                  R.Text := To_Unbounded_String ("O2c_Set (0)");
-               else
-                  R.Text := "(" & Bit & ")";
-               end if;
+                if First then
+                   R.Text := To_Unbounded_String ("O2c_Set (0)");
+                   if O2c_BC.Bytecode_Mode then
+                      --  An empty literal has no elements, so the loop above
+                      --  pushed nothing - and the empty mask IS the value.
+                      --  Without this, `{}` left the stack one short, which
+                      --  is how `Input.Mouse`'s `keys := {}` came to store
+                      --  through a slot that was never a set.
+                      O2c_BC.Push_Word (0);
+                   end if;
+                else
+                   R.Text := "(" & Bit & ")";
+                end if;
             end;
          when Lex.Tok_LParen =>
             Next;
@@ -4035,13 +4101,81 @@ package body O2c_Compiler is
                               raise O2c_Error with "'" & FNm & "." & MName
                                 & "' is not exported by module " & FNm;
                            end if;
-                           if Xs (XI).Kind = S_Const then
-                              R.Text := To_Unbounded_String
-                                (Ada_Id (FNm) & "." & Ada_Id (MName));
-                              R.Typ := Xs (XI).Typ;
-                              R.Lit := False;
-                              return R;
-                           end if;
+                            if Xs (XI).Kind = S_Const then
+                               if O2c_BC.Bytecode_Mode then
+                                  --  A constant is not storage: the backend has
+                                  --  nothing to load it from, so the VALUE is
+                                  --  pushed here.  The export carries the
+                                  --  literal's text (exported constants are
+                                  --  plain literals - the declaration enforces
+                                  --  it), and anything the VM cannot push names
+                                  --  itself in the refusal rather than arriving
+                                  --  as a zero.  This used to emit NOTHING,
+                                  --  which is why `Math.ln (Math.e)` read a
+                                  --  minted-zero global (3dn's follow-up).
+                                  declare
+                                     CT : constant String :=
+                                       To_String (Xs (XI).Const_Text);
+                                  begin
+                                     if Xs (XI).Typ = T_Real
+                                       or else Xs (XI).Typ = T_LReal
+                                     then
+                                        declare
+                                           T : String := CT;
+                                        begin
+                                           for I in T'Range loop
+                                              if T (I) = 'D'
+                                                or else T (I) = 'd'
+                                              then
+                                                 T (I) := 'E';
+                                              end if;
+                                           end loop;
+                                           O2c_Ir_Lower.Push_Real
+                                             (Long_Float'Value (T));
+                                        exception
+                                           when Constraint_Error =>
+                                              raise O2c_BC.Wrong_Construct
+                                                with "bytecode backend: "
+                                                  & "constant '" & FNm & "."
+                                                  & MName & "' is not a REAL "
+                                                  & "literal the VM can push";
+                                        end;
+                                     elsif Xs (XI).Typ = T_Int
+                                       or else Xs (XI).Typ = T_Long
+                                     then
+                                        begin
+                                           O2c_Ir_Lower.Push_Int
+                                             (Integer'Value (CT));
+                                        exception
+                                           when Constraint_Error =>
+                                              raise O2c_BC.Wrong_Construct
+                                                with "bytecode backend: "
+                                                  & "constant '" & FNm & "."
+                                                  & MName & "' is not an "
+                                                  & "INTEGER literal the VM "
+                                                  & "can push";
+                                        end;
+                                     elsif Xs (XI).Typ = T_Str
+                                       and then CT'Length >= 2
+                                       and then CT (CT'First) = '"'
+                                       and then CT (CT'Last) = '"'
+                                     then
+                                        O2c_Ir_Lower.Push_Str
+                                          (CT (CT'First + 1 .. CT'Last - 1));
+                                     else
+                                        raise O2c_BC.Wrong_Construct with
+                                          "bytecode backend: constant '"
+                                          & FNm & "." & MName & "' has no "
+                                          & "literal value the VM can push";
+                                     end if;
+                                  end;
+                               end if;
+                               R.Text := To_Unbounded_String
+                                 (Ada_Id (FNm) & "." & Ada_Id (MName));
+                               R.Typ := Xs (XI).Typ;
+                               R.Lit := False;
+                               return R;
+                            end if;
                            if Xs (XI).Kind = S_Var
                              and then Length (Xs (XI).VT_Nm) = 0
                            then
@@ -4132,34 +4266,28 @@ package body O2c_Compiler is
                            end if;
                            if Cur.Kind = Lex.Tok_LParen then
                               Next;
-                              declare
-                                 Args : array (1 .. Max_Params)
-                                   of Unbounded_String;
-                                 --  The parsed form too: a bytecode
-                                 --  emission needs the operand's type and
-                                 --  name, which the Ada text cannot give.
-                                 Arg_R : array (1 .. Max_Params)
-                                   of Expr_Rec;
-                                 N_A  : Natural := 0;
-                                 Call : Unbounded_String;
-                              begin
-                                 loop
-                                    exit when Cur.Kind = Lex.Tok_RParen;
-                                    N_A := N_A + 1;
-                                    if N_A > Max_Params then
-                                       raise O2c_Error with "too many "
-                                         & "arguments";
-                                    end if;
-                                    declare
-                                       A : Expr_Rec :=
-                                         Parse_Actual (X_Formal (XI, N_A));
-                                    begin
-                                       Args (N_A) := A.Text;
-                                       Arg_R (N_A) := A;
-                                    end;
-                                    exit when Cur.Kind /= Lex.Tok_Comma;
-                                    Next;
-                                 end loop;
+                               declare
+                                  Args : array (1 .. Max_Params)
+                                    of Unbounded_String;
+                                  N_A  : Natural := 0;
+                                  Call : Unbounded_String;
+                               begin
+                                  loop
+                                     exit when Cur.Kind = Lex.Tok_RParen;
+                                     N_A := N_A + 1;
+                                     if N_A > Max_Params then
+                                        raise O2c_Error with "too many "
+                                          & "arguments";
+                                     end if;
+                                     declare
+                                        A : Expr_Rec :=
+                                          Parse_Actual (X_Formal (XI, N_A));
+                                     begin
+                                        Args (N_A) := A.Text;
+                                     end;
+                                     exit when Cur.Kind /= Lex.Tok_Comma;
+                                     Next;
+                                  end loop;
                                  if N_A /= Xs (XI).Params then
                                     raise O2c_Error with "call expects "
                                       & Natural'Image (Xs (XI).Params)
@@ -4223,42 +4351,47 @@ package body O2c_Compiler is
                                          & MName & " is not yet supported";
                                     end if;
                                  end if;
-                                 if O2c_BC.Bytecode_Mode
-                                   and then Eq_No_Case (FNm, "XYplane")
-                                   and then Eq_No_Case (MName, "IsDot")
-                                   and then N_A = 2
-                                 then
-                                    --  IsDot (x, y) is the one plane
-                                    --  primitive that RETURNS, so it is the
-                                    --  first thing to need a bytecode
-                                    --  emission on the expression path -
-                                    --  every earlier helper wrote through an
-                                    --  address and had no result to produce.
-                                    for K in 1 .. 2 loop
-                                       Bc_Push_Arg (Arg_R (K));
-                                    end loop;
-                                    O2c_Ir_Lower.Call_Native (17, 2);
-                                    R.Typ := T_Bool;
-                                    R.Lit := False;
-                                    R.Folds := False;
-                                 end if;
-                                 if O2c_BC.Bytecode_Mode
-                                   and then Math_Native (FNm, MName) > 0
-                                 then
-                                    --  The transcendentals: push each argument,
-                                    --  then call the native whose arity the
-                                    --  verifier checks against Native_Pops.
-                                    --  The result is REAL for both modules - a
-                                    --  LONGREAL is the same 64-bit slot (M4e).
-                                    for K in 1 .. N_A loop
-                                       Bc_Push_Arg (Arg_R (K));
-                                    end loop;
-                                    O2c_Ir_Lower.Call_Native
-                                      (Math_Native (FNm, MName), N_A);
-                                    R.Typ := T_Real;
-                                    R.Lit := False;
-                                    R.Folds := False;
-                                 end if;
+                                  if O2c_BC.Bytecode_Mode
+                                    and then Eq_No_Case (FNm, "XYplane")
+                                    and then Eq_No_Case (MName, "IsDot")
+                                    and then N_A = 2
+                                  then
+                                     --  IsDot (x, y) is the one plane
+                                     --  primitive that RETURNS, so it is the
+                                     --  first thing to need a bytecode
+                                     --  emission on the expression path -
+                                     --  every earlier helper wrote through an
+                                     --  address and had no result to produce.
+                                     --  NOTHING is pushed here: Parse_Actual
+                                     --  already pushed both actuals - pushing
+                                     --  them again left one copy of each on the
+                                     --  operand stack for the rest of the run.
+                                     O2c_Ir_Lower.Call_Native (17, 2);
+                                     R.Typ := T_Bool;
+                                     R.Lit := False;
+                                     R.Folds := False;
+                                  end if;
+                                  if O2c_BC.Bytecode_Mode
+                                    and then Math_Native (FNm, MName) > 0
+                                  then
+                                     --  The transcendentals: the arguments are
+                                     --  already on the operand stack, pushed by
+                                     --  Parse_Actual - the convention the
+                                     --  in-image call path above states.  The
+                                     --  result is REAL for both modules - a
+                                     --  LONGREAL is the same 64-bit slot (M4e).
+                                     --  This used to push every argument AGAIN
+                                     --  through Bc_Push_Arg: a literal arrived
+                                     --  twice (one copy leaked for the rest of
+                                     --  the run) and Math.e arrived as a
+                                     --  minted-zero global, because a constant
+                                     --  has no name to load - 3dn's follow-up.
+                                     O2c_Ir_Lower.Call_Native
+                                       (Math_Native (FNm, MName), N_A);
+                                     R.Typ := T_Real;
+                                     R.Lit := False;
+                                     R.Folds := False;
+                                  end if;
                                  R.Text := Call;
                               end;
                            elsif Xs (XI).Params /= 0 then
@@ -5845,9 +5978,10 @@ package body O2c_Compiler is
          Append_Spec ("   " & Ada_Id (Name) & " : constant "
                       & Ada_Type (V.Typ)
                       & " := " & To_String (V.Text) & ";");
-         X_Add (To_String (Mod_Name),
-                (Kind => S_Const, Typ => V.Typ,
-                 Name => To_Unbounded_String (Name), others => <>));
+          X_Add (To_String (Mod_Name),
+                 (Kind => S_Const, Typ => V.Typ,
+                  Name => To_Unbounded_String (Name),
+                  Const_Text => V.Text, others => <>));
       else
          Append_Decl ("   " & Name & " : constant " & Ada_Type (V.Typ)
                       & " := " & To_String (V.Text) & ";");
@@ -8794,27 +8928,29 @@ package body O2c_Compiler is
                         U : constant Natural :=
                           Import_Type (Q_Owner (Q), Q_Mem (Q));
                      begin
-                        if Cur.Kind = Lex.Tok_Assign then
-                           --  whole-record assignment (M22)
-                           declare
-                              Rhs : Unbounded_String;
-                           begin
-                              Next;
-                              if Cur.Kind = Lex.Tok_Ident then
-                                 declare
-                                    RId : constant Natural :=
-                                      Find (Cur.Text (1 .. Cur.Len));
-                                 begin
-                                    if RId /= 0 and then
-                                      Syms (RId).Kind = S_Var
-                                      and then Syms (RId).UT = U
-                                    then
-                                       Rhs := To_Unbounded_String
-                                         (Cur.Text (1 .. Cur.Len));
-                                       Next;
-                                    end if;
-                                 end;
-                              end if;
+                         if Cur.Kind = Lex.Tok_Assign then
+                            --  whole-record assignment (M22)
+                            declare
+                               Rhs    : Unbounded_String;
+                               Src_Bc : Unbounded_String;  --  base for Bc_Base
+                            begin
+                               Next;
+                               if Cur.Kind = Lex.Tok_Ident then
+                                  declare
+                                     RId : constant Natural :=
+                                       Find (Cur.Text (1 .. Cur.Len));
+                                  begin
+                                     if RId /= 0 and then
+                                       Syms (RId).Kind = S_Var
+                                       and then Syms (RId).UT = U
+                                     then
+                                        Rhs := To_Unbounded_String
+                                          (Cur.Text (1 .. Cur.Len));
+                                        Src_Bc := Rhs;
+                                        Next;
+                                     end if;
+                                  end;
+                               end if;
                               if Rhs = "" and then Cur.Kind = Lex.Tok_Ident
                                 and then Imported_Mod
                                   (Cur.Text (1 .. Cur.Len))
@@ -8839,25 +8975,31 @@ package body O2c_Compiler is
                                             and then
                                               To_String (Xs (XI2).VT_Nm)
                                               = To_String (Xs (XI).VT_Nm)
-                                          then
-                                             Rhs := To_Unbounded_String
-                                               (Ada_Id (MN2) & "."
-                                                & Ada_Id
-                                                    (Cur.Text (1 .. Cur.Len)));
-                                          end if;
-                                          Next;
+                                           then
+                                              Rhs := To_Unbounded_String
+                                                (Ada_Id (MN2) & "."
+                                                 & Ada_Id
+                                                     (Cur.Text (1 .. Cur.Len)));
+                                              Src_Bc := Rhs;
+                                           end if;
+                                           Next;
                                        end;
                                     end if;
                                  end;
                               end if;
-                              if Length (Rhs) = 0 then
-                                 raise O2c_Error with "whole-record "
-                                   & "assignment to '" & MNm & "."
-                                   & To_String (MName)
-                                   & "' needs a variable of the same "
-                                   & "record type (M22)";
-                              end if;
-                              Append_Body ("      " & Ada_Id (MNm) & "."
+                               if Length (Rhs) = 0 then
+                                  raise O2c_Error with "whole-record "
+                                    & "assignment to '" & MNm & "."
+                                    & To_String (MName)
+                                    & "' needs a variable of the same "
+                                    & "record type (M22)";
+                               end if;
+                               --  As at M28: the Ada text alone was the whole
+                               --  of this branch, and the copy moved nothing.
+                               Bc_Whole_Copy
+                                 (Ada_Id (MNm) & "." & Ada_Id (To_String (MName)),
+                                  To_String (Src_Bc), U);
+                               Append_Body ("      " & Ada_Id (MNm) & "."
                                            & Ada_Id (To_String (MName))
                                            & " := "
                                            & To_String (Rhs) & ";");
@@ -9636,26 +9778,28 @@ package body O2c_Compiler is
                         Append_Body ("      " & Head (1 .. H_Len)
                                      & " := (" & To_String (A) & ");");
                      end;
-                  else
-                     --  M28: whole copy from a same-typed local variable
-                     --  or an exported module RECORD VARIABLE
-                     declare
-                        Rhs : Unbounded_String;
-                     begin
-                        if Cur.Kind = Lex.Tok_Ident then
-                           declare
-                              R : constant Natural :=
-                                Find (Cur.Text (1 .. Cur.Len));
-                           begin
-                              if R /= 0 and then Syms (R).Kind = S_Var
-                                and then Syms (R).UT = Syms (Idx).UT
-                              then
-                                 Rhs := To_Unbounded_String
-                                   (Cur.Text (1 .. Cur.Len));
-                                 Next;
-                              end if;
-                           end;
-                        end if;
+                   else
+                      --  M28: whole copy from a same-typed local variable
+                      --  or an exported module RECORD VARIABLE
+                      declare
+                         Rhs    : Unbounded_String;
+                         Src_Bc : Unbounded_String;  --  base name for Bc_Base
+                      begin
+                         if Cur.Kind = Lex.Tok_Ident then
+                            declare
+                               R : constant Natural :=
+                                 Find (Cur.Text (1 .. Cur.Len));
+                            begin
+                               if R /= 0 and then Syms (R).Kind = S_Var
+                                 and then Syms (R).UT = Syms (Idx).UT
+                               then
+                                  Rhs := To_Unbounded_String
+                                    (Cur.Text (1 .. Cur.Len));
+                                  Src_Bc := Rhs;
+                                  Next;
+                               end if;
+                            end;
+                         end if;
                         if Length (Rhs) = 0 and then Cur.Kind = Lex.Tok_Ident
                           and then Imported_Mod (Cur.Text (1 .. Cur.Len))
                         then
@@ -9684,12 +9828,13 @@ package body O2c_Compiler is
                                             Import_Type (Q_Owner (Q),
                                                          Q_Mem (Q));
                                        begin
-                                          if TY = Syms (Idx).UT then
-                                             Rhs := To_Unbounded_String
-                                               (Ada_Id (MN2) & "."
-                                                & Ada_Id
-                                                    (Cur.Text (1 .. Cur.Len)));
-                                          end if;
+                                           if TY = Syms (Idx).UT then
+                                              Rhs := To_Unbounded_String
+                                                (Ada_Id (MN2) & "."
+                                                 & Ada_Id
+                                                     (Cur.Text (1 .. Cur.Len)));
+                                              Src_Bc := Rhs;
+                                           end if;
                                        end;
                                     end if;
                                     Next;
@@ -9739,11 +9884,18 @@ package body O2c_Compiler is
                                    & Cur.Text (1 .. Cur.Len)
                                    & "' is not a same-typed variable "
                                    & "(copy of " & Head (1 .. H_Len) & ")";
-                              end if;
-                           end;
-                        end if;
-                        Append_Body ("      " & Head (1 .. H_Len) & " := "
-                                     & To_String (Rhs) & ";");
+                               end if;
+                            end;
+                         end if;
+                         if Length (Rhs) /= 0 then
+                            --  The Ada text alone used to be the whole of this
+                            --  branch: the copy compiled, ran, and moved
+                            --  nothing.  Emit it, slot by slot.
+                            Bc_Whole_Copy (Head (1 .. H_Len),
+                                           To_String (Src_Bc), Syms (Idx).UT);
+                         end if;
+                         Append_Body ("      " & Head (1 .. H_Len) & " := "
+                                      & To_String (Rhs) & ";");
                      end;
                   end if;
                end;

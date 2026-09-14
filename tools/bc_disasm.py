@@ -22,6 +22,8 @@ Usage:  python3 tools/bc_disasm.py IMAGE.obc [PROC_INDEX ...]
         one open formal and one result are disassembled - which is what Files.New and Files.Old
         are.  The module body's offset is printed either way (`entry`), since a program's own code
         is usually what is wanted and is not in the procedure candidates.
+        An argument of the form @OFFSET disassembles FLAT from that code offset (the same space
+        `entry` is printed in) until HALT or 512 bytes - for the module body, which is not a proc.
 """
 import re
 import struct
@@ -72,11 +74,15 @@ def disassemble(code, table, index):
     chunk = body(code, table, index)
     print("  proc %d: code_off=%d len=%d frame=%d params=%d results=%d"
           % (index, off, len(chunk), frame, npar, nres))
+    dump(code, chunk, 0)
+
+
+def dump(code, chunk, shown_base):
     pc = 0
     while pc < len(chunk):
         op = chunk[pc]
         if op not in OPS:
-            print("   %5d: %02x  [?] - not in the spec's table" % (pc, op))
+            print("   %5d: %02x  [?] - not in the spec's table" % (shown_base + pc, op))
             return
         name, widths = OPS[op]
         start = pc
@@ -85,7 +91,14 @@ def disassemble(code, table, index):
         for width in widths:
             args.append(int.from_bytes(chunk[pc:pc + width], 'little'))
             pc += width
-        print("   %5d: %-16s %s" % (start, name, args if args else ''))
+        print("   %5d: %-16s %s" % (shown_base + start, name, args if args else ''))
+        if name == 'HALT':
+            return
+
+
+def disassemble_flat(code, off):
+    print("  flat from code offset %d" % off)
+    dump(code, code[off:off + 512], off)
 
 
 def main(argv):
@@ -95,16 +108,19 @@ def main(argv):
     data = open(argv[0], 'rb').read()
     code = sections(data)[6]
     table = procs(code)
-    want = [int(a) for a in argv[1:]]
+    flat = [int(a[1:]) for a in argv[1:] if a.startswith('@')]
+    want = [int(a) for a in argv[1:] if not a.startswith('@')]
     print("opcodes from the spec: %d   procedures: %d" % (len(OPS), len(table)))
     print("entry (module body) at code offset %d"
           % struct.unpack_from('<Q', data, 0x38)[0])
-    if not want:
+    if not want and not flat:
         for i, (off, frame, npar, nres) in enumerate(table, 1):
             if (npar, nres) == (2, 1):
                 want.append(i)
     for i in want:
         disassemble(code, table, i)
+    for off in flat:
+        disassemble_flat(code, off)
     return 0
 
 

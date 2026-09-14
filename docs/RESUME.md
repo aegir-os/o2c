@@ -7642,6 +7642,100 @@ first two were ConvInt catching a wrong emission, and envset needing its differe
 
 Full gate green: run_bc, run_vm, bytecode_gaps, coverage, differential (68), run_m1, run_stress.
 
+### 3gu. Whole-record copy emitted NOTHING - at two sites
+
+The 3gt fixture pair ran: fixture 1 (`tx := RVL.Next(hx)`, a POINTER-valued function across a module
+boundary) PASSES - that shape was never broken; fixture 2 (qualified record variable `QRL.origin`)
+printed 0/0 instead of 55/99, and the disassembly showed the whole-record assignment emitting no
+bytecode at all.  Two sites shared the gap, and a third shape with it:
+
+    M22  QRL.origin := a     (qualified LHS)
+    M28  b := a              (plain LHS - and a plain ARRAY copy `d := c` was silent too)
+
+Both only appended the Ada text.  The fix is a per-slot copy (`Bc_Whole_Copy`: `Bc_Base` both sides,
+`Load_Fld`/`Store_Fld` per 8-byte slot); the spec's `COPY_BYTES` (0x2E) is reserved but unimplemented
+everywhere, so no VM change.  Fixtures: `wholecopy` (record + array), `qrecvar` (qualified, both
+directions), `ptrfun` (fixture 1, kept - it passes, and covers a shape nothing else does).
+
+Re-running hello.ob2 afterwards moved the fault 8595 -> 8627: one more line landed (a 0 became 48).
+A fault that MOVES is the fixes working; it is not a reason to stop.
+
+### 3gv. A VAR POINTER formal is an ADDRESS - the 3dl rule, extended
+
+hello.ob2:230-234 `Push(head, 1..3); cur := Last(head); Out.Int(head^.v, 0)` faulted at the deref.
+The caller emitted `LOAD_G [17]` - head's VALUE - where a by-ref actual needs the caller's ADDRESS:
+`Parse_Actual`'s address treatment (`By_Ref_Scalar`, 3dd/3df) required `Formal.UT = 0`, and a pointer
+formal has `UT /= 0`, so it fell through to a value push.  The callee then read the slot as the value
+(works by accident) and `l := n` wrote the FRAME slot (lost), so head stayed NIL.
+
+Three edits, each the 3dl rule restated for a pointer:
+
+- caller: `By_Ref_Scalar` widened to `(Formal.UT = 0 or else UTypes (Formal.UT).Is_Ptr)`;
+- callee read: the designator chain's pointer base pushes `Bc_Load (Base_Name)` - now with
+  `By_Ref_Scalar` when the base is a VAR formal, so the value comes through the address;
+- callee write: `Assign_Pointer` pushes base + index 0 BEFORE the RHS parse and ends in
+  `Store_Idx (8)` for a by-ref LHS (stack order `[base, idx, value]`, value on top - the parse
+  must come last).
+
+Fixture: `varptr` (Push-style write-back plus a Last traversal; 3 then 1).  `head^.v` in hello
+runs from this point on.
+
+### 3gw. 3dn's follow-up: the Math argument was pushed TWICE, and a qualified CONST never
+
+Next fault was offset 12277, `CALL_NATIVE [32]` = `o2c_math_ln`, raising `CONSTRAINT_ERROR` out of
+`a-ngelfu` - Ln of a bad argument.  The argument was `Math.e`, and the image held `LOAD_G [84]`
+for it: a minted-zero global.  Two bugs composed, and the mathln fixture's own comment had already
+named the pair as "3dn's follow-up":
+
+1. the qualified-CONST factor branch (`Math.e`) set `R.Text` and returned - it emitted NOTHING in
+   bytecode mode.  An exported const's value lived nowhere an importer could reach: `Xs` carried
+   kind and type only.  Fix: `X_Entry` gains `Const_Text` (M19 already restricts exported constants
+   to plain literals, so the text IS the value), and the read pushes it - REAL/LONGREAL by
+   `Long_Float'Value` (D rewritten to E), INTEGER/LONGINT by `Integer'Value`, string by pool push,
+   anything else a NAMED refusal.  (`Math_Const`, written in 3dm and never called, stays dead -
+   the general mechanism covers it.)
+2. the Math native path then re-pushed every argument through `Bc_Push_Arg` - which loads by NAME,
+   minting the zero global for a constant.  For a literal the parse had already pushed the value,
+   so `Math.ln (2.0)` pushed TWO copies and leaked one slot per call, balanced only by accident of
+   what followed.  Fix: the re-push loops are deleted from the Math and `XYplane.IsDot` paths -
+   `Parse_Actual` pushes every actual, the convention the in-image call path already states.
+
+`IsDot` was the same double-push with literal arguments; bytecode_gaps still passes on one push.
+Fixtures: `mathconst` (`Math.e` in a comparison, `Math.ln (Math.e)`, `Math.sin (Math.pi / 2.0)`),
+and `mathln` now uses `Math.pi` - its golden is unchanged because the number is the same.
+
+### 3gx. `{}` pushed nothing; hello.ob2 RUNS to completion
+
+One fault later: offset 4426, `STORE_IDX_I`, proc 32 = `Input.Mouse`.  Its `keys := {}` emitted
+`[base, idx]` and no value: the SET literal's every ELEMENT path pushes, and the empty literal has
+no elements, so `{}` was the one shape that pushed nothing.  The store then took whatever was
+underneath - STORAGE_ERROR.  (The small probe failed verify with a depth violation; hello's own
+image carried an inflated `stack_max` for the proc, which is why only the small one was caught
+statically.  The inflation is noted, not chased.)  Fix: the empty literal pushes mask 0.
+
+    hello.ob2 on the host VM: 94 lines, exit status 0.
+
+Every self-check line the source asserts prints its good value: 71/73/75/77 (the four
+transcendentals), res-ok/8400/O2cW! (Files), 8002 (Mouse), 1.000/8.000/3.142 (MathL - the const
+fix covers it, `Eq_No_Case` matches both modules), hello-env (Env round-trip), 8200/8210/8212
+(Args), err-ok, 8100/8102/8105 (XYplane), 406 = 28*29/2 (Geom.SumArr).  The run costs ~3 minutes
+because `Files.Wait ("BD0:")` polls a volume the host never has: 400 x 2,000,000 busy iterations.
+That is the shim's text, not a VM defect - noted, not changed.
+
+Four lines print a WRONG value, each reached for the first time (hello never ran this far before,
+so none is a regression):
+
+    Reals.ConvertTo(r, "3.25")   r stays 0.000, want 3.250
+    Input.TimeUnit               8013, want 8003 - the module body's `TimeUnit := 1000` did not land
+    Convert.ToInt("8311", n, res)  8319, want 8310
+    Convert.FromInt(-123, fl)    prints 0, want -123
+
+All four are FFI natives taking VAR out-parameters, which points at the out-parameter convention
+for that group rather than at four separate bugs.  That is the next item.
+
+Fixtures landed for 3gu-3gx: wholecopy, qrecvar(+lib), ptrfun(+lib), varptr, emptyset, mathconst;
+mathln updated.  Fast suites green after each fix: run_bc, run_vm, bytecode_gaps.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

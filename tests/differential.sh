@@ -198,6 +198,13 @@ filesintr	ADA_BROKEN	emits Ada that will not compile: a user module named Files 
 #  the import itself (M19) - the fixture's subject is the three imported CALL
 #  sites, which the VM side compiles, runs and checks by output.
 usercall	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
+#  ptrfun and qrecvar are the same shape as usercall - each imports its own
+#  .lib.ob2 library - so the Ada side refuses the import for the same reason.
+#  ptrfun's subject is a POINTER-valued function across a module boundary;
+#  qrecvar's is a whole assignment to and from an exported RECORD VARIABLE.
+#  Both are VM-side subjects, checked by output.
+ptrfun	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
+qrecvar	ADA_REFUSED	takes no library argument on the Ada side (N_Libs => 0), so the Ada text backend refuses the import of a user module
 #  recactual passes a record to a procedure and writes through it - the fixture
 #  for 3cj, and its subject is the VM side (the callee has to resolve a record
 #  formal's own slot).  The Ada side emits Ada that will not build: "w"
