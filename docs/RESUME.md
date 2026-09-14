@@ -7493,6 +7493,47 @@ comparison should carry stderr, since Err writes there and the golden is stdout.
 
 Full gate green: run_bc, run_vm, bytecode_gaps, coverage, differential, run_m1, run_stress.
 
+### 3gp. It RUNS - and the compile metric was never going to say that
+
+    $ vm_main /tmp/h.obc < samples/sample.txt
+    123
+    hello from Oberon-2
+    45
+    9
+    0149
+    48
+    0
+    48
+    7
+    Hi
+    7
+    2
+    42
+    ...
+    vm: internal error in phase 3: STORAGE_ERROR (stack overflow or erroneous memory access)
+    vm: malformed code: /tmp/h.obc
+
+rc=1.  So hello.ob2 plus geom and geo COMPILE, then RUN, then fault 13 lines in.
+
+**What is right about that output**: it starts with a computed value, then `hello from Oberon-2` - the Greeting
+CONSTANT - then a run of integers.  A program that was merely emitting nothing, or garbage from the first line,
+would not look like this.
+
+**What is wrong with it, and it is two separate things**:
+  1. It FAULTS.  Everything past line 13 is unreachable, so nothing later can be judged until this is fixed.
+  2. At least one value looks semantically wrong already: hello.ob2 prints a CHAR in places, and 48 is '0'.
+     CountTo prints `total` where the argument predicts 2k.  These may be the same root cause or different
+     ones; the fault comes first because it hides the rest.
+
+**The next instrument, and it is the one that has paid four times in this stretch**: the fault reports no
+PROGRAM COUNTER.  Note_At exists and prints an offset (it is used for other malformed-code sites), but this
+path does not go through it, so "phase 3" and STORAGE_ERROR name neither the instruction nor the source.  Giving
+this failure a location is the same move that turned "only INTEGER/CHAR/REAL comparisons are supported" into
+"(line 470)" and moved four barriers: make the refusal say WHERE.
+
+The compile metric is met and that was worth having; the semantics are a new question and this is its first
+measurement, not its answer.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
