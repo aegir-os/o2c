@@ -5656,11 +5656,22 @@ package body O2c_Compiler is
                              or else (Rl
                                       and then (X.Typ = T_Real
                                                 or else X.Typ = T_LReal))
+                             --  A SET is a word, so equality and inequality
+                             --  are a word compare and emit correctly through
+                             --  the same path as INTEGER.  Restricted to those
+                             --  two ops deliberately: `<=` on sets means SUBSET,
+                             --  which is not a word compare at all, and emitting
+                             --  a word compare for it would be a wrong answer
+                             --  rather than a refusal.
+                             or else ((R.Typ = T_Set and then X.Typ = T_Set)
+                                      and then (Op = " = "
+                                                or else Op = " /= "))
                              or else Pl)
                      then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "only INTEGER/CHAR/REAL comparisons are supported, "
-                          & "and pointers compare only with NIL";
+                          & "and pointers compare only with NIL (line "
+                          & Natural'Image (Cur.Line) & ")";
                      end if;
                      --  Two opcode NAMES per comparison became one name plus
                      --  the operands' CLASS, with the opcode following from

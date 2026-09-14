@@ -7215,6 +7215,33 @@ module's own dependency is what makes it insufficient.
 
 Reverted, tree green.
 
+### 3gg. LANDED: SET equality - the pointer-to-comparison barrier moved
+
+The metric's barrier was the comparison rule, and one measurement named it exactly - after giving the refusal a
+LINE NUMBER, which it lacked while its siblings all had one:
+
+    only INTEGER/CHAR/REAL comparisons are supported, and pointers compare only with NIL (line 470)
+
+hello.ob2:470 is `if (s2 = {}) & (n = 0) & (m = 0) then`: a SET comparison.
+
+**The fix is one condition**, because the opcode machinery needed nothing: `=` emits `Op_Eq` with
+`Tc_Word`, and a SET IS A WORD, so equality and inequality flow through the same path as INTEGER.  It is
+restricted to `=` and `/=`, deliberately - on sets `<=` means SUBSET, which is not a word compare, and emitting
+one would be a wrong answer rather than a refusal.
+
+**And the metric advances**: `...pointers compare only with NIL (line 470)` becomes `type mismatch assigning
+lre` - a later, different failure.  The full gate is green: run_bc, run_vm, bytecode_gaps, coverage,
+differential, run_m1, run_stress.
+
+**One thing did not work, and it is recorded rather than forced**: a fixture for set equality (comparing `{}`,
+`{1,3}` and a variable) is refused by the PARSER - `expression expected` at `if s = t then`.  So the parser
+has its own set-expression limit somewhere before the comparison rule is even reached, and the corpus only
+exercises `s2 = {}` inside a parenthesised conjunction.  The fixture is removed rather than committed broken,
+and that parser question is now a named gap of its own.
+
+So the comparison rule is not the whole set story - and the next step is either the parser's set expressions
+or the `lre` mismatch, whichever hello.ob2 reaches first.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
