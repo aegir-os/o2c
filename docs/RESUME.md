@@ -6299,8 +6299,21 @@ the earlier session had to fix for USER procedures, and for the same reason: the
 shape, so nothing exercised it.  `InAvail` is not a symbol, so `Idx = 0` and it refuses.
 
 **Reverted, not landed** - `run_bc` was FAIL (150) while the flip was on without that second site, and a red
-tree does not stand.  The measurement stands, though, and it is the whole of the remaining work: the same
-recognition at the parameterless-call site, then flip / fixture / gate.
+tree does not stand.  The measurement stands, though, and reading the site pins the rest of it:
+
+* the raise is at 10015, and the code BELOW it is an argument-list parser - so this is reached from `return`,
+  which treats its operand as a call, and the raise fires before that parser is ever entered.  The FFI names
+  need the same recognition here, guarded by `Mod_Name = "Input"` and bytecode mode, exactly as the factor
+  arm is;
+* **and it must LEAVE A VALUE ON THE STACK**, because it is reached from `return InAvail` - the emission is
+  `Call_Native (41..43, 0)`, which does that, but the raise has to be skipped rather than replaced, so the
+  structure is an `if` that jumps past it rather than a `return`;
+* it is worth noting WHY this shape was never exercised: it is the same bare-name call the earlier session
+  found unwritten for user procedures.  The corpus has now met it twice from opposite directions - a builtin
+  written in Oberon is the first source that WANTS it.
+
+Then flip / fixture / gate, and the fixture can be deterministic: with no stdin, `Available` is 1 (the
+terminator) and `Read` gives `Character'Val (0)`, which is what the Ada helper returns.
 
 ## 4. Method — what worked, and what did not
 
