@@ -6668,6 +6668,37 @@ return 0 and the question is which of the two paths sees it first.
 The flip is reverted so the tree is green; the seam, the native and both arms stay, because they are additive
 and both VM targets build with them - the same way `Clock_Ms` waited for its native.
 
+### 3fo. Args: the REAL site was 7848, and the arms work - one push short in the emission
+
+The metric's wording was the clue: `Args.ArgGet are not yet supported` - ARE, not IS.  Grepping for that string
+found a FAMILY of per-module refusals at 7739-7946 (Convert, Env, Args, XYplane, In), each naming its members
+in prose.  The `Args.ArgGet` arm is at 7848, and it is nothing like the `ARGCOUNT` arm I had patched: its Ada
+path ALREADY parses all three arguments (`P1` integer, `P2` ARRAY OF CHAR, `P3` integer) and appends
+`O2c_Arg_Get (p1, p2, p3)`.  So the bytecode fix was small - drop the raise, and emit beside the Ada append.
+
+**And it works**: with the flip on, `run_bc` PASSES and the metric moves off Args entirely, to
+
+    only INTEGER/CHAR/REAL comparisons are supported, and pointers compare only with NIL
+
+a semantic rule further along the compilation.  So Args' compiler work is done; what follows is the next gap
+the corpus meets.
+
+**One push short.**  A fixture for Args - `Args.Get (1, buf, res)` then `Out.Int (Args.count, 0)` - compiles
+and then the VM rejects it:
+
+    operand-stack depth violation at code offset 6004: depth-1, limit 153, opcode 195
+
+opcode 195 is the native call, and depth -1 says the three pushes before it did not all happen.  P1 is a
+LOAD (or a literal push), and P2/P3 are the body's by-ref parameters, whose SLOT holds the address - which is
+why they are `Load_Local (Local_Slot (...))` rather than `Bc_Load`.  One of those three is not pushing what the
+emitter expects, and the next step is to disassemble the fixture's Args body and count: `tools/bc_disasm.py`
+shows exactly what was emitted, which is how the sibling-link bug was found.
+
+**An eighth refusal site, and the lesson stands**: three turns on this file, and each time the first site
+patched was not the one firing.  The probe answered it here (no print appeared at either of the two markers,
+which sent the grep to the third string), and the probe is now removed.  The `Args` arms and the native stay,
+additive and verified, with the flip off - the same staging `Clock_Ms` went through.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

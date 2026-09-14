@@ -4144,7 +4144,6 @@ package body O2c_Compiler is
                                                       Math_Arity (MName))
                                     then
                                        --  MARKER_EXPR_REFUSAL: default
-                                       --  refusal, as on the statement paths.
                                        raise O2c_BC.Wrong_Construct with
                                          "bytecode backend: " & FNm & "."
                                          & MName & " is not yet supported";
@@ -7829,15 +7828,10 @@ package body O2c_Compiler is
             elsif To_String (Mod_Name) = "Args"
               and then Eq_No_Case (Head (1 .. H_Len), "ARGGET")
             then
-               --  Refused in bytecode mode rather than silently emitting
-               --  nothing: this branch appends to the Ada body and makes no
-               --  O2c_BC call at all, so a bytecode program would compile,
-               --  run, and quietly do nothing at all.
-               if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Args.ArgGet are not yet supported";
-               end if;
-               --  M50 FFI: argument fetch (builtin Args only)
+               --  M50 FFI: argument fetch (builtin Args only).  Both backends
+               --  are served from ONE parse now: the Ada side appends its call,
+               --  the bytecode side emits the equivalent native.  It used to
+               --  refuse here, which was right while the native did not exist.
                declare
                   P1, P2, P3 : Expr_Rec;
                begin
@@ -7866,6 +7860,32 @@ package body O2c_Compiler is
                   Append_Body ("      O2c_Arg_Get (" & To_String (P1.Text)
                                & ", " & To_String (P2.Text) & ", "
                                & To_String (P3.Text) & ");");
+                  if O2c_BC.Bytecode_Mode then
+                     --  Native 13 takes a value and two ADDRESSES.  P1 is a
+                     --  value; P2 and P3 are the body's own by-ref parameters,
+                     --  whose SLOT holds the address - so the slot is loaded
+                     --  raw, not dereferenced, which is what Bc_Load would do
+                     --  for an array-of parameter.
+                     if P1.Lit and then P1.Folds then
+                        O2c_Ir_Lower.Push_Int (P1.Val);
+                     else
+                        Bc_Load (Ada_Id (To_String (P1.Text)));
+                     end if;
+                     declare
+                        S2 : constant Integer :=
+                          O2c_BC.Local_Slot (Ada_Id (To_String (P2.Text)));
+                        S3 : constant Integer :=
+                          O2c_BC.Local_Slot (Ada_Id (To_String (P3.Text)));
+                     begin
+                        if S2 < 0 or else S3 < 0 then
+                           raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                             & "ArgGet needs the buffer and result in this frame";
+                        end if;
+                        O2c_Ir_Lower.Load_Local (Natural (S2));
+                        O2c_Ir_Lower.Load_Local (Natural (S3));
+                     end;
+                     O2c_Ir_Lower.Call_Native (13, 3);
+                  end if;
                end;
             elsif To_String (Mod_Name) = "XYplane"
               and then (Eq_No_Case (Head (1 .. H_Len), "PLANEOPEN")
