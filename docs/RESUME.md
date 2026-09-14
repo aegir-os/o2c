@@ -6917,6 +6917,43 @@ The next probe writes exactly that shape into an ordinary function, with In flip
 re-applies the three In arms and disassembles `In.Int`'s own body, which shows whether the native's result
 lands between the store's base/index and its STORE_IDX.
 
+### 3fw. The In failure is a CRASH the suite hides - and the emission is correct
+
+Running the probe by hand, with its own input and its stderr shown, is what the suite never does:
+
+    vm: running /tmp/int.obc
+    hello                                    <- In.String works
+    world                                    <- In.Name works
+    vm: internal error in phase 3: STORAGE_ERROR (stack overflow or erroneous memory access)
+
+**`bytecode_gaps` never showed this.**  It discards the probe's stderr and compares stdout, so a CRASH reads as
+a wrong answer - the entry says "In printed 'helloworld', expected helloworld42882.500" when what actually
+happened is that the VM died after two lines.  A suite that reports a wrong value for a crash sends the reader
+looking at the values.
+
+And the emission is CORRECT.  `In.Int`'s body is
+
+    4068 LOAD_L       [0]       the by-ref slot - the caller's address
+    4071 LOAD_CONST   [121]     the index, and pool[121] = 0
+    4076 CALL_NATIVE  [23, 0]   InInt
+    4080 STORE_IDX_I
+
+which is exactly [base, index, value].  The address itself is what is bad, so the CALLER did not pass one:
+`In.Int (i)` is a qualified call to a FLIPPED module, and `i` is a to-var parameter of it - so the passing
+convention across that boundary is the suspect, not the body.  The export carries `By_Ref` (`E.P (I) := (...,
+By_Ref => PRef (I), ...)`) and the caller is supposed to use it; whether it does is the next measurement.
+
+Two things worth keeping:
+
+* **a crash can masquerade as a wrong answer**.  `bytecode_gaps` compares stdout only; three suites now have
+  had a failure whose true shape differed from its report.
+* the last four turns have each ended with a corrected suspicion - three of them my own from the preceding
+  turn.  What is holding up is the disassembler and the hand-run; what is not is reasoning about emissions
+  from the code that was meant to produce them.
+
+Reverted, tree green.  Next: the by-ref convention across a module boundary - what the caller pushes for a
+flipped module's to-var parameter.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
