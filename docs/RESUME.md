@@ -6628,6 +6628,17 @@ entry 40), the `ARGCOUNT` arm switched from refuse to emit, the `ARGGET` arm cop
 fixture / gate.  Nothing in it is unmeasured now, which is the state worth reaching before writing rather
 than after reverting.
 
+**And it is smaller still: `Args.Get`'s bytecode path ALREADY EXISTS.**  The arm at ~8380 handles the
+qualified `Args.Get (n, arg, res)` in full - it parses the three arguments, pushes the value argument (with
+the literal-or-load distinction that `Bc_Load` alone gets wrong for `1`), pushes the buffer and the result
+slot with `Addr_Global`, and calls `Call_Native (13, 3)`.  So a CALLER of Args.Get is already served.
+
+What is missing is only the BARE `ArgGet` inside the builtin's own body - the same bare/qualified split as
+Input, in the opposite order: here the qualified half is done and the bare half is not.  Its arguments are
+the body's own parameters, and `arg`/`res` are by-ref, so their slots hold the ADDRESSES the native wants -
+which means the bare arm is a small parse and three pushes, with the qualified arm beside it as the worked
+example.  The 3-argument parse is the part not yet studied, and that is the next measurement.
+
 `In` (3677, `InChar/InInt/InLong/InReal`) is the same family and should be measured the same way first - and
 its four names suggest four arms and possibly a native, which the same kind of reading will settle.
 
