@@ -137,6 +137,7 @@ cat > "$WORK/recorded.txt" <<'EOB'
 gcloop	ADA_REFUSED	refuses: "type mismatch assigning cur.next" (pointer designator)
 localprocv	ADA_REFUSED	refuses: procedure values as variables
 proccall	ADA_REFUSED	refuses: procedure values as variables
+procfld	ADA_REFUSED	refuses: procedure values as record fields
 threadid	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadjoin	ADA_REFUSED	refuses: procedure values as variables
 threadmutex	ADA_REFUSED	refuses: "Threads needs the bytecode backend"

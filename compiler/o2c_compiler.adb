@@ -1303,9 +1303,11 @@ package body O2c_Compiler is
                          return Natural is
       FU : constant Natural := UTypes (U).F (J).UT;
    begin
-      if FU = 0 or else FU = U or else UTypes (FU).Is_Ptr then
+      if FU = 0 or else FU = U or else UTypes (FU).Is_Ptr
+        or else UTypes (FU).Is_Proc
+      then
          --  a scalar, a field naming its own record (Oberon's implicit
-         --  pointer), or a pointer: one word each
+         --  pointer), a pointer, or a procedure id: one word each
          return 1;
       end if;
       --  an array of any element, or a nested record: its own size
@@ -1565,8 +1567,9 @@ package body O2c_Compiler is
             end if;
          elsif UTypes (U).F (J).UT = U
            or else UTypes (UTypes (U).F (J).UT).Is_Ptr
+           or else UTypes (UTypes (U).F (J).UT).Is_Proc
          then
-            null;                  --  one word: a pointer either way
+            null;                  --  one word: a pointer or a procedure id
          elsif UTypes (UTypes (U).F (J).UT).Arr_Len > 0 then
             if UTypes (UTypes (U).F (J).UT).Elem_UT /= 0 then
                if not Fields_Allowed (UTypes (UTypes (U).F (J).UT).Elem_UT,
@@ -2369,6 +2372,32 @@ package body O2c_Compiler is
                end if;
                D.Text := D.Text & "."
                  & Ada_Id (To_String (UTypes (FO).F (F).Name));
+               --  A procedure-typed field is a terminal leaf too: it holds
+               --  a procedure id in one word, walked like an INTEGER slot,
+               --  with D.UT marking it for the two consumers that care -
+               --  the assignment's store and the indirect call.
+               if UTypes (FO).F (F).UT /= 0
+                 and then UTypes (UTypes (FO).F (F).UT).Is_Proc
+                 and then Lex.Peek_Token.Kind /= Lex.Tok_Dot
+                 and then Lex.Peek_Token.Kind /= Lex.Tok_Caret
+                 and then Lex.Peek_Token.Kind /= Lex.Tok_LBracket
+               then
+                  D.Sc := T_Int;
+                  D.UT := UTypes (FO).F (F).UT;
+                  if O2c_BC.Bytecode_Mode then
+                     D.Off := Nested + Field_Offset (UT, FO, F);
+                     D.K := D_Field;
+                     if not UTypes (Base_UT).Is_Ptr
+                       and then not D.Base_On_Stack
+                     then
+                        Bc_Base (Base_Name, Base_UT);
+                     end if;
+                  else
+                     D.K := D_Scalar;
+                  end if;
+                  Next;        --  past the field name
+                  return D;
+               end if;
                if UTypes (FO).F (F).UT = 0
                  or else (Ptr_Field_Of (UTypes (FO).F (F).UT, FO)
                           --  A pointer field that nothing selects from is a
@@ -5029,6 +5058,18 @@ package body O2c_Compiler is
                   U  : constant Natural := Syms (Id).UT;
                begin
                   Next;              --  past the variable name
+                  if UTypes (U).Is_Proc then
+                     --  A procedure value is its id: one slot, INTEGER-
+                     --  shaped to the consumers that store or compare it.
+                     --  Without this arm the name fell into the record
+                     --  chain and died as "an array value needs an index".
+                     if O2c_BC.Bytecode_Mode then
+                        Bc_Load (Nm);
+                     end if;
+                     R.Text := To_Unbounded_String (Nm);
+                     R.Typ := T_Int;
+                     return R;
+                  end if;
                   if UTypes (U).Is_Ptr and then Cur.Kind = Lex.Tok_Is then
                      --  p IS T: class-wide membership test (M13)
                      Next;
@@ -10360,9 +10401,67 @@ package body O2c_Compiler is
                         D : Desig := Parse_Rec_Ptr_Chain (Head (1 .. H_Len),
                                                           U);
                      begin
+                        if D.K = D_Field and then D.UT /= 0
+                          and then UTypes (D.UT).Is_Proc
+                          and then Cur.Kind = Lex.Tok_LParen
+                        then
+                           --  Calling through a procedure-typed field: the
+                           --  field holds the callee's id, and a PROCEDURE
+                           --  type is parameterless by definition - the
+                           --  variable's call, one designator down.
+                           Next;
+                           Expect (Lex.Tok_RParen,
+                                   "')' after a procedure field call");
+                           Next;
+                           if O2c_BC.Bytecode_Mode then
+                              O2c_Ir_Lower.Load_Fld
+                                (D.Off, O2c_Ir_Lower.Fld_Int);
+                              O2c_BC.Call_Indirect;
+                           end if;
+                           Append_Body ("      " & To_String (D.Text)
+                                        & ";");
+                        else
                         Expect (Lex.Tok_Assign, "':='");
                         Next;
-                        if D.K = D_Index then
+                        if D.K = D_Field and then D.UT /= 0
+                          and then UTypes (D.UT).Is_Proc
+                          and then Cur.Kind = Lex.Tok_Ident
+                          and then Find (Cur.Text (1 .. Cur.Len)) > 0
+                          and then Syms (Find (Cur.Text (1 .. Cur.Len))).Kind
+                            = S_Proc
+                        then
+                           --  A procedure id into the field: the bare name
+                           --  pushes the id, the store is the field's.  A
+                           --  PROCEDURE type is parameterless, so a
+                           --  procedure WITH parameters cannot be the value.
+                           declare
+                              RS : constant Natural :=
+                                Find (Cur.Text (1 .. Cur.Len));
+                           begin
+                              if Syms (RS).Ret then
+                                 raise O2c_Error with "'"
+                                   & Cur.Text (1 .. Cur.Len)
+                                   & "' is a function, so it cannot be a "
+                                   & "PROCEDURE value";
+                              end if;
+                              if Syms (RS).Params /= 0 then
+                                 raise O2c_Error with "'"
+                                   & Cur.Text (1 .. Cur.Len)
+                                   & "' takes arguments, so it cannot be a "
+                                   & "PROCEDURE value (a procedure type is "
+                                   & "parameterless)";
+                              end if;
+                              if O2c_BC.Bytecode_Mode then
+                                 O2c_BC.Push_BC_Proc (Syms (RS).Bc_Proc);
+                                 O2c_Ir_Lower.Store_Fld
+                                   (D.Off, O2c_Ir_Lower.Fld_Int);
+                              end if;
+                              Append_Body ("      " & To_String (D.Text)
+                                           & " := "
+                                           & Cur.Text (1 .. Cur.Len) & ";");
+                              Next;
+                           end;
+                        elsif D.K = D_Index then
                            --  [base, index]: evaluate the value, store it.
                            declare
                               V : Expr_Rec := Parse_Expr;
@@ -10436,6 +10535,7 @@ package body O2c_Compiler is
                            raise O2c_Error with "cannot assign a whole "
                              & "char-array here; index it (line "
                              & Natural'Image (Cur.Line) & ")";
+                        end if;
                         end if;
                      end;
                   end if;
@@ -10983,6 +11083,18 @@ package body O2c_Compiler is
                                  --  Store it: pushing alone leaves the
                                  --  variable holding whatever it held, which
                                  --  for a fresh one is the zeroed slot.
+                                 Bc_Store (Head (1 .. H_Len));
+                                 Next;
+                              elsif O2c_BC.Bytecode_Mode
+                                and then LS > 0 and then RS > 0
+                                and then Syms (LS).UT > 0
+                                and then UTypes (Syms (LS).UT).Is_Proc
+                                and then Syms (RS).Kind = S_Var
+                                and then Syms (RS).UT > 0
+                                and then UTypes (Syms (RS).UT).Is_Proc
+                              then
+                                 --  Value to value: the id crosses.
+                                 Bc_Load (Ada_Id (Cur.Text (1 .. Cur.Len)));
                                  Bc_Store (Head (1 .. H_Len));
                                  Next;
                               else
