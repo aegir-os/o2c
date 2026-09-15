@@ -130,12 +130,12 @@ fi
 #  An imported CHAR constant had no pushable literal at all.  The local
 #  spellings of both are the consts.ob2 fixture; this probe adds the module
 #  boundary, which the fixture format cannot cross.
-printf 'module ImpCLib;\nconst N* = 4;\n    C* = "x";\nend ImpCLib.\n' > "$WORK/impc_lib.ob2"
-printf 'module ImpC;\nimport Out, ImpCLib;\nconst M = ImpCLib.N * 2;\nvar k: integer;\n    c: char;\nbegin\n  k := M;\n  Out.Int(k, 0);\n  c := ImpCLib.C;\n  if c = "x" then Out.Int(1, 0) else Out.Int(0, 0) end\nend ImpC.\n' > "$WORK/impc.ob2"
+printf 'module ImpCLib;\nconst N* = 4;\n    C* = "x";\n    Big* = 5000000000;\nend ImpCLib.\n' > "$WORK/impc_lib.ob2"
+printf 'module ImpC;\nimport Out, ImpCLib;\nconst M = ImpCLib.N * 2;\nvar k: integer;\n    c: char;\n    b: longint;\nbegin\n  k := M;\n  Out.Int(k, 0);\n  c := ImpCLib.C;\n  if c = "x" then Out.Int(1, 0) else Out.Int(0, 0) end;\n  b := ImpCLib.Big;\n  if b = 5000000000 then Out.String("big-ok") else Out.String("big-bad") end\nend ImpC.\n' > "$WORK/impc.ob2"
 if timeout 120 "$FRONT" "$WORK/impc.ob2" "$WORK/impc.obc" "$WORK/impc_lib.ob2" >"$WORK/impc.log" 2>&1 \
-   && [ "$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/impc.obc" 2>/dev/null | tr -d '\n\r')" = "81" ]
+   && [ "$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/impc.obc" 2>/dev/null | tr -d '\n\r')" = "81big-ok" ]
 then
-   note "positive: imported constants fold (M = Lib.N * 2) and CHAR ones push"
+   note "positive: imported constants fold (M = Lib.N * 2), CHAR ones push, and a LONGINT one past 32 bits pushes"
 else
    bad "impc: imported constants failed: $(cat "$WORK/impc.log")"
 fi

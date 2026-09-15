@@ -3270,7 +3270,26 @@ package body O2c_Compiler is
                elsif Has_Dot then
                   R.Typ := T_Real;              --  REAL literal (M18)
                else
+                  --  A digit literal past INTEGER'Last is LONGINT.  The type
+                  --  is a front-end fact, not an emission detail, so it is
+                  --  decided BEFORE the mode guard below: an import parse
+                  --  suspends emission, and an exported LONGINT constant
+                  --  recorded as T_Int mismatches at the import site.
                   R.Typ := T_Int;
+                  begin
+                     declare
+                        V : constant Long_Integer :=
+                          Long_Integer'Value (Norm);
+                     begin
+                        if V > Long_Integer (Integer'Last) then
+                           R.Typ := T_Long;
+                        end if;
+                     end;
+                  exception
+                     when Constraint_Error =>
+                        --  Past LONGINT too: the push path names it loudly.
+                        null;
+                  end;
                end if;
                if O2c_BC.Bytecode_Mode then
                   if Has_D or else Has_Dot then
@@ -4396,12 +4415,27 @@ package body O2c_Compiler is
                                              (Integer'Value (CT));
                                         exception
                                            when Constraint_Error =>
-                                              raise O2c_BC.Wrong_Construct
-                                                with "bytecode backend: "
-                                                  & "constant '" & FNm & "."
-                                                  & MName & "' is not an "
-                                                  & "INTEGER literal the VM "
-                                                  & "can push";
+                                              --  A LONGINT constant past
+                                              --  INTEGER'Last overflows the
+                                              --  plain Value: INTEGER'Last
+                                              --  is the parser's bound, not
+                                              --  the value's (the digit-
+                                              --  literal path has the same
+                                              --  fallback).
+                                              begin
+                                                 O2c_Ir_Lower.Push_Long
+                                                   (Long_Integer'Value (CT));
+                                              exception
+                                                 when Constraint_Error =>
+                                                    raise O2c_BC
+                                                      .Wrong_Construct
+                                                      with "bytecode "
+                                                        & "backend: constant '"
+                                                        & FNm & "." & MName
+                                                        & "' is not an "
+                                                        & "INTEGER literal "
+                                                        & "the VM can push";
+                                              end;
                                         end;
                                      elsif Xs (XI).Typ = T_Str
                                        and then CT'Length >= 2
@@ -5447,6 +5481,16 @@ package body O2c_Compiler is
                                    & "backend: constant '" & T & "' is not a "
                                    & "REAL literal the VM can push";
                            end;
+                        elsif Syms (Id).Typ = T_Long then
+                           --  Past INTEGER'Last: the text, not Const_Val.
+                           begin
+                              O2c_Ir_Lower.Push_Long (Long_Integer'Value (T));
+                           exception
+                              when Constraint_Error =>
+                                 raise O2c_BC.Wrong_Construct with "bytecode "
+                                   & "backend: constant '" & T & "' is not a "
+                                   & "LONGINT literal the VM can push";
+                           end;
                         elsif Syms (Id).Typ = T_Char and then T'Length = 3
                           and then T (T'First) = ''' and then T (T'Last) = '''
                         then
@@ -6426,6 +6470,11 @@ package body O2c_Compiler is
          --  site pushes the value read back from it.  A SET constant has
          --  no such fold (its mask is built on the stack) and stays a
          --  loud refusal.
+         Syms (N_Sym).Const_Text := V.Text;
+      elsif V.Typ = T_Long and then V.Lit then
+         --  A LONGINT constant past INTEGER'Last: Const_Val is an Integer
+         --  and cannot hold it, so the literal text crosses and the use
+         --  site pushes it read back, like a REAL's.
          Syms (N_Sym).Const_Text := V.Text;
       end if;
       if V.Folds then
