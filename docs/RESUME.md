@@ -1,14 +1,15 @@
 # RESUME — starting point for the next session
 
 Written at the end of a long session on the bytecode backend's FFI surface,
-then corrected and extended by the three sessions that followed it - the unary
-operators, construct coverage, and descending FOR.
+then corrected and extended by the sessions that followed it - the unary
+operators, construct coverage, descending FOR, and the gap-closing campaign
+(3hf) that retired the divergence inventory.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         443
-    fixtures        92 in tests/bc/
-    foreign natives 25 in vm/obc_vm.adb
+    commits         532
+    fixtures        134 in tests/bc/
+    foreign natives 45 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
 The header names no commit hash on purpose: `HEAD` and `commits` describe the
@@ -7984,6 +7985,95 @@ bc_emit now opens and ends the body around its emission, which is what the real 
 and what the self-test should have been modelling.  Encode's synthesize-the-body fallback stays
 for what it is - an offset-preserving shim for a one-procedure image, not a licence to skip the
 body.
+
+### 3hf. The gap-closing campaign - every known bytecode/Ada divergence, closed or recorded
+
+The campaign started from an inventory of every divergence between the Ada codegen backend and
+the VM backend, in three classes: silent wrong answers (fix first), loud refusals by root cause
+(implement or record), and by-design differences (leave).  It closed in eight commits, each
+gated by the full seven suites, with the differential count moving 84 to 89.  The order
+mattered: the silent-wrong-answer class went first because a wrong answer invalidates every
+golden that accidentally encoded it - and hello.ob2's golden had done exactly that for method
+calls (`a.Scale(3)` did not scale, and the golden said so).
+
+**Batch by batch:**
+
+- **ABS/ODD/INC/DEC (`be5638b`).**  All four parsed, ran, and quietly did nothing: ABS returned
+  its argument, INC/DEC leaked the value.  `Op_Abs` joins the IR (the VM had IAbs/RAbs all
+  along), ODD lowers to `x rem 2 /= 0`, INC/DEC store through the VAR-formal address when the
+  target is by-ref.  The probe that found them also found a both-backends crash on `INC(x,10)`:
+  a `Step : String := "1"` Unbounded_String length check.  absodd/odd/incdec fixtures.
+
+- **Mixed REAL/INTEGER arithmetic (`922ff69`).**  Nine refusal sites, one rule: the integer
+  side must be a LITERAL (Real_Like's `.Lit`; LONGINT never mixes - both backends refuse).
+  `Bc_Real_Coerce` does I2R on the right operand, and a SWAP-I2R-SWAP dance on the left, which
+  is where the new SWAP opcode (0x75) came from: emitter, VM exec, verifier (depth-neutral),
+  IR, and the docs/obc-image.md spec row, all in the one commit.  mixed.ob2.
+
+- **Method calls (`d2060c4`).**  A statement method call was a no-op WITH a stack leak; an
+  expression one refused.  The semantic fact that sizes the fix: a record VALUE receiver is
+  never polymorphic, so static binding is correct (address + Call_Proc); a POINTER receiver
+  dispatches through the tag (DISPATCH, count-general).  Imported-record methods bind
+  statically to `Owner.Method_O2c_Rec`, which needed exported bound methods X_Add'ed under
+  their impl name.  Pointers to imported records refuse loudly.  stmtmethod.ob2 (2/11/21/8),
+  and the run_m1 catch above: hello.ob2's golden had encoded the no-ops.
+
+- **Static links, N deep (`59086d0`).**  Every nested frame already records its own link slot,
+  so the one-level limit was bookkeeping, not a property of the machine.  `Find_Up_Level` /
+  `Bc_Chase` walk the chain for loads, stores, LEN, open-array formals, and the call link
+  (`Ancestor_Distance` replaces `Link_For_Callee`).  A store that cannot be reached refuses
+  with the name - the old path fell back to a module global, the silent wrong answer of 3ec.
+  Surfaced by the chase, the campaign's first latent bug: **End_Proc restored the outer frame
+  from single Saved_* slots that a nested declaration overwrites**, so every top-level
+  procedure after a nested one recorded a stale parent (measured: Reals' Ten claimed Convert).
+  The saved state now lives in the procedure's own Proc_Entry.  deep.ob2 (two-level loads and
+  stores, an outward call, an open-array formal two frames up), and the run_bc deep check
+  flipped from refusal-probe to positive chase.
+
+- **Comparisons (`9195e51`).**  `a <= b` on SETs was the campaign's worst silent wrong answer:
+  the subset branch built only the Ada text and returned, leaving both sets on the stack for
+  the IF to test the top one - true by luck, false for a superset (probe-measured before the
+  fix).  It now emits the difference against the empty set.  BOOLEAN =/# are word compares;
+  mixed REAL/INTEGER compares reuse Bc_Real_Coerce.  cmpset.ob2, and the gaps-script entry that
+  is the harness rule made flesh: "compiles, runs, answers wrongly" has no machine-checked
+  home until the fix makes it a fixture.
+
+- **Declaration shapes (`c2485b7`).**  The inventory's list was partly stale - record fields,
+  arrays of records, and extensions already worked.  The residual was two lists out of sync:
+  the declaration gate allowed seven one-slot element types, the subscript base push listed
+  four, so an ARRAY OF SET / LONGREAL / LONGINT passed declaration and underflowed the
+  verifier with no construct named.  (Inline `array N of T` as a field type is a both-backends
+  parser limit - consistent, not a divergence.)  arrkind.ob2; the Ada side maps these to
+  O2c_Bool_Arr (realarr's category) and is recorded, not fixed.
+
+- **Constants and NEW of a designator (`080c41f`).**  An imported INTEGER constant pushed its
+  value but never folded, so `const M = Lib.N * 2` was refused at the use; CHAR and BOOLEAN
+  constants had no pushable literal at all.  Fixing the fold surfaced the campaign's second
+  latent bug: **const expressions emitted dead code before the body proc opened, and
+  Open_Proc's Depth reset lost the tracking while the verifier still simulated it** - two
+  constants in a row exceeded the recorded stack limit.  Emission is now suspended for the
+  constant's own expression (the value is re-emitted at every use), with value capture kept
+  alive under Const_Quiet.  NEW(h.p) and the self-referential NEW(q^.next) allocate through
+  the field: the chain leaves the base on the stack, so the allocator's result stores with
+  Store_Fld - the assignment's shape.  consts.ob2, newdesig.ob2, and the multi-module impc
+  probe in run_bc (the fixture format is single-module).
+
+- **Texts (`426d0c1`).**  The 3cg-era note naming Texts.OpenWriter as "the next refusal" was
+  stale: the record-actual (3cj) and VAR-receiver work had already closed everything Texts'
+  bodies need, and a probe passes the whole Write* family.  The only uncovered export was
+  WriteReal, added to textslib.ob2 - both backends print 1.500.
+
+**What remains, deliberately.**  Three `blocked` entries in bytecode_gaps.sh - bare
+Ln/InAvail/InChar inside a module NAMED Math/Input/In - are the correct state until the Math
+flip, and the harness enforces that they stay blocked.  The Ada-side recordings stand at 15
+ADA_REFUSED + 15 ADA_BROKEN, each with the reason named; they are the retiring backend's own
+limits, recorded rather than fixed.
+
+**Method note, one campaign later.**  The two latent bugs were both found the same way: a
+change meant to alter behaviour was tested on BOTH cases it covers (the AGENTS.md rule), the
+second case failed somewhere the hypothesis said nothing about, and a narrow instrumented run
+(gdb's catchpoint, a RESERVE-DEBUG print) named the site in one pass.  The deduce-then-patch
+loop had spent longer producing confident wrong answers.
 
 ## 4. Method — what worked, and what did not
 

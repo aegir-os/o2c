@@ -1,5 +1,14 @@
 # Bytecode backend: known gaps
 
+> **STATUS (3hf): this document is HISTORICAL.** The gap-closing campaign
+> (RESUME.md §3hf, commits `be5638b`..`426d0c1`) retired the divergence
+> inventory: every item below is either fixed - and held by a fixture in
+> `tests/bc/` - or recorded with its reason in `tests/bytecode_gaps.sh` /
+> `tests/differential.sh`. The priorities and line numbers are the state at
+> writing, kept for the narrative of what was load-bearing and why; do not
+> treat any refusal described here as current without probing it first.
+> The living lists are the executable ones.
+
 Constructs the **Ada** backend accepts and the **bytecode** backend does not.
 The executable form of this list is `tests/bytecode_gaps.sh` - one probe per
 entry, asserting the current state. **Fixing a gap makes that script fail until
