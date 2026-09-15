@@ -7,8 +7,8 @@ operators, construct coverage, descending FOR, and the gap-closing campaign
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         539
-    fixtures        137 in tests/bc/
+    commits         542
+    fixtures        139 in tests/bc/
     foreign natives 45 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -8131,11 +8131,48 @@ commits, differential 89 to 91, every batch gated by the seven suites.
   (ptr.ob2).  The PLANEISDOT/PLANEKEY arm - Ada text only, harmless while the builtin
   never reaches bytecode mode - refuses by name, the Input arm's precedent.
 
-**What remains, deliberately.**  Methods through a pointer to an IMPORTED record and
-procedure-typed record fields stay recorded (the former needs qualified type names, the
-former-and-a-half sizes the latter); a qualified type in a formal (`var r: Lib.R`) is
-the front-end hole both need.  Hex character literals (`0X`) are out of dialect - the
-corpus spells them CHR/ORD.  The three `blocked` entries stand until the Math flip.
+**What remains, deliberately.**  Procedure-typed record FIELDS stay recorded: procedure
+values are first-class otherwise (a variable holds a proc id, `f()` calls through it,
+Threads.Start spawns it), but a field would need the proc-id store and the indirect
+call wired through the designator engine - the variable paths (Push_BC_Proc at the
+bare-name assignment, Bc_Load + Call_Indirect at the call) are the templates.
+Hex character literals (`0X`) are out of dialect - the corpus spells them CHR/ORD.
+The three `blocked` entries stand until the Math flip.
+
+### 3hi. Qualified type names, imported-record pointer methods - and the extension layout
+
+The deferred half of 3hg's list, closed in three commits, each gated.
+
+- **Qualified type names (`64390f1`).**  A VAR of an imported type had M20's branch;
+  the formal parameter, the function return type, POINTER TO Lib.R and ARRAY OF Lib.R
+  resolved only local names and refused "unknown type".  All four resolve through
+  Import_Type now (a pointer target never Pends - an imported type cannot be a forward
+  reference).  qnames.ob2 exercises all four against Texts.Writer; differential 93.
+
+- **Methods through a pointer to an imported record (`4ee4b83`).**  The method table of
+  an imported record seeds from the owner's export catalog (an override keeps the
+  inherited slot; the impl is the export under its impl name, the static call's premise
+  made tabular), so a pointer receiver dispatches through the tag exactly as a local
+  one - statement and function paths, and a local extension's override reaches the
+  widened pointer.
+
+- **The extension layout was BACKWARDS (same commit).**  The probe for the methods
+  returned the extension's own first field from an inherited method, and a LOCAL
+  reproduction returned r for x on a Circle: Field_Offset summed the DESCENDANT's
+  fields, laying extensions out own-fields-first.  Nothing caught it because an
+  override is recompiled against the extension and every fixture overrode - the worst
+  kind of silent wrong answer, the kind only a never-taken path can hide.  The layout
+  is the parent's first now, and Field_Offset is the only layout authority (the GC
+  scans whole bodies), which makes the one function the whole fix.  stmtmethod.ob2
+  gained a non-overridden GetX - the regression shape itself; run_bc.sh carries the
+  multi-module dispatch probe (22 = the override ran, the inherited Get read the
+  parent's offset).
+
+- **Nesting depth is fine (`nest9.ob2`).**  The scan's >8-nesting worry was unfounded:
+  Total_Slots' guard is a recursion bound, and nine records compiled and ran on the
+  first probe.  Fixture, differential 94.
+
+## 4. Method — what worked, and what did not
 
 ## 4. Method — what worked, and what did not
 
