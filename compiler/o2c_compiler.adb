@@ -6649,19 +6649,42 @@ package body O2c_Compiler is
          if Cur.Kind /= Lex.Tok_Ident then
             raise O2c_Error with "an element type expected";
          end if;
-         UTypes (UTI).Elem := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
-         if UTypes (UTI).Elem = T_Str then
-            --  element is a user type: an earlier ARRAY or RECORD (M16)
+         --  A qualified element (ARRAY OF Lib.R) resolves through the
+         --  import catalog, exactly as a VAR of one does (M20).
+         if Imported_Mod (Cur.Text (1 .. Cur.Len))
+           and then Lex.Peek_Token.Kind = Lex.Tok_Dot
+         then
             declare
-               EU : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+               Mod_Nm : constant String := Cur.Text (1 .. Cur.Len);
+               EU     : Natural;
             begin
-               if EU = 0 or else UTypes (EU).Is_Ptr then
+               Next;           --  past the module name
+               Next;           --  past '.'
+               Expect (Lex.Tok_Ident, "an exported type name");
+               EU := Import_Type (Mod_Nm, Cur.Text (1 .. Cur.Len));
+               if UTypes (EU).Is_Ptr then
                   raise O2c_Error with "array element types: INTEGER/BOOLEAN/"
-                    & "CHAR or an earlier ARRAY/RECORD type ('"
+                    & "CHAR or an ARRAY/RECORD type ('" & Mod_Nm & "."
                     & Cur.Text (1 .. Cur.Len) & "')";
                end if;
+               UTypes (UTI).Elem := T_Str;
                UTypes (UTI).Elem_UT := EU;
             end;
+         else
+            UTypes (UTI).Elem := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
+            if UTypes (UTI).Elem = T_Str then
+               --  element is a user type: an earlier ARRAY or RECORD (M16)
+               declare
+                  EU : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+               begin
+                  if EU = 0 or else UTypes (EU).Is_Ptr then
+                     raise O2c_Error with "array element types: INTEGER/"
+                       & "BOOLEAN/CHAR or an earlier ARRAY/RECORD type ('"
+                       & Cur.Text (1 .. Cur.Len) & "')";
+                  end if;
+                  UTypes (UTI).Elem_UT := EU;
+               end;
+            end if;
          end if;
          Next;
          UTypes (UTI).Is_Rec := False;
@@ -7011,7 +7034,19 @@ package body O2c_Compiler is
             Next;
             UTypes (UTI).Is_Ptr := True;
             UTypes (UTI).Is_Rec := False;
-            TGT := Find_UT (TName);
+            if Imported_Mod (TName)
+              and then Cur.Kind = Lex.Tok_Dot
+            then
+               --  POINTER TO Lib.R: an imported target can never be a
+               --  forward reference, so no Pend - the catalog resolves it
+               --  now (or names what is not exported).
+               Next;           --  past '.'
+               Expect (Lex.Tok_Ident, "an exported type name");
+               TGT := Import_Type (TName, Cur.Text (1 .. Cur.Len));
+               Next;
+            else
+               TGT := Find_UT (TName);
+            end if;
             if TGT = 0 then
                UTypes (UTI).Pend := True;
                UTypes (UTI).Pend_Nm := To_Unbounded_String (TName);
@@ -7030,8 +7065,12 @@ package body O2c_Compiler is
                     & "pointer (M26)";
                end if;
                UTypes (UTI).Ptr_Tgt := TGT;
+               --  The TARGET's name, not the text after TO: a qualified
+               --  reference (POINTER TO Lib.R) resolves to the imported
+               --  type's own name.
                Append_Decl ("   type " & Ada_Id (Name)
-                         & " is access all " & Ada_Last (TName)
+                         & " is access all "
+                         & Ada_Last (To_String (UTypes (TGT).Name))
                          & "'Class;");
             end if;
          end;
@@ -7373,20 +7412,43 @@ package body O2c_Compiler is
                   declare
                      TN : constant String := Cur.Text (1 .. Cur.Len);
                   begin
-                     PTyp (N_Par) := Builtin_Type_Of (TN);
-                     if PTyp (N_Par) = T_Str then
-                        PUT (N_Par) := Find_UT (TN);
-                        if PUT (N_Par) = 0 then
-                           raise O2c_Error with "unknown type '" & TN
-                             & "' (line " & Natural'Image (Cur.Line) & ")";
+                     if Imported_Mod (TN)
+                       and then Lex.Peek_Token.Kind = Lex.Tok_Dot
+                     then
+                        --  VAR r: Lib.R - the formal's type comes from the
+                        --  import catalog, the same resolution a VAR of an
+                        --  imported type gets (M20).
+                        Next;        --  past the module name
+                        Next;        --  past '.'
+                        Expect (Lex.Tok_Ident, "an exported type name");
+                        PUT (N_Par) := Import_Type
+                          (TN, Cur.Text (1 .. Cur.Len));
+                        PTyp (N_Par) := T_Str;
+                        if not UTypes (PUT (N_Par)).Is_Ptr
+                          and then not By_Ref
+                        then
+                           raise O2c_Error with "record/array parameters "
+                             & "must be declared VAR ('" & TN & "."
+                             & Cur.Text (1 .. Cur.Len) & "', line "
+                             & Natural'Image (Cur.Line) & ")";
                         end if;
-                        if not UTypes (PUT (N_Par)).Is_Ptr then
-                           --  records and arrays are VAR-only (M11): the
-                           --  Oberon-2 report has no structured value params
-                           if not By_Ref then
-                              raise O2c_Error with "record/array parameters "
-                                & "must be declared VAR ('" & TN & "', line "
-                                & Natural'Image (Cur.Line) & ")";
+                     else
+                        PTyp (N_Par) := Builtin_Type_Of (TN);
+                        if PTyp (N_Par) = T_Str then
+                           PUT (N_Par) := Find_UT (TN);
+                           if PUT (N_Par) = 0 then
+                              raise O2c_Error with "unknown type '" & TN
+                                & "' (line " & Natural'Image (Cur.Line) & ")";
+                           end if;
+                           if not UTypes (PUT (N_Par)).Is_Ptr then
+                              --  records and arrays are VAR-only (M11): the
+                              --  Oberon-2 report has no structured value params
+                              if not By_Ref then
+                                 raise O2c_Error with "record/array "
+                                   & "parameters must be declared VAR ('"
+                                   & TN & "', line "
+                                   & Natural'Image (Cur.Line) & ")";
+                              end if;
                            end if;
                         end if;
                      end if;
@@ -7416,17 +7478,33 @@ package body O2c_Compiler is
          declare
             TN : constant String := Cur.Text (1 .. Cur.Len);
          begin
-            Ret_Typ := Builtin_Type_Of (TN);
-            if Ret_Typ = T_Str then
-               Ret_UT := Find_UT (TN);
-               if Ret_UT = 0 then
-                  raise O2c_Error with "unknown type '" & TN
-                    & "' (line " & Natural'Image (Cur.Line) & ")";
-               end if;
+            if Imported_Mod (TN)
+              and then Lex.Peek_Token.Kind = Lex.Tok_Dot
+            then
+               Next;           --  past the module name
+               Next;           --  past '.'
+               Expect (Lex.Tok_Ident, "an exported type name");
+               Ret_UT := Import_Type (TN, Cur.Text (1 .. Cur.Len));
+               Ret_Typ := T_Str;
                if not UTypes (Ret_UT).Is_Ptr then
                   raise O2c_Error with "function return types: INTEGER/"
-                    & "BOOLEAN/CHAR or a POINTER type ('" & TN & "', line "
+                    & "BOOLEAN/CHAR or a POINTER type ('" & TN & "."
+                    & Cur.Text (1 .. Cur.Len) & "', line "
                     & Natural'Image (Cur.Line) & ")";
+               end if;
+            else
+               Ret_Typ := Builtin_Type_Of (TN);
+               if Ret_Typ = T_Str then
+                  Ret_UT := Find_UT (TN);
+                  if Ret_UT = 0 then
+                     raise O2c_Error with "unknown type '" & TN
+                       & "' (line " & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  if not UTypes (Ret_UT).Is_Ptr then
+                     raise O2c_Error with "function return types: INTEGER/"
+                       & "BOOLEAN/CHAR or a POINTER type ('" & TN
+                       & "', line " & Natural'Image (Cur.Line) & ")";
+                  end if;
                end if;
             end if;
          end;
