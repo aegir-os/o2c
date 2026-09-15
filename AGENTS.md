@@ -95,6 +95,15 @@ checking nothing, which is how its first version behaved.
 directory does *not* announce itself as a build failure at the point of use —
 it surfaces as a stale tool, which is worse.
 
+**The distribution is staged by aegir's Makefile, from `O2C_ROOT`.**
+`make disk.img O2C_ROOT=…` (also `make run` without `SKIP_DISK`) sub-makes
+`build vm-aegir` here, then stages: stripped `vm.elf` → `C/o2_vm`, stripped
+`o2c.elf` → `Development/C/o2c`, the test corpus **sources only** (tar
+excludes `*.out`, `*.sh`, `ada_host`, `hello.gpr`) → `Development/tests`,
+`samples/` → `Development/samples`. BeFS directories are multi-leaf-capable
+(mkbefs splits like the engine), so corpus size is no longer capped; the
+sources-only choice is about guest consumers, not capacity.
+
 **Never suppress a build's output.** `make tools-host >/dev/null 2>&1` with no
 exit-status check hid a failing tool build for two turns: `O2c_BC` had gained
 the `OBC_VM` dependency, `tools.gpr` did not have `../vm`, the link kept the
