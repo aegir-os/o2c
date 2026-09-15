@@ -24,6 +24,11 @@ begin
   h.v := h.v * 2
 end Twice;
 
+procedure (var h: Shape) GetX: integer;
+begin
+  return h.x
+end GetX;
+
 procedure (var h: R2) Get: integer;
 begin
   return h.v
@@ -41,6 +46,11 @@ begin
   s := c;
   s.Bump(1);
   Out.Int(c.x, 0); Out.Ln;
+  (*  GetX is NOT overridden: the impl was compiled against Shape's layout,
+      and a Circle object must still place x where Shape puts it.  The old
+      own-fields-first layout read r here. *)
+  c.r := 99;
+  Out.Int(s.GetX(), 0); Out.Ln;
   w.v := 4;
   w.Twice;
   Out.Int(w.Get(), 0); Out.Ln

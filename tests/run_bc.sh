@@ -152,6 +152,21 @@ then
 else
    bad "impc: imported constants failed: $(cat "$WORK/impc.log")"
 fi
+#  ---- methods through a pointer to an imported record, dispatch included ----
+#  The fixture format is single-module, so this lives here with impc: the
+#  method table of an imported record seeds from the owner's export catalog,
+#  and a local extension's override keeps the inherited slot.  The layout
+#  underneath (parent fields first) is what an inherited Get measures.
+printf 'module MMetLib;\ntype R* = record n*: integer end;\ntype P* = pointer to R;\nprocedure (var r: R) Scale*(k: integer);\nbegin\n  r.n := r.n * k\nend Scale;\nprocedure (var r: R) Get*: integer;\nbegin\n  return r.n\nend Get;\nend MMetLib.\n' > "$WORK/mmet_lib.ob2"
+printf 'module MMet;\nimport Out, MMetLib;\ntype E = record (MMetLib.R) x2: integer end;\ntype PE = pointer to E;\nvar p: MMetLib.P;\n    q: PE;\nprocedure (var e: E) Scale(k: integer);\nbegin\n  e.n := e.n * k + 1\nend Scale;\nbegin\n  new(q);\n  q^.n := 7;\n  p := q;\n  p.Scale(3);\n  Out.Int(p.Get(), 0)\nend MMet.\n' > "$WORK/mmet.ob2"
+if timeout 120 "$FRONT" "$WORK/mmet.ob2" "$WORK/mmet.obc" "$WORK/mmet_lib.ob2" >"$WORK/mmet.log" 2>&1 \
+   && [ "$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/mmet.obc" 2>/dev/null | tr -d '\n\r')" = "22" ]
+then
+   note "positive: pointer to imported record dispatches to the local override, inherited Get reads the parent's offset"
+else
+   bad "mmet: imported-record pointer methods failed: $(cat "$WORK/mmet.log")"
+fi
+
 #  The VM must report exhaustion rather than corrupt itself.  Before the
 #  collector was fixed it freed the live list and returned a wrong answer,
 #  which is indistinguishable from success without this check.

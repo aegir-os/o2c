@@ -1351,6 +1351,52 @@ package body O2c_Compiler is
          Mtabs (UT).M (1 .. Mtabs (UT).N) :=
            Mtabs (UTypes (UT).Parent).M (1 .. Mtabs (UT).N);
       end if;
+      if UTypes (UT).Imported then
+         --  An imported record's methods are not in Bounds - they are the
+         --  owner's EXPORTS, so the table seeds from the catalog.  An
+         --  override keeps the inherited slot, the Bounds rule below; the
+         --  implementation is the export under its impl name, in the image
+         --  when the owner is (the static call's premise, made tabular).
+         declare
+            Nm   : constant String := To_String (UTypes (UT).Name);
+            Ownr : constant String := Q_Owner (Nm);
+            Mem  : constant String := Q_Mem (Nm);
+         begin
+            for X in 1 .. N_XM loop
+               if To_String (XMs (X).Owner) = Ownr
+                 and then To_String (XMs (X).RecN) = Mem
+               then
+                  declare
+                     XI : constant Natural :=
+                       Find_X (Ownr, To_String (XMs (X).MName)
+                               & "_O2c_" & Mem);
+                     Found : Boolean := False;
+                  begin
+                     if XI = 0 or else Xs (XI).Bc = 0 then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend:"
+                          & " method '" & To_String (XMs (X).MName) & "' on "
+                          & Nm & " has no implementation in this image";
+                     end if;
+                     for I in 1 .. Mtabs (UT).N loop
+                        if To_String (Mtabs (UT).M (I).Name) =
+                          To_String (XMs (X).MName)
+                        then
+                           Mtabs (UT).M (I).Proc := Xs (XI).Bc;
+                           Found := True;
+                        end if;
+                     end loop;
+                     if not Found
+                       and then Mtabs (UT).N < Mtabs (UT).M'Last
+                     then
+                        Mtabs (UT).N := Mtabs (UT).N + 1;
+                        Mtabs (UT).M (Mtabs (UT).N) :=
+                          (Name => XMs (X).MName, Proc => Xs (XI).Bc);
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end;
+      end if;
       for B in 1 .. N_Bound loop
          if Bounds (B).RecUT = U then
             declare
@@ -1456,17 +1502,13 @@ package body O2c_Compiler is
       --  A pointer base designates its target, so the chain is walked from
       --  there: p^.v has a variable of pointer type and a field owned by the
       --  record.  Without this the walk never reaches the owner and every
-      --  field access through a pointer is refused.
+      --  field access through a pointer is refused.  The walk VALIDATES
+      --  reachability only: the offset itself is FO's, below.
       U : Natural := (if UTypes (Base_UT).Is_Ptr
                       then UTypes (Base_UT).Ptr_Tgt
                       else Base_UT);
    begin
       while U /= 0 and then U /= FO loop
-         --  Whole ancestor records come first - by their SLOTS, not their
-         --  field count: one field is not one slot.
-         for J in 1 .. UTypes (U).N_F loop
-            N := N + Field_Slots (U, J, 0);
-         end loop;
          U := UTypes (U).Parent;
       end loop;
       if U = 0 then
@@ -1475,6 +1517,18 @@ package body O2c_Compiler is
          raise O2c_BC.Wrong_Construct with
            "bytecode backend: a field's owning record is not on the "
            & "variable's type chain";
+      end if;
+      --  The layout is the parent's FIRST: every ancestor of FO lies before
+      --  FO's own fields, so an inherited field sits at the offset it has in
+      --  its parent - and a base-typed view of an extension object reads
+      --  base fields.  The old walk summed the DESCENDANT's fields instead,
+      --  laying extensions out own-fields-first: an inherited method on an
+      --  extension object read the extension's first field (measured as
+      --  GetX on a Circle returning r, and an imported record's inherited
+      --  Get returning extra).  Nothing else computes layout - the GC scans
+      --  whole bodies - so this one function is the whole fix.
+      if UTypes (FO).Is_Ext and then UTypes (FO).Parent /= 0 then
+         N := Total_Slots (UTypes (FO).Parent);
       end if;
       --  ... and the fields of FO before F.
       for J in 1 .. F - 1 loop
@@ -5173,18 +5227,18 @@ package body O2c_Compiler is
                                        --  (the formal is VAR), before
                                        --  Parse_Actual pushes the actuals.
                                        --  Through a POINTER the dynamic
-                                       --  type can differ, and there is no
-                                       --  dispatcher in bytecode yet.
+                                       --  type can differ, so the receiver
+                                       --  is its VALUE and the call
+                                       --  dispatches through the tag - the
+                                       --  local path's shape, with the
+                                       --  table seeded from the owner's
+                                       --  exports.
                                        if UTypes (U).Is_Ptr then
-                                          raise O2c_BC.Wrong_Construct with
-                                            "bytecode backend: method '"
-                                            & Mb (1 .. M_Len)
-                                            & "' through a pointer to an "
-                                            & "imported record is not yet "
-                                            & "supported";
+                                          Bc_Load (Nm);
+                                       else
+                                          Push_Var_Addr (Nm,
+                                                         Total_Slots (U));
                                        end if;
-                                       Push_Var_Addr (Nm,
-                                                      Total_Slots (U));
                                     end if;
                                     if XMI /= 0 then
                                        if not XMs (XMI).Ret then
@@ -5267,36 +5321,64 @@ package body O2c_Compiler is
                                           Next;
                                           Call := Call & ")";
                                           if O2c_BC.Bytecode_Mode then
-                                             --  The statically-bound call:
-                                             --  the owner's implementation
-                                             --  (Sum_O2c_Point shape) is an
-                                             --  ordinary export, in the
-                                             --  image when the owner is;
-                                             --  its result is what this
-                                             --  expression evaluates to.
-                                             declare
-                                                XI : constant Natural :=
-                                                  Find_X
-                                                    (Ownr, Mb (1 .. M_Len)
-                                                     & "_O2c_" & RNm);
-                                             begin
-                                                if XI = 0
-                                                  or else Xs (XI).Bc = 0
-                                                then
-                                                   raise O2c_BC
-                                                     .Wrong_Construct
-                                                     with "bytecode "
-                                                     & "backend: method '"
-                                                     & Mb (1 .. M_Len)
-                                                     & "' on an imported "
-                                                     & "record has no "
-                                                     & "implementation in "
-                                                     & "this image";
-                                                end if;
-                                                O2c_Ir_Lower.Call_Proc
-                                                  (Xs (XI).Bc,
-                                                   Xs (XI).Params);
-                                             end;
+                                             if UTypes (U).Is_Ptr then
+                                                --  The tag names the table;
+                                                --  the index is the method's
+                                                --  slot in the receiver
+                                                --  type's, inherited or
+                                                --  overridden alike.  One
+                                                --  result, as befits a
+                                                --  function.
+                                                declare
+                                                   MIdx : Natural := 0;
+                                                begin
+                                                   Fill_Table (Urec);
+                                                   for I in 1 .. Mtabs
+                                                     (Urec).N
+                                                   loop
+                                                      if To_String
+                                                        (Mtabs (Urec).M
+                                                           (I).Name)
+                                                        = Mb (1 .. M_Len)
+                                                      then
+                                                         MIdx := I - 1;
+                                                      end if;
+                                                   end loop;
+                                                   O2c_BC.Dispatch
+                                                     (MIdx, N_A, 1);
+                                                end;
+                                             else
+                                                --  The statically-bound call:
+                                                --  the owner's implementation
+                                                --  (Sum_O2c_Point shape) is
+                                                --  an ordinary export, in the
+                                                --  image when the owner is;
+                                                --  its result is what this
+                                                --  expression evaluates to.
+                                                declare
+                                                   XI : constant Natural :=
+                                                     Find_X
+                                                       (Ownr, Mb (1 .. M_Len)
+                                                        & "_O2c_" & RNm);
+                                                begin
+                                                   if XI = 0
+                                                     or else Xs (XI).Bc = 0
+                                                   then
+                                                      raise O2c_BC
+                                                        .Wrong_Construct
+                                                        with "bytecode "
+                                                        & "backend: method '"
+                                                        & Mb (1 .. M_Len)
+                                                        & "' on an imported "
+                                                        & "record has no "
+                                                        & "implementation in "
+                                                        & "this image";
+                                                   end if;
+                                                   O2c_Ir_Lower.Call_Proc
+                                                     (Xs (XI).Bc,
+                                                      Xs (XI).Params);
+                                                end;
+                                             end if;
                                           end if;
                                           R.Text := Call;
                                           if Length (XMs (XMI).Ret_Nm) > 0
@@ -10091,20 +10173,19 @@ package body O2c_Compiler is
                                           --  ordinary call to the owner's
                                           --  implementation below.  Through
                                           --  a POINTER the dynamic type can
-                                          --  differ, and there is no
-                                          --  dispatcher in bytecode yet.
+                                          --  differ, so the receiver is its
+                                          --  VALUE (the object's address)
+                                          --  and the call dispatches through
+                                          --  the tag - the local path's
+                                          --  shape, with the table seeded
+                                          --  from the owner's exports.
                                           if UTypes (U).Is_Ptr then
-                                             raise O2c_BC.Wrong_Construct
-                                               with "bytecode backend: "
-                                               & "method '"
-                                               & T1.Text (1 .. T1.Len)
-                                               & "' through a pointer to "
-                                               & "an imported record is not "
-                                               & "yet supported";
+                                             Bc_Load (Head (1 .. H_Len));
+                                          else
+                                             Push_Var_Addr
+                                               (Head (1 .. H_Len),
+                                                Total_Slots (U));
                                           end if;
-                                          Push_Var_Addr
-                                            (Head (1 .. H_Len),
-                                             Total_Slots (U));
                                        end if;
                                        if XMs (XMI).Ret then
                                           raise O2c_Error with "method '"
@@ -10208,33 +10289,58 @@ package body O2c_Compiler is
                                           Append_Body ("      "
                                                        & To_String (Call));
                                           if O2c_BC.Bytecode_Mode then
-                                             --  The statically-bound call:
-                                             --  the owner's implementation
-                                             --  (Scale_O2c_Point shape) is
-                                             --  an ordinary export, in the
-                                             --  image when the owner is.
-                                             declare
-                                                XI : constant Natural :=
-                                                  Find_X (Ownr, DNm
-                                                          & "_O2c_" & RNm);
-                                             begin
-                                                if XI = 0
-                                                  or else Xs (XI).Bc = 0
-                                                then
-                                                   raise O2c_BC
-                                                     .Wrong_Construct
-                                                     with "bytecode "
-                                                     & "backend: method '"
-                                                     & DNm
-                                                     & "' on an imported "
-                                                     & "record has no "
-                                                     & "implementation in "
-                                                     & "this image";
-                                                end if;
-                                                O2c_Ir_Lower.Call_Proc
-                                                  (Xs (XI).Bc,
-                                                   Xs (XI).Params);
-                                             end;
+                                             if UTypes (U).Is_Ptr then
+                                                --  The tag names the table;
+                                                --  the index is the method's
+                                                --  slot in the receiver
+                                                --  type's, inherited or
+                                                --  overridden alike.
+                                                declare
+                                                   MIdx : Natural := 0;
+                                                begin
+                                                   Fill_Table (Urec);
+                                                   for I in 1 .. Mtabs
+                                                     (Urec).N
+                                                   loop
+                                                      if To_String
+                                                        (Mtabs (Urec).M
+                                                           (I).Name) = DNm
+                                                      then
+                                                         MIdx := I - 1;
+                                                      end if;
+                                                   end loop;
+                                                   O2c_BC.Dispatch
+                                                     (MIdx, N_A, 0);
+                                                end;
+                                             else
+                                                --  The statically-bound call:
+                                                --  the owner's implementation
+                                                --  (Scale_O2c_Point shape) is
+                                                --  an ordinary export, in the
+                                                --  image when the owner is.
+                                                declare
+                                                   XI : constant Natural :=
+                                                     Find_X (Ownr, DNm
+                                                             & "_O2c_" & RNm);
+                                                begin
+                                                   if XI = 0
+                                                     or else Xs (XI).Bc = 0
+                                                   then
+                                                      raise O2c_BC
+                                                        .Wrong_Construct
+                                                        with "bytecode "
+                                                        & "backend: method '"
+                                                        & DNm
+                                                        & "' on an imported "
+                                                        & "record has no "
+                                                        & "implementation in "
+                                                        & "this image";
+                                                   end if;
+                                                   O2c_Ir_Lower.Call_Proc
+                                                     (Xs (XI).Bc,
+                                                      Xs (XI).Params);
+                                                end;
+                                             end if;
                                           end if;
                                        end;
                                     end if;
