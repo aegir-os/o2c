@@ -12,5 +12,7 @@ begin
   Texts.WriteString(w, "hi ");
   Texts.WriteInt(w, 42, 0);
   Texts.Write(w, "!");
+  Texts.WriteLn(w);
+  Texts.WriteReal(w, 1.5, 0);
   Texts.WriteLn(w)
 end TextsLib.
