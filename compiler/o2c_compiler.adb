@@ -3347,6 +3347,10 @@ package body O2c_Compiler is
                R.Text := To_Unbounded_String
                  (Ada_String_Literal (Cur.Text (1 .. Cur.Len)));
                R.Typ := T_Str;
+               --  Lit marks the stack word as a CONST-pool offset (what
+               --  Push_Str pushed) rather than an address - the string
+               --  comparison resolves exactly the operands so marked.
+               R.Lit := True;
                if O2c_BC.Bytecode_Mode then
                   --  Cur.Text holds the literal's bytes with no quotes (the
                   --  Ada text is quoted separately by Ada_String_Literal), so
@@ -5422,7 +5426,28 @@ package body O2c_Compiler is
                      declare
                         T : constant String := To_String (Syms (Id).Const_Text);
                      begin
-                        if Syms (Id).Typ = T_Char and then T'Length = 3
+                        if (Syms (Id).Typ = T_Real
+                            or else Syms (Id).Typ = T_LReal)
+                        then
+                           --  Push the value read back from the captured
+                           --  literal text; the D exponent becomes E for
+                           --  'Value, exactly as the imported path does.
+                           declare
+                              RT : String := T;
+                           begin
+                              for I in RT'Range loop
+                                 if RT (I) = 'D' or else RT (I) = 'd' then
+                                    RT (I) := 'E';
+                                 end if;
+                              end loop;
+                              O2c_Ir_Lower.Push_Real (Long_Float'Value (RT));
+                           exception
+                              when Constraint_Error =>
+                                 raise O2c_BC.Wrong_Construct with "bytecode "
+                                   & "backend: constant '" & T & "' is not a "
+                                   & "REAL literal the VM can push";
+                           end;
+                        elsif Syms (Id).Typ = T_Char and then T'Length = 3
                           and then T (T'First) = ''' and then T (T'Last) = '''
                         then
                            --  A char is its code in a slot, everywhere in
@@ -5443,7 +5468,9 @@ package body O2c_Compiler is
                      end;
                      R.Typ := Syms (Id).Typ;
                      R.CStr := False;
-                     R.Lit := False;
+                     --  A string constant's word is a pool offset too -
+                     --  same reason the literal factor is Lit.
+                     R.Lit := Syms (Id).Typ = T_Str;
                      R.Folds := False;
                      --  Do the shared tail's two jobs here - consume the
                      --  identifier with Next, and return - because NOT doing
@@ -6043,9 +6070,23 @@ package body O2c_Compiler is
                   --  content (char arrays may be padded with NULs)
                   Used_StrCmp := True;
                   if O2c_BC.Bytecode_Mode then
-                     --  Both addresses are on the stack.  The three-way
-                     --  compare gives -1/0/1; the relational against zero
-                     --  gives whichever operator was asked for.
+                     --  Both addresses are on the stack - but a LITERAL
+                     --  operand is a CONST-pool offset, not an address, and
+                     --  Str_Cmp walks memory: comparing a variable with a
+                     --  literal dereferenced the offset and died in the
+                     --  interpreter (STORAGE_ERROR, "malformed code").
+                     --  Resolve exactly those operands; the right one is on
+                     --  top, the left takes the swap dance.
+                     if X.Lit then
+                        O2c_BC.Resolve_Str;
+                     end if;
+                     if R.Lit then
+                        O2c_Ir_Lower.Swap;
+                        O2c_BC.Resolve_Str;
+                        O2c_Ir_Lower.Swap;
+                     end if;
+                     --  The three-way compare gives 0/1/2; the relational
+                     --  against 1 gives whichever operator was asked for.
                      O2c_BC.Bin (O2c_BC.Str_Cmp);
                      O2c_Ir_Lower.Push_Int (1);   --  0 less, 1 equal, 2 greater
                      O2c_BC.Bin (Bc_O);
@@ -6378,6 +6419,13 @@ package body O2c_Compiler is
          --  TRUE and FALSE parse to exactly these two texts; anything else
          --  boolean (a comparison's text) is not a literal and stays
          --  uncaptured, which is the loud refusal at the use site.
+         Syms (N_Sym).Const_Text := V.Text;
+      elsif (V.Typ = T_Real or else V.Typ = T_LReal) and then V.Lit then
+         --  A REAL/LONGREAL constant: the arithmetic arms clear Lit, so
+         --  only a genuine literal's text is captured here, and the use
+         --  site pushes the value read back from it.  A SET constant has
+         --  no such fold (its mask is built on the stack) and stays a
+         --  loud refusal.
          Syms (N_Sym).Const_Text := V.Text;
       end if;
       if V.Folds then
