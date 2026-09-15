@@ -7,8 +7,8 @@ operators, construct coverage, descending FOR, and the gap-closing campaign
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         542
-    fixtures        139 in tests/bc/
+    commits         543
+    fixtures        140 in tests/bc/
     foreign natives 45 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -8131,13 +8131,10 @@ commits, differential 89 to 91, every batch gated by the seven suites.
   (ptr.ob2).  The PLANEISDOT/PLANEKEY arm - Ada text only, harmless while the builtin
   never reaches bytecode mode - refuses by name, the Input arm's precedent.
 
-**What remains, deliberately.**  Procedure-typed record FIELDS stay recorded: procedure
-values are first-class otherwise (a variable holds a proc id, `f()` calls through it,
-Threads.Start spawns it), but a field would need the proc-id store and the indirect
-call wired through the designator engine - the variable paths (Push_BC_Proc at the
-bare-name assignment, Bc_Load + Call_Indirect at the call) are the templates.
-Hex character literals (`0X`) are out of dialect - the corpus spells them CHR/ORD.
-The three `blocked` entries stand until the Math flip.
+**What remains, deliberately.**  Hex character literals (`0X`) are out of dialect -
+the corpus spells them CHR/ORD.  The three `blocked` entries stand until the Math
+flip.  Nothing else is known open: every scan finding is a fixture, a probe, or a
+recorded Ada-side limit.
 
 ### 3hi. Qualified type names, imported-record pointer methods - and the extension layout
 
@@ -8171,6 +8168,16 @@ The deferred half of 3hg's list, closed in three commits, each gated.
 - **Nesting depth is fine (`nest9.ob2`).**  The scan's >8-nesting worry was unfounded:
   Total_Slots' guard is a recursion bound, and nine records compiled and ran on the
   first probe.  Fixture, differential 94.
+
+- **PROCEDURE-typed record fields (`60e0e12`).**  A procedure value is an id in a
+  word, and a record field holds one: one slot to the layout, a terminal leaf to the
+  designator chain, `r.f := Hello` stores through the field, `r.f()` loads and calls
+  indirect - the variable paths made designator-shaped.  Two latent gaps surfaced
+  with it: a PROCEDURE-typed variable as an expression FACTOR fell into the record
+  chain and died as "an array value needs an index", and `g2 := g` would not copy.
+  procfld.ob2; the Ada side has no procedure values at all, recorded ADA_REFUSED
+  with the others.  This was the scan's last deferred finding - the inventory is
+  empty now.
 
 ## 4. Method — what worked, and what did not
 
