@@ -1903,6 +1903,34 @@ package body O2c_Compiler is
          --  Not necessarily a global: a FOR control variable is a frame
          --  local, and a VAR formal's slot holds the caller's address.
          Push_Var_Addr (Text_Form, Total_Slots (Syms (SId).UT));
+      elsif SId /= 0 and then Syms (SId).Open_Arr then
+         --  An ARRAY OF CHAR formal IS the caller's array: the address the
+         --  native wants is in the formal's first slot - up the link chain
+         --  when the formal belongs to an enclosing procedure.
+         declare
+            Sl : constant Integer :=
+              O2c_BC.Local_Slot (Ada_Id (Text_Form));
+         begin
+            if Sl >= 0 then
+               O2c_Ir_Lower.Load_Local (Natural (Sl));
+            else
+               declare
+                  Owner : Natural;
+                  Dist  : Natural;
+                  Slot  : Integer;
+               begin
+                  Find_Up_Level (Ada_Id (Text_Form), Owner, Dist, Slot);
+                  if Owner = 0 then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & What & ": ARRAY OF parameter '" & Text_Form
+                       & "' is not in any visible frame";
+                  end if;
+                  Bc_Chase (Dist);
+                  O2c_Ir_Lower.Push_Int (Slot);
+                  O2c_Ir_Lower.Load_Idx (8);
+               end;
+            end if;
+         end;
       elsif Text_Form'Length >= 2
         and then Text_Form (Text_Form'First) = '"'
         and then Text_Form (Text_Form'Last) = '"'
@@ -2857,9 +2885,28 @@ package body O2c_Compiler is
                      O2c_Ir_Lower.Load_Local (Natural (Sl));
                      O2c_Ir_Lower.Load_Local (Natural (Sl) + 1);
                   elsif Syms (Id).Open_Arr then
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "forwarding a global ARRAY OF parameter is not yet "
-                       & "supported";
+                     --  An ENCLOSING procedure's ARRAY OF formal: its
+                     --  address and length sit in the owner's frame as the
+                     --  same two slots, so the chase loads both, address
+                     --  first - the local case's order.
+                     declare
+                        Owner : Natural;
+                        Dist  : Natural;
+                        Slot  : Integer;
+                     begin
+                        Find_Up_Level (Ada_Id (Nm), Owner, Dist, Slot);
+                        if Owner = 0 then
+                           raise O2c_BC.Wrong_Construct with "bytecode "
+                             & "backend: forwarding ARRAY OF parameter '"
+                             & Nm & "': its frame cannot be found";
+                        end if;
+                        Bc_Chase (Dist);
+                        O2c_Ir_Lower.Push_Int (Slot);
+                        O2c_Ir_Lower.Load_Idx (8);
+                        Bc_Chase (Dist);
+                        O2c_Ir_Lower.Push_Int (Slot + 1);
+                        O2c_Ir_Lower.Load_Idx (8);
+                     end;
                   else
                      --  A fixed array: its address, and a length the
                      --  emitter knows because the declaration fixed it.  A
@@ -5306,11 +5353,31 @@ package body O2c_Compiler is
                            --  refused by a message about the STACK rather
                            --  than about the string.
                            if Sl < 0 then
-                              raise O2c_BC.Wrong_Construct with "bytecode "
-                                & "backend: ARRAY OF parameter '" & Nm
-                                & "' is not in the frame";
+                              --  One level up (or more): an enclosing
+                              --  procedure's ARRAY OF CHAR formal, read as
+                              --  a string value from a nested procedure.
+                              --  The address is the formal's first slot in
+                              --  the owner's frame - the indexed case just
+                              --  below chases the same way.
+                              declare
+                                 Owner : Natural;
+                                 Dist  : Natural;
+                                 Slot  : Integer;
+                              begin
+                                 Find_Up_Level (Ada_Id (Nm),
+                                                Owner, Dist, Slot);
+                                 if Owner = 0 then
+                                    raise O2c_BC.Wrong_Construct with
+                                      "bytecode backend: ARRAY OF parameter '"
+                                      & Nm & "' is not in any visible frame";
+                                 end if;
+                                 Bc_Chase (Dist);
+                                 O2c_Ir_Lower.Push_Int (Slot);
+                                 O2c_Ir_Lower.Load_Idx (8);
+                              end;
+                           else
+                              O2c_Ir_Lower.Load_Local (Natural (Sl));
                            end if;
-                           O2c_Ir_Lower.Load_Local (Natural (Sl));
                         end if;
                         R.Text := To_Unbounded_String (Nm);
                         R.Typ := T_Str;
@@ -10947,7 +11014,25 @@ package body O2c_Compiler is
                                        then O2c_BC.Local_Slot
                                               (Ada_Id (To_String (A.Text)))
                                        else -1);
+                                    --  An enclosing procedure's formal: its
+                                    --  address/length slots are up the link
+                                    --  chain, so the two loads below chase.
+                                    Up_Owner : Natural := 0;
+                                    Up_Dist  : Natural := 0;
+                                    Up_Slot  : Integer := -1;
                                  begin
+                                    if Is_Open and then P_Sl < 0 then
+                                       Find_Up_Level
+                                         (Ada_Id (To_String (A.Text)),
+                                          Up_Owner, Up_Dist, Up_Slot);
+                                       if Up_Owner = 0 then
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: Out.String: "
+                                            & "ARRAY OF parameter '"
+                                            & To_String (A.Text)
+                                            & "' is not in any visible frame";
+                                       end if;
+                                    end if;
                                     if Is_Open or else (AU > 0
                                       and then UTypes (AU).Elem = T_Char)
                                     then
@@ -11002,7 +11087,15 @@ package body O2c_Compiler is
                                           if Is_Open then
                                              --  ... and its length is the parameter's second slot, so the bound is
                                              --  loaded rather than fixed at compile time.
-                                             O2c_Ir_Lower.Load_Local (Natural (P_Sl) + 1);
+                                             if P_Sl >= 0 then
+                                                O2c_Ir_Lower.Load_Local
+                                                  (Natural (P_Sl) + 1);
+                                             else
+                                                Bc_Chase (Up_Dist);
+                                                O2c_Ir_Lower.Push_Int
+                                                  (Up_Slot + 1);
+                                                O2c_Ir_Lower.Load_Idx (8);
+                                             end if;
                                           else
                                              O2c_Ir_Lower.Push_Int (N);
                                           end if;
@@ -11028,7 +11121,15 @@ package body O2c_Compiler is
                                              --  own first slot holds the caller's, and using the pushed
                                              --  address for every case would fix fields and break
                                              --  arrparam.ob2.
-                                             O2c_Ir_Lower.Load_Local (Natural (P_Sl));
+                                             if P_Sl >= 0 then
+                                                O2c_Ir_Lower.Load_Local
+                                                  (Natural (P_Sl));
+                                             else
+                                                Bc_Chase (Up_Dist);
+                                                O2c_Ir_Lower.Push_Int
+                                                  (Up_Slot);
+                                                O2c_Ir_Lower.Load_Idx (8);
+                                             end if;
                                           else
                                              O2c_Ir_Lower.Addr_Global
                                                   (Ada_Id (To_String (A.Text)), Total_Slots (AU));

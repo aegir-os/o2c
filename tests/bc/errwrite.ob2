@@ -4,7 +4,17 @@ module ErrWrite;
     offset, so a literal works exactly as a variable does.  The output goes to
     the VM's stderr, which is the same channel its own notes use. *)
 import Out, Err;
+procedure Outer(s: array of char);
+  procedure Inner;
+  begin
+    Err.Write(s);
+    Err.WriteLn
+  end Inner;
 begin
+  Inner
+end Outer;
+begin
+  Outer("err-up");
   Err.Write ("err-ok");
   Err.WriteLn;
   Err.WriteLn;
