@@ -5994,6 +5994,21 @@ package body O2c_Compiler is
                           & Natural'Image (Cur.Line) & ")";
                      end if;
                      Used_Set := True;
+                     if O2c_BC.Bytecode_Mode then
+                        --  a <= b on sets is SUBSET: (a - b) = {}.  a and b
+                        --  are on the stack in source order, so LE is one
+                        --  difference; GE swaps first (b - a).  Emitting
+                        --  nothing here - which is what happened, the branch
+                        --  only built the Ada text - left both sets on the
+                        --  stack, and the IF then tested the top one: a
+                        --  silent wrong answer.
+                        if Is_GE then
+                           O2c_Ir_Lower.Swap;
+                        end if;
+                        O2c_Ir_Lower.Apply (O2c_Ir.Op_Set_Diff);
+                        O2c_Ir_Lower.Push_Int (0);
+                        O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Eq, O2c_Ir.Tc_Word);
+                     end if;
                      if Is_LE then
                         R.Text := To_Unbounded_String
                           ("((" & To_String (R.Text) & " and not "
@@ -6110,6 +6125,15 @@ package body O2c_Compiler is
                   declare
                      Rl : constant Boolean :=
                        (R.Typ = T_Real or else R.Typ = T_LReal);
+                     --  A mixed REAL/INTEGER comparison: Real_Like has
+                     --  already limited this to an integer LITERAL, which
+                     --  sits on the stack as a word and wants the same I2R
+                     --  dance the arithmetic sites do.
+                     Mix : constant Boolean :=
+                       (Rl and then X.Typ = T_Int)
+                       or else (R.Typ = T_Int
+                                and then (X.Typ = T_Real
+                                          or else X.Typ = T_LReal));
                      Pl : constant Boolean :=
                        ((R.Typ = T_Ptr or else R.Typ = T_Nil)
                         and then (X.Typ = T_Ptr or else X.Typ = T_Nil))
@@ -6129,6 +6153,14 @@ package body O2c_Compiler is
                              or else (Rl
                                       and then (X.Typ = T_Real
                                                 or else X.Typ = T_LReal))
+                             or else Mix
+                             --  A BOOLEAN is a 0/1 word, so equality and
+                             --  inequality are a word compare.  Ordering on
+                             --  booleans never reaches here: the typing above
+                             --  refuses it in both backends.
+                             or else ((R.Typ = T_Bool and then X.Typ = T_Bool)
+                                      and then (Op = " = "
+                                                or else Op = " /= "))
                              --  A SET is a word, so equality and inequality
                              --  are a word compare and emit correctly through
                              --  the same path as INTEGER.  Restricted to those
@@ -6151,33 +6183,42 @@ package body O2c_Compiler is
                           & " is not supported (line "
                           & Natural'Image (Cur.Line) & ")";
                      end if;
+                     if Mix then
+                        Bc_Real_Coerce (R.Typ, X.Typ);
+                     end if;
                      --  Two opcode NAMES per comparison became one name plus
                      --  the operands' CLASS, with the opcode following from
                      --  Bc_Op.  That is the rule 3bg put in ONE table, stated
                      --  here the way the arithmetic sites now state it.
                      if Op = " = " then
                         O2c_Ir_Lower.Bin_Op
-                          (O2c_Ir.Op_Eq, (if Rl then O2c_Ir.Tc_Real
+                          (O2c_Ir.Op_Eq, (if Rl or else Mix
+                                          then O2c_Ir.Tc_Real
                                           else O2c_Ir.Tc_Word));
                      elsif Op = " /= " then
                         O2c_Ir_Lower.Bin_Op
-                          (O2c_Ir.Op_Ne, (if Rl then O2c_Ir.Tc_Real
+                          (O2c_Ir.Op_Ne, (if Rl or else Mix
+                                          then O2c_Ir.Tc_Real
                                           else O2c_Ir.Tc_Word));
                      elsif Op = " < " then
                         O2c_Ir_Lower.Bin_Op
-                          (O2c_Ir.Op_Lt, (if Rl then O2c_Ir.Tc_Real
+                          (O2c_Ir.Op_Lt, (if Rl or else Mix
+                                          then O2c_Ir.Tc_Real
                                           else O2c_Ir.Tc_Word));
                      elsif Op = " <= " then
                         O2c_Ir_Lower.Bin_Op
-                          (O2c_Ir.Op_Le, (if Rl then O2c_Ir.Tc_Real
+                          (O2c_Ir.Op_Le, (if Rl or else Mix
+                                          then O2c_Ir.Tc_Real
                                           else O2c_Ir.Tc_Word));
                      elsif Op = " > " then
                         O2c_Ir_Lower.Bin_Op
-                          (O2c_Ir.Op_Gt, (if Rl then O2c_Ir.Tc_Real
+                          (O2c_Ir.Op_Gt, (if Rl or else Mix
+                                          then O2c_Ir.Tc_Real
                                           else O2c_Ir.Tc_Word));
                      else
                         O2c_Ir_Lower.Bin_Op
-                          (O2c_Ir.Op_Ge, (if Rl then O2c_Ir.Tc_Real
+                          (O2c_Ir.Op_Ge, (if Rl or else Mix
+                                          then O2c_Ir.Tc_Real
                                           else O2c_Ir.Tc_Word));
                      end if;
                   end;

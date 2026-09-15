@@ -436,6 +436,16 @@ check "pointer field: assignment"     ok 'module G45; type R = record n: integer
 check "pointer field: read through it" ok 'module G46; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; k: integer; begin new(q); h.p := q; k := h.p^.n end G46.'
 check "pointer field: the linked-list spelling still works" ok 'module G47; type Node = record v: integer; next: Node end; type P = pointer to Node; var p, q: P; begin new(p); new(q); q^.next := p; p^.v := 1 end G47.'
 
+#  a <= b on SETs (subset) was a SILENT WRONG ANSWER, and this harness's
+#  shape is exactly why it went unrecorded: it compiled, it ran, and the IF
+#  read the unconsumed second set off the stack, so the true case answered
+#  true by luck and only the FALSE case (a superset) answered wrong.  The
+#  branch built only the Ada text and returned.  It now emits the difference
+#  against the empty set, and BOOLEAN =/# plus mixed REAL/INTEGER compares
+#  (the I2R dance, literal-only per Real_Like) emit alongside it.
+#  tests/bc/cmpset.ob2 holds all three by value, differential-corroborated.
+check "SET subset <=/>=, BOOLEAN =/#, mixed REAL/INTEGER compare" ok 'module G52; import Out; var a, b: set; p, q: boolean; r: real; begin a := {1}; b := {1, 2}; p := a <= b; q := p # q; r := 2.5; if r > 2 then p := q end end G52.'
+
 note "--- LONGINT: arithmetic works, its own literals do not ---"
 #  Every operator was refused with one message.  Assignment and comparison
 #  worked, so no test could notice, and the existing longint.ob2 only did
