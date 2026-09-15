@@ -436,6 +436,15 @@ check "pointer field: assignment"     ok 'module G45; type R = record n: integer
 check "pointer field: read through it" ok 'module G46; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; k: integer; begin new(q); h.p := q; k := h.p^.n end G46.'
 check "pointer field: the linked-list spelling still works" ok 'module G47; type Node = record v: integer; next: Node end; type P = pointer to Node; var p, q: P; begin new(p); new(q); q^.next := p; p^.v := 1 end G47.'
 
+#  An ARRAY OF SET / LONGREAL / LONGINT variable passed the declaration gate
+#  (the gate lists them) but its subscript pushed no base address: the
+#  element-access condition listed four element types where the gate listed
+#  seven.  The verifier's "operand-stack depth violation" was the only
+#  diagnostic, and it named no construct.  One slot is one slot, so the
+#  three join the same [base, index] convention.  tests/bc/arrkind.ob2 holds
+#  them by value (with a named array as a record field beside them).
+check "ARRAY OF SET / LONGREAL / LONGINT variable" ok 'module G53; import Out; var s: array 2 of set; lr: array 2 of longreal; n: array 2 of longint; begin s[1] := {1}; lr[1] := 1.5; n[1] := 3000000000 end G53.'
+
 #  a <= b on SETs (subset) was a SILENT WRONG ANSWER, and this harness's
 #  shape is exactly why it went unrecorded: it compiled, it ran, and the IF
 #  read the unconsumed second set off the stack, so the true case answered

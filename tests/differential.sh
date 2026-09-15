@@ -190,6 +190,12 @@ list	ADA_BROKEN	emits Ada that will not compile: reference to the current instan
 newloop	ADA_BROKEN	emits Ada that will not compile: reference to the current instance of a type
 nested	ADA_BROKEN	emits Ada that will not compile: a component used before the record ends
 realarr	ADA_BROKEN	emits Ada that will not compile: expected type Boolean
+#  arrkind is realarr's category, three element types wider: the Ada side
+#  knows only O2c_Int_Arr and O2c_Bool_Arr as anonymous-array bases, so an
+#  ARRAY OF SET / LONGREAL / LONGINT (like realarr's REAL) is emitted as an
+#  array of Boolean and GNAT rejects it.  The bytecode side - the fixture's
+#  subject - holds all three by value.
+arrkind	ADA_BROKEN	emits Ada that will not compile: anonymous arrays of SET/LONGREAL/LONGINT map to O2c_Bool_Arr (realarr's category)
 #  filesintr is the one fixture that is deliberately bytecode-only.  Its module
 #  is NAMED Files, because that is what makes the file intrinsics reachable at
 #  all - and the Ada path then emits calls to O2c_FDel/O2c_FStat/... whose BODIES

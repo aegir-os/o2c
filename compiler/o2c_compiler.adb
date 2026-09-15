@@ -2443,7 +2443,17 @@ package body O2c_Compiler is
               and then (UTypes (UT).Elem = T_Int
                         or else UTypes (UT).Elem = T_Char
                         or else UTypes (UT).Elem = T_Bool
-                        or else UTypes (UT).Elem = T_Real)
+                        or else UTypes (UT).Elem = T_Real
+                        --  One slot is one slot: a SET, a LONGREAL and a
+                        --  LONGINT element are the same [base, index]
+                        --  convention as the four above.  Omitting them
+                        --  passed the declaration gate (which DOES list
+                        --  them) and then pushed no base - the verifier's
+                        --  "operand-stack depth violation", never the name
+                        --  of the construct.
+                        or else UTypes (UT).Elem = T_Set
+                        or else UTypes (UT).Elem = T_LReal
+                        or else UTypes (UT).Elem = T_Long)
             then
                --  An array is a run of scalar slots: push the address of its
                --  first slot before the index is evaluated, so the stack
@@ -6516,7 +6526,14 @@ package body O2c_Compiler is
                               or else UTypes (UT).Elem = T_Char
                               or else UTypes (UT).Elem = T_Bool
                               or else UTypes (UT).Elem = T_Real
-                              or else UTypes (UT).Elem = T_Long);
+                              or else UTypes (UT).Elem = T_Long
+                              --  A SET is a word and a LONGREAL is a slot,
+                              --  exactly like the rest: Fields_Allowed has
+                              --  always allowed both as ARRAY fields inside
+                              --  a record, and a list like this refuses by
+                              --  omission.
+                              or else UTypes (UT).Elem = T_Set
+                              or else UTypes (UT).Elem = T_LReal);
                   Ok_Ptr : constant Boolean := UTypes (UT).Is_Ptr;
                   --  A procedure value is one slot - a procedure id - so a
                   --  variable of that type is as ordinary as a pointer.
