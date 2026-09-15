@@ -4074,6 +4074,16 @@ package body O2c_Compiler is
                            raise O2c_Error with "ABS needs an INTEGER, "
                              & "LONGINT or REAL argument";
                         end if;
+                        if O2c_BC.Bytecode_Mode then
+                           --  The argument is on the stack; abs is a unary
+                           --  op at the argument's width (IAbs / RAbs).
+                           --  It used to fall through with NO emission at
+                           --  all, so ABS (x) ran and quietly yielded x.
+                           O2c_Ir_Lower.Un_Op
+                             (O2c_Ir.Op_Abs,
+                              (if A.Typ = T_Real then O2c_Ir.Tc_Real
+                               else O2c_Ir.Tc_Word));
+                        end if;
                         R.Text := To_Unbounded_String
                           ("abs (" & To_String (A.Text) & ")");
                         R.Typ := A.Typ;
@@ -4081,6 +4091,17 @@ package body O2c_Compiler is
                         if A.Typ /= T_Int and then A.Typ /= T_Long then
                            raise O2c_Error with "ODD needs an INTEGER or "
                              & "LONGINT argument";
+                        end if;
+                        if O2c_BC.Bytecode_Mode then
+                           --  x rem 2 /= 0.  rem (truncated) is the dialect's
+                           --  MOD - both backends emit it - and oddness only
+                           --  compares against 0, so negatives come out right
+                           --  where a floored (x mod 2) = 1 would diverge.
+                           --  This too used to emit nothing and yield x.
+                           O2c_Ir_Lower.Push_Int (2);
+                           O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mod);
+                           O2c_Ir_Lower.Push_Int (0);
+                           O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Ne);
                         end if;
                         R.Text := To_Unbounded_String
                           ("((" & To_String (A.Text) & " mod 2) = 1)");
@@ -8412,8 +8433,32 @@ package body O2c_Compiler is
                        & Natural'Image (Cur.Line) & ")";
                   end if;
                   declare
-                     Step : String := "1";
+                     Step : Unbounded_String := To_Unbounded_String ("1");
+                     BRef : constant Boolean := Syms (Id).By_Ref;
+                     ANm  : constant String := Ada_Id (Nm (1 .. N_Len));
                   begin
+                     if O2c_BC.Bytecode_Mode then
+                        --  The current value first, so the step lands on top
+                        --  and Sub computes x - step (Add would commute, Sub
+                        --  would not).  A var PARAMETER's scalar lives in the
+                        --  caller, address in the frame slot, so the store
+                        --  goes THROUGH it: [addr, 0] first because Store_Idx
+                        --  consumes [base, idx, value] - the assignment path
+                        --  above does the same (3dd).  This whole branch used
+                        --  to emit NOTHING: INC/DEC parsed, built Ada text
+                        --  bytecode discarded, and left the variable alone.
+                        if BRef then
+                           O2c_Ir_Lower.Load_Local
+                             (Natural (O2c_BC.Local_Slot (ANm)));
+                           O2c_Ir_Lower.Push_Int (0);
+                           O2c_Ir_Lower.Load_Local
+                             (Natural (O2c_BC.Local_Slot (ANm)));
+                           O2c_Ir_Lower.Push_Int (0);
+                           O2c_Ir_Lower.Load_Idx (8);
+                        else
+                           Bc_Load (ANm);
+                        end if;
+                     end if;
                      if Cur.Kind = Lex.Tok_Comma then
                         Next;
                         declare
@@ -8429,13 +8474,25 @@ package body O2c_Compiler is
                               raise O2c_Error with "INC/DEC on LONGINT "
                                 & "takes plain literals only";
                            end if;
-                           Step := To_String (V.Text);
+                           Step := V.Text;
                         end;
+                     elsif O2c_BC.Bytecode_Mode then
+                        O2c_Ir_Lower.Push_Int (1);
+                     end if;
+                     if O2c_BC.Bytecode_Mode then
+                        O2c_Ir_Lower.Bin_Op
+                          ((if Neg then O2c_Ir.Op_Sub
+                            else O2c_Ir.Op_Add));
+                        if BRef then
+                           O2c_Ir_Lower.Store_Idx (8);
+                        else
+                           Bc_Store (ANm);
+                        end if;
                      end if;
                      Append_Body ("      " & Nm (1 .. N_Len) & " := "
                                   & Nm (1 .. N_Len)
                                   & (if Neg then " - " else " + ")
-                                  & Step & ";");
+                                  & To_String (Step) & ";");
                   end;
                   if Cur.Kind = Lex.Tok_RParen then
                      Next;

@@ -29,6 +29,7 @@ package body O2c_Ir_Lower is
                when O2c_Ir.Op_Mul => return O2c_Bc.Rmul;
                when O2c_Ir.Op_Div => return O2c_Bc.Rdiv;
                when O2c_Ir.Op_Neg => return O2c_Bc.Rneg;
+               when O2c_Ir.Op_Abs => return O2c_Bc.Rabs;
                when O2c_Ir.Op_Eq => return O2c_Bc.Req;
                when O2c_Ir.Op_Ne => return O2c_Bc.Rne;
                when O2c_Ir.Op_Lt => return O2c_Bc.Rlt;
@@ -47,6 +48,7 @@ package body O2c_Ir_Lower is
                when O2c_Ir.Op_Div => return O2c_Bc.IDiv;
                when O2c_Ir.Op_Mod => return O2c_Bc.IMod;
                when O2c_Ir.Op_Neg => return O2c_Bc.Neg;
+               when O2c_Ir.Op_Abs => return O2c_Bc.IAbs;
                when O2c_Ir.Op_Eq => return O2c_Bc.Eq;
                when O2c_Ir.Op_Ne => return O2c_Bc.Ne;
                when O2c_Ir.Op_Lt => return O2c_Bc.Lt;
@@ -833,7 +835,7 @@ package body O2c_Ir_Lower is
             O2c_BC.For_Next (Q.Imm_1, Integer (Value_At (Q.Src2).Int),
                              Q.Imm_2, Bc_Label_Of (Q.Src1));
 
-         when Op_Neg =>
+         when Op_Neg | Op_Abs =>
             --  UNARY, and that is not a detail.  The emitter's Un leaves the
             --  depth alone while Bin counts two operands in and one out, so a
             --  negate routed through Bin would tell the stack model to pop a

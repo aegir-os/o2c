@@ -78,7 +78,7 @@ package O2c_Ir is
 
                --  arithmetic and comparison, three-address
                Op_Copy,                      --  d := s1
-               Op_Add, Op_Sub, Op_Mul, Op_Div, Op_Mod, Op_Neg,
+               Op_Add, Op_Sub, Op_Mul, Op_Div, Op_Mod, Op_Neg, Op_Abs,
                Op_Eq, Op_Ne, Op_Lt, Op_Le, Op_Gt, Op_Ge,
                Op_Not, Op_And, Op_Or,
 
