@@ -60,6 +60,7 @@ check "record, INTEGER field"   ok 'module G9; type R = record x: integer end; v
 check "record extension"        ok 'module G10; type A = record x: integer end; type B = record (A) y: integer end; var v: B; begin end G10.'
 check "pointer"                 ok 'module G11; type R = record x: integer end; type P = pointer to R; var v: P; begin end G11.'
 check "parameterless call"      ok 'module G12; procedure P; begin end P; begin P end G12.'
+check "method on a VAR record receiver"  ok 'module G12b; type R = record x: integer end; var v: R; procedure (var h: R) M; begin h.x := 1 end M; begin v.M end G12b.'
 
 
 note "--- CHAR arrays and strings ---"

@@ -2991,6 +2991,36 @@ package body O2c_Compiler is
          ArgT := ArgT & Args (I);
       end loop;
 
+      if O2c_BC.Bytecode_Mode then
+         --  Statement position, so Result_Count is 0.  A POINTER receiver
+         --  dispatches through the tag - the method's index in the table is
+         --  the same slot inherited or overridden (the function path
+         --  computes it exactly this way).  A record VALUE calls the
+         --  statically-bound implementation: a record variable can never
+         --  hold a subtype, so no tag is needed.  This branch used to emit
+         --  NOTHING: Parse_Actual pushed the actuals, they leaked on the
+         --  operand stack, and the method never ran.
+         if Td = 0 then
+            if Syms (SIdx).Bc_Proc = 0 then
+               raise O2c_BC.Wrong_Construct with "bytecode backend: method '"
+                 & MName & "' has no procedure id";
+            end if;
+            O2c_Ir_Lower.Call_Proc (Syms (SIdx).Bc_Proc, NPar);
+         else
+            declare
+               MIdx : Natural := 0;
+            begin
+               Fill_Table (BaseB);
+               for I in 1 .. Mtabs (BaseB).N loop
+                  if To_String (Mtabs (BaseB).M (I).Name) = MName then
+                     MIdx := I - 1;
+                  end if;
+               end loop;
+               O2c_BC.Dispatch (MIdx, N_A, 0);
+            end;
+         end if;
+      end if;
+
       --  record types in Td's subtree that override M (deepest first)
       if Td /= 0 then
          for X in 1 .. N_UT loop
@@ -4793,25 +4823,16 @@ package body O2c_Compiler is
                                       & Dsp_Name (DN, BB) & " (" & Rcv;
                                     if O2c_BC.Bytecode_Mode then
                                        --  A receiver is self: a pointer's
-                                       --  value is the object's address, and
-                                       --  a VAR record's address is too.  The
+                                       --  value is the object's address,
+                                       --  and a record VALUE's address is
+                                       --  what the VAR formal wants.  The
                                        --  arguments follow, pushed by
-                                       --  Parse_Actual, and then the dispatch.
+                                       --  Parse_Actual, and then the call.
                                        if UTypes (U).Is_Ptr then
                                           Bc_Load (Nm);
                                        else
-                                          --  A VAR record receiver would be
-                                          --  a global, and only ALLOC_NEW
-                                          --  objects carry a type tag, so
-                                          --  there is nothing to dispatch
-                                          --  on.  A pointer receiver is the
-                                          --  form that works, and the one
-                                          --  the samples use.
-                                          raise O2c_BC.Wrong_Construct with
-                                            "bytecode backend: a method on "
-                                            & "a VAR record receiver is not "
-                                            & "supported; use a POINTER "
-                                            & "receiver";
+                                          Push_Var_Addr
+                                            (Nm, Total_Slots (U));
                                        end if;
                                     end if;
                                     loop
@@ -4845,24 +4866,42 @@ package body O2c_Compiler is
                                     Expect (Lex.Tok_RParen, "')'");
                                     Next;
                                     if O2c_BC.Bytecode_Mode then
-                                       --  The index of the method in the
-                                       --  receiver type's table: the same
-                                       --  name, inherited or overridden, so
-                                       --  the same slot whichever type the
-                                       --  object turns out to be.
-                                       declare
-                                          MIdx : Natural := 0;
-                                       begin
-                                          Fill_Table (Urec);
-                                          for I in 1 .. Mtabs (Urec).N loop
-                                             if To_String (Mtabs (Urec).M (I).Name)
-                                               = DN
-                                             then
-                                                MIdx := I - 1;
-                                             end if;
-                                          end loop;
-                                          O2c_BC.Dispatch (MIdx, Exp, 1);
-                                       end;
+                                       if UTypes (U).Is_Ptr then
+                                          --  The index of the method in the
+                                          --  receiver type's table: the same
+                                          --  name, inherited or overridden,
+                                          --  so the same slot whichever type
+                                          --  the object turns out to be.
+                                          declare
+                                             MIdx : Natural := 0;
+                                          begin
+                                             Fill_Table (Urec);
+                                             for I in 1 .. Mtabs (Urec).N
+                                             loop
+                                                if To_String
+                                                  (Mtabs (Urec).M (I).Name)
+                                                  = DN
+                                                then
+                                                   MIdx := I - 1;
+                                                end if;
+                                             end loop;
+                                             O2c_BC.Dispatch (MIdx, Exp, 1);
+                                          end;
+                                       else
+                                          --  A record VALUE is exactly its
+                                          --  static type: the bound
+                                          --  implementation, called
+                                          --  directly, result on the stack.
+                                          if Syms (SIdx).Bc_Proc = 0 then
+                                             raise O2c_BC.Wrong_Construct
+                                               with "bytecode backend: "
+                                               & "method '" & DN
+                                               & "' has no procedure id";
+                                          end if;
+                                          O2c_Ir_Lower.Call_Proc
+                                            (Syms (SIdx).Bc_Proc,
+                                             Syms (SIdx).Params);
+                                       end if;
                                     end if;
                                     Call := Call & ")";
                                     R.Text := Call;
@@ -4888,6 +4927,30 @@ package body O2c_Compiler is
                                     Ownr : constant String :=
                                       To_String (XMs (XMI).Owner);
                                  begin
+                                    if O2c_BC.Bytecode_Mode
+                                      and then XMI /= 0
+                                    then
+                                       --  A record VALUE is exactly its
+                                       --  static type, so the method the
+                                       --  chain found binds statically: no
+                                       --  tag, no dispatcher.  The
+                                       --  receiver's ADDRESS goes first
+                                       --  (the formal is VAR), before
+                                       --  Parse_Actual pushes the actuals.
+                                       --  Through a POINTER the dynamic
+                                       --  type can differ, and there is no
+                                       --  dispatcher in bytecode yet.
+                                       if UTypes (U).Is_Ptr then
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: method '"
+                                            & Mb (1 .. M_Len)
+                                            & "' through a pointer to an "
+                                            & "imported record is not yet "
+                                            & "supported";
+                                       end if;
+                                       Push_Var_Addr (Nm,
+                                                      Total_Slots (U));
+                                    end if;
                                     if XMI /= 0 then
                                        if not XMs (XMI).Ret then
                                           raise O2c_Error with "method '"
@@ -4968,6 +5031,38 @@ package body O2c_Compiler is
                                           Expect (Lex.Tok_RParen, "')'");
                                           Next;
                                           Call := Call & ")";
+                                          if O2c_BC.Bytecode_Mode then
+                                             --  The statically-bound call:
+                                             --  the owner's implementation
+                                             --  (Sum_O2c_Point shape) is an
+                                             --  ordinary export, in the
+                                             --  image when the owner is;
+                                             --  its result is what this
+                                             --  expression evaluates to.
+                                             declare
+                                                XI : constant Natural :=
+                                                  Find_X
+                                                    (Ownr, Mb (1 .. M_Len)
+                                                     & "_O2c_" & RNm);
+                                             begin
+                                                if XI = 0
+                                                  or else Xs (XI).Bc = 0
+                                                then
+                                                   raise O2c_BC
+                                                     .Wrong_Construct
+                                                     with "bytecode "
+                                                     & "backend: method '"
+                                                     & Mb (1 .. M_Len)
+                                                     & "' on an imported "
+                                                     & "record has no "
+                                                     & "implementation in "
+                                                     & "this image";
+                                                end if;
+                                                O2c_Ir_Lower.Call_Proc
+                                                  (Xs (XI).Bc,
+                                                   Xs (XI).Params);
+                                             end;
+                                          end if;
                                           R.Text := Call;
                                           if Length (XMs (XMI).Ret_Nm) > 0
                                           then
@@ -7080,6 +7175,30 @@ package body O2c_Compiler is
                  & "or an exported POINTER (M20c)";
             end if;
          end if;
+         --  The implementation is callable cross-module: importers bind
+         --  value-receiver method calls STATICALLY to it (a record value
+         --  is exactly its static type, so no dispatcher is needed), which
+         --  takes an ordinary Xs entry - under the impl name, the same
+         --  name the Ada spec exports for its dispatchers.
+         declare
+            E : X_Entry :=
+              (Kind => S_Proc, Typ => Ret_Typ, Params => N_Par,
+               Ret => Is_Function,
+               Bc => Syms (PSym).Bc_Proc,
+               Name => To_Unbounded_String
+                 (Method_Impl_Name (Name, Recv_UT)), others => <>);
+         begin
+            for I in 1 .. N_Par loop
+               E.P (I) := (Name => PName (I),
+                           Typ => (if PUT (I) = 0 then PTyp (I)
+                                   else T_Int),
+                           UT => 0, By_Ref => PRef (I), Open => POpen (I));
+               if PUT (I) /= 0 then
+                  E.P_Nm (I) := To_Unbounded_String (Qual_UT (PUT (I)));
+               end if;
+            end loop;
+            X_Add (To_String (Mod_Name), E);
+         end;
       elsif Exported then
          --  M19/M20b: exported procedures may take scalars and this
          --  module's exported RECORD (VAR) / POINTER types, and return
@@ -9345,6 +9464,24 @@ package body O2c_Compiler is
                                        else Head (1 .. H_Len));
                                  begin
                                     Next;   --  past the method name
+                                    if O2c_BC.Bytecode_Mode then
+                                       --  self goes first, before
+                                       --  Parse_Actual pushes the actuals.
+                                       --  A POINTER receiver carries a tag
+                                       --  and dispatches; a record VALUE is
+                                       --  exactly its static type (values
+                                       --  are not polymorphic), so its
+                                       --  method binds statically - the
+                                       --  ADDRESS, since the receiver
+                                       --  formal is VAR.
+                                       if UTypes (U).Is_Ptr then
+                                          Bc_Load (Head (1 .. H_Len));
+                                       else
+                                          Push_Var_Addr
+                                            (Head (1 .. H_Len),
+                                             Total_Slots (U));
+                                       end if;
+                                    end if;
                                     Emit_Method_Call
                                       (BI, Rtxt,
                                        (if UTypes (U).Is_Ptr
@@ -9366,6 +9503,33 @@ package body O2c_Compiler is
                                       To_String (XMs (XMI).Owner);
                                  begin
                                     if XMI /= 0 then
+                                       if O2c_BC.Bytecode_Mode then
+                                          --  A record VALUE is exactly its
+                                          --  static type, so the method the
+                                          --  chain found binds statically:
+                                          --  no tag, no dispatcher.  The
+                                          --  receiver's ADDRESS goes first
+                                          --  (the formal is VAR), before
+                                          --  Parse_Actual pushes the
+                                          --  actuals; the call itself is an
+                                          --  ordinary call to the owner's
+                                          --  implementation below.  Through
+                                          --  a POINTER the dynamic type can
+                                          --  differ, and there is no
+                                          --  dispatcher in bytecode yet.
+                                          if UTypes (U).Is_Ptr then
+                                             raise O2c_BC.Wrong_Construct
+                                               with "bytecode backend: "
+                                               & "method '"
+                                               & T1.Text (1 .. T1.Len)
+                                               & "' through a pointer to "
+                                               & "an imported record is not "
+                                               & "yet supported";
+                                          end if;
+                                          Push_Var_Addr
+                                            (Head (1 .. H_Len),
+                                             Total_Slots (U));
+                                       end if;
                                        if XMs (XMI).Ret then
                                           raise O2c_Error with "method '"
                                             & T1.Text (1 .. T1.Len)
@@ -9467,6 +9631,35 @@ package body O2c_Compiler is
                                           Call := Call & ");";
                                           Append_Body ("      "
                                                        & To_String (Call));
+                                          if O2c_BC.Bytecode_Mode then
+                                             --  The statically-bound call:
+                                             --  the owner's implementation
+                                             --  (Scale_O2c_Point shape) is
+                                             --  an ordinary export, in the
+                                             --  image when the owner is.
+                                             declare
+                                                XI : constant Natural :=
+                                                  Find_X (Ownr, DNm
+                                                          & "_O2c_" & RNm);
+                                             begin
+                                                if XI = 0
+                                                  or else Xs (XI).Bc = 0
+                                                then
+                                                   raise O2c_BC
+                                                     .Wrong_Construct
+                                                     with "bytecode "
+                                                     & "backend: method '"
+                                                     & DNm
+                                                     & "' on an imported "
+                                                     & "record has no "
+                                                     & "implementation in "
+                                                     & "this image";
+                                                end if;
+                                                O2c_Ir_Lower.Call_Proc
+                                                  (Xs (XI).Bc,
+                                                   Xs (XI).Params);
+                                             end;
+                                          end if;
                                        end;
                                     end if;
                                  end;
