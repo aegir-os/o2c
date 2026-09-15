@@ -1891,9 +1891,11 @@ package body O2c_Compiler is
    --                      a run called `x` made a store through a record formal
    --                      land in a fresh zeroed global while the caller's
    --                      record was untouched (3ci/3cj).
-   --    a LOCAL variable  has NO address in this VM: LOAD_L moves a value and
-   --                      there is no load-address-of-local op, which is why
-   --                      Op_Addr_Local is reserved (3br).  It refuses, loudly.
+   --    a LOCAL variable  is addressed by LOAD_ADDR_L (3dk): the op pushes the
+   --                      frame address of the local's first slot, and the
+   --                      field walk below is the same as the by-ref case.
+   --                      It refused for years ("no load-address-of-local
+   --                      op", 3br) - the refusal outlived the op.
    --    a GLOBAL          is a run in the image's globals block.
    --
    --  One rule, one place: this arithmetic was written out twice and both copies
@@ -1914,9 +1916,12 @@ package body O2c_Compiler is
          elsif BId /= 0 and then Syms (BId).Kind = S_Var
            and then O2c_BC.Local_Slot (An) >= 0
          then
-            raise O2c_BC.Wrong_Construct with "bytecode backend: "
-              & "a LOCAL record or array variable's fields have no address yet "
-              & "('" & Base_Name & "')";
+            --  A frame local's base IS available: LOAD_ADDR_L (3dk) pushes
+            --  the frame address of its first slot.  This branch refused
+            --  from a time when no such op existed - the comment above said
+            --  so, and the refusal outlived the op that ended it.
+            O2c_Ir_Lower.Load_Addr_L
+              (Natural (O2c_BC.Local_Slot (An)));
          else
             O2c_Ir_Lower.Addr_Global (Base_Name, Total_Slots (Base_UT));
          end if;
@@ -2757,13 +2762,14 @@ package body O2c_Compiler is
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "forwarding a global ARRAY OF parameter is not yet "
                        & "supported";
-                  elsif Sl >= 0 then
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "an ARRAY OF actual that is a local array is not yet "
-                       & "supported";
                   else
                      --  A fixed array: its address, and a length the
-                     --  emitter knows because the declaration fixed it.
+                     --  emitter knows because the declaration fixed it.  A
+                     --  LOCAL takes the same path because a local array is
+                     --  global-backed in this backend: its whole-assignment
+                     --  and indexed paths address a global run of its name,
+                     --  and the frame slot Local interned is a phantom - so
+                     --  the actual must hand over the run, not the frame.
                      O2c_Ir_Lower.Addr_Global (Ada_Id (Nm), 1);
                      O2c_Ir_Lower.Push_Int (UTypes (Syms (Id).UT).Arr_Len);
                   end if;
@@ -2804,16 +2810,14 @@ package body O2c_Compiler is
                   Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
                begin
                   if Sl >= 0 then
-                     --  A frame local has no address in this VM (3br), so a
-                     --  local record actual still refuses - but the GLOBAL case
-                     --  now works, because the callee's side does: the chain
-                     --  calls Bc_Base, which loads a by-reference formal's own
-                     --  slot instead of interning a global run called `x`.
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "a record or fixed-array actual that is a LOCAL is not "
-                       & "yet supported ('" & Nm & "')";
+                     --  A local: its frame address (LOAD_ADDR_L), exactly as
+                     --  Bc_Base derives it for a local field walk.  The
+                     --  callee's side needed no change - the chain loads a
+                     --  by-reference formal's own slot either way.
+                     O2c_Ir_Lower.Load_Addr_L (Natural (Sl));
+                  else
+                     O2c_Ir_Lower.Addr_Global (Nm, Total_Slots (Formal.UT));
                   end if;
-                  O2c_Ir_Lower.Addr_Global (Nm, Total_Slots (Formal.UT));
                end;
             end if;
             A.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));

@@ -7835,6 +7835,34 @@ was wrong, not the build: GNAT folds `"integer literal out " & "of range: "` int
 literal, so old and new code produce the IDENTICAL string.  A confirmation check has to
 distinguish; that one could not.
 
+### 3hb. Parity milestones 2+3: locals as actuals - three refusals, one stale comment
+
+Items 2 and 3 turned out to be THREE refusals sharing one root, and the root was a comment:
+Bc_Base refused a local record's fields because "there is no load-address-of-local op" - true
+at 3br, false since 3dk's LOAD_ADDR_L.  The refusal outlived the op by two seasons.  The
+survey missed this sixth gap because it probed the var-ACTUAL shape, and a local record's own
+fields refused before any actual was reached.
+
+    Bc_Base (local record/array field walk)      -> Load_Addr_L (Local_Slot)
+    record/fixed-array VAR actual that is local  -> Load_Addr_L (Sl)
+    ARRAY OF actual that is a local array        -> Addr_Global - NOT Load_Addr_L
+
+The third one differs on purpose, and measuring is what caught it: the first version passed
+the frame address and the callee printed NULs.  One disassembly named it - `a := "hi"` in the
+caller emitted LOAD_ADDR_G [3] while the actual handed over LOAD_ADDR_L [0]: a local ARRAY is
+GLOBAL-BACKED in this backend (whole-assignment and indexed paths address a global run of its
+name; the frame slot Local interned is a phantom, frame=1 and never touched).  A local RECORD
+is frame-backed, which is why the two fixes diverge.  Latent hazard, noted not chased:
+global-backed local arrays mean two activations of one procedure share the array's storage,
+and two procedures with a same-named local array collide.
+
+Fixtures: localfld (field write+read back, 41), localarr (read through + write through the
+formal: "hi" -> "Ji"), localrec (callee writes 41 into the caller's frame slot).  localrec's
+first version named the type R with formal r - Ada is case-insensitive, the formal hides the
+type inside its own formal part ("cannot be used before end of specification"): the recorded
+ADA_BROKEN name-collision family, so the fixture names it Rec.  Whole-copy of a local record
+probed consistent (copy-ok).  Differential corroborates all three: 78 fixtures.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
