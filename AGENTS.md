@@ -102,14 +102,15 @@ it surfaces as a stale tool, which is worse.
 the CLI search path, so a bare `o2c` resolves), the test corpus **sources
 only** (tar excludes `*.out`, `*.sh`, `ada_host`, `hello.gpr`) →
 `Development/tests`, `samples/` → `Development/samples`. In the guest both
-binaries take CLI arguments through `Aegir_User.CLI` — **Ada.Command_Line
-is not wired into the args page there** (`gnat_argc` is never set), so it
-always reports zero arguments; that is why `VM_Platform.Image_Arg` exists
-and why `crate/o2c.adb` reads `CLI.Argument` directly.  A no-argument
-`o2_vm` runs the default image only when the boot staged
-`Tests/O2cLib/VmWait.mrk` (the `O2C_VM_ELF` condition in aegir's Makefile);
-otherwise it prints its usage.  BeFS directories are multi-leaf-capable
-(mkbefs splits like the engine), so corpus size is no longer capped; the
+binaries take arguments through `Ada.Command_Line`, like every command:
+crt0 (`start-riscv64.s`) calls `aegir_init_args` (aegir_user-gloss.adb,
+milestone 53c), which tokenizes the args page into `gnat_argc`/`gnat_argv`
+with argv[0] empty, so `Argument (1)` is the first typed token - the same
+numbering `Aegir_User.CLI.Argument` uses.  A no-argument `o2_vm` runs the
+default image only when the boot staged `Tests/O2cLib/VmWait.mrk` (the
+`O2C_VM_ELF` condition in aegir's Makefile); otherwise it prints its usage.
+BeFS directories are multi-leaf-capable (mkbefs splits like the engine),
+so corpus size is no longer capped; the
 sources-only choice is about guest consumers, not capacity.
 
 **Never suppress a build's output.** `make tools-host >/dev/null 2>&1` with no

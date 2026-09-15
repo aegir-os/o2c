@@ -10,11 +10,13 @@
 --  (VM_Platform.Wait_For_Default) - everywhere else no compiler is coming,
 --  and polling for the default image looks like a hang, so the VM prints
 --  its usage instead.
+with Ada.Command_Line;
 with Ada.Text_IO;
 with OBC_VM;
 with VM_Platform;
 
 procedure VM_Main is
+   use Ada.Command_Line;
    use type OBC_VM.Status;
 
    Default_Image : constant String := "BD0:VmGreet.obc";
@@ -42,12 +44,11 @@ procedure VM_Main is
       end if;
    end Run_Image;
 
-   Image : constant String := VM_Platform.Image_Arg;
 begin
    VM_Platform.Init;
    OBC_VM.Set_Quantum (VM_Platform.Quantum_Override);
-   if Image'Length > 0 then
-      Run_Image (Image, Arg_Attempts);
+   if Argument_Count >= 1 then
+      Run_Image (Argument (1), Arg_Attempts);
    elsif VM_Platform.Wait_For_Default then
       Run_Image (Default_Image, 0);
    else

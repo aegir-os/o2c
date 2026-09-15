@@ -42,10 +42,6 @@ package body VM_Platform is
      (30000);
    --  50 min: longer than any boot
 
-   function Image_Arg return String is
-     (Aegir_User.CLI.Argument (1));
-   --  CLI.Argument answers "" out of range, which is the no-argument case.
-
    --  Probe by OPENING, not Stat: Stat on the initrd volume has answered
    --  not-OK for a file that was staged, which is why o2c reads its own
    --  marker (HelloBc.mrk) instead of statting it.  Called once per run,

@@ -26,16 +26,6 @@ package VM_Platform is
    --  so the VM waits for the compiler to finish writing the image.
    function Max_Input_Attempts return Natural;
 
-   --  The image path the VM was asked to run, or "" when none was given.
-   --  Both platforms take it from their own first argument; "" means the
-   --  caller falls back to the default image.  The guest reads it through
-   --  Aegir_User.CLI - Ada.Command_Line is NOT wired into the args page in
-   --  the guest (gnat_argc is never set), which is exactly why this seam
-   --  exists: vm_main asking Ada.Command_Line there always saw zero
-   --  arguments and silently ran the default image instead of the one the
-   --  user typed.
-   function Image_Arg return String;
-
    --  True only in the boot whose o2c will publish the default image: the
    --  aegir Makefile stages Tests/O2cLib/VmWait.mrk exactly when it stages
    --  the manifest VM (O2C_VM_ELF).  Anywhere else - an interactive boot,

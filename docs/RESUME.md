@@ -8182,10 +8182,13 @@ The deferred half of 3hg's list, closed in three commits, each gated.
 ### 3hj. The guest CLI: o2c is a compiler now, and o2_vm answers its arguments
 
 The user tried the staged tools in an interactive boot and found neither usable.
-Both reports traced to the same root: **Ada.Command_Line is dead in the guest** -
-a-comlin imports `__gnat_arg_count`, and nothing in the userspace RTS ever sets
-`gnat_argc`, so it always reports zero arguments.  The live API is
-`Aegir_User.CLI.Argument` (the args page the shell stages, milestone 33a).
+(A false lead cost a commit here: the first theory blamed a dead
+Ada.Command_Line in the guest, "proven" by a grep that matched no C-style
+`gnat_argc =` assignment.  Wrong - the assignment is Ada: crt0
+(`start-riscv64.s`) calls `aegir_init_args` (aegir_user-gloss.adb, milestone
+53c), which tokenizes the args page into `gnat_argc`/`gnat_argv` with argv[0]
+empty; echo and the whole command suite take their arguments through
+Ada.Command_Line this way.  A negative grep is not a probe.)
 
 - **o2c was the demo, not a compiler.**  The staged `o2c` was the M19 boot-test
   main: it ignored arguments entirely and always compiled the hardcoded demo
@@ -8198,19 +8201,20 @@ a-comlin imports `__gnat_arg_count`, and nothing in the userspace RTS ever sets
   capture contract.  aegir's Makefile stages the binary to `C/o2c` as well, so
   the bare name resolves.
 
-- **o2_vm took no argument and waited forever.**  Two defects, one seam: with
-  Ada.Command_Line dead, `o2_vm foo.obc` silently ran the default image; and a
-  no-argument VM polled for `BD0:VmGreet.obc` up to 50 min (Max_Input_Attempts
-  30000, sized for the manifest race with o2c) even in boots where no compiler
-  would ever publish one.  `VM_Platform` gained `Image_Arg` (the CLI token /
-  argv entry) and `Wait_For_Default` (true only when the boot staged
-  `Tests/O2cLib/VmWait.mrk`, which aegir's Makefile stages under exactly the
-  `O2C_VM_ELF` condition that ships the manifest VM - probed by OPEN, not Stat,
-  which has lied about staged initrd files before).  The guest Arg_Get/Arg_Count
-  adopted the host's offset convention (argument 1 is the image).  So: an
-  explicit image runs with a 5 s open grace; a bare `o2_vm` in an interactive
-  boot prints its usage; the manifest boot is byte-for-byte unchanged
+- **o2_vm ran the default image and waited forever.**  A no-argument VM polled
+  for `BD0:VmGreet.obc` up to 50 min (Max_Input_Attempts 30000, sized for the
+  manifest race with o2c) even in boots where no compiler would ever publish
+  one - and a mistyped explicit image got the same wait.  `VM_Platform` gained
+  `Wait_For_Default` (true only when the boot staged `Tests/O2cLib/VmWait.mrk`,
+  which aegir's Makefile stages under exactly the `O2C_VM_ELF` condition that
+  ships the manifest VM - probed by OPEN, not Stat, which has lied about
+  staged initrd files before), and `OBC_VM.Run`/`VM_IO.Read_File` an Attempts
+  bound: an explicit image runs with a 5 s open grace, a bare `o2_vm` in an
+  interactive boot prints its usage, and the manifest boot is unchanged
   (run_m1 boot 2 still prints `vm: running BD0:VmGreet.obc` then `vm elf ok`).
+  The guest Arg_Get/Arg_Count also adopted the host's offset convention
+  (argument 1 is the image); before, a program run as `o2_vm img a b` in the
+  guest would have seen the image itself as its Arg 1.
 
 All seven suites green.  The aegir Makefile change (VmWait.mrk + `C/o2c`
 staging) rides alongside in that repo - the marker is load-bearing: without it

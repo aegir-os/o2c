@@ -1,5 +1,6 @@
 with Aegir_User.Console;
 with Aegir_User.CLI;
+with Ada.Command_Line;
 with Ada.Exceptions;
 with Aegir_User.Files;
 with Aegir_User.Syscalls;
@@ -72,9 +73,9 @@ procedure O2c is
    --  Compiler mode: `o2c <source.ob2> [<out.obc>] [lib.ob2 ...]`, the
    --  host front end's (o2c_bc_host) interface with the output defaulted.
    --  Extra arguments are library module sources, compiled first so the
-   --  main source can import them.  Arguments come from Aegir_User.CLI -
-   --  Ada.Command_Line is not wired into the args page in the guest
-   --  (gnat_argc is never set), so a program asking it always sees none.
+   --  main source can import them.  Arguments come from Ada.Command_Line,
+   --  like every command's: crt0's aegir_init_args fills gnat_argc/argv
+   --  from the args page, with argv[0] empty so the numbering matches.
    procedure Compile_From_CLI is
       --  The file server deals in Unsigned_64 statuses; the use-type at
       --  the procedure level comes after this nested one.
@@ -87,8 +88,8 @@ procedure O2c is
 
       function Output_Name (Source : String) return String is
       begin
-         if Aegir_User.CLI.Arg_Count >= 2 then
-            return Aegir_User.CLI.Argument (2);
+         if Ada.Command_Line.Argument_Count >= 2 then
+            return Ada.Command_Line.Argument (2);
          end if;
          if Source'Length >= 4
            and then Source (Source'Last - 3 .. Source'Last) = ".ob2"
@@ -98,10 +99,10 @@ procedure O2c is
          return Source & ".obc";
       end Output_Name;
 
-      Source   : constant String := Aegir_User.CLI.Argument (1);
+      Source   : constant String := Ada.Command_Line.Argument (1);
       Out_Path : constant String := Output_Name (Source);
    begin
-      for I in 3 .. Aegir_User.CLI.Arg_Count loop
+      for I in 3 .. Ada.Command_Line.Argument_Count loop
          if N_CLibs = O2c_Compiler.Max_Libs then
             Aegir_User.Console.Put_Line
               ("o2c error: too many libraries (limit"
@@ -110,7 +111,7 @@ procedure O2c is
          end if;
          N_CLibs := N_CLibs + 1;
          declare
-            P : constant String := Aegir_User.CLI.Argument (I);
+            P : constant String := Ada.Command_Line.Argument (I);
          begin
             CLibs (N_CLibs) :=
               (Name => To_Unbounded_String (P),
@@ -178,7 +179,7 @@ begin
    --  Arguments mean the compiler, not the demo: `o2c hello.ob2` writes
    --  hello.obc.  The no-argument demo below is the boot test's contract
    --  (run_m1 captures it), so it stays exactly as it is.
-   if Aegir_User.CLI.Arg_Count >= 1 then
+   if Ada.Command_Line.Argument_Count >= 1 then
       Compile_From_CLI;
       return;
    end if;

@@ -20,10 +20,6 @@ package body VM_Platform is
    function Max_Input_Attempts return Natural is
      (1);
 
-   function Image_Arg return String is
-     (if Ada.Command_Line.Argument_Count >= 1
-      then Ada.Command_Line.Argument (1) else "");
-
    --  The host never runs the manifest default: an image is an argument.
    function Wait_For_Default return Boolean is
      (False);
