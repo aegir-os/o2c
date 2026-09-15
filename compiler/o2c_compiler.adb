@@ -9725,13 +9725,19 @@ package body O2c_Compiler is
                                  raise O2c_Error with "field '" & FNm
                                    & "' given twice in the aggregate";
                               end if;
-                              Used (NI, FI) := True;
-                              Next;               --  past the field name
-                              Expect (Lex.Tok_Equal, "'='");
-                              Next;
-                              declare
-                                 V : Expr_Rec := Parse_Expr;
-                              begin
+                               Used (NI, FI) := True;
+                               Next;               --  past the field name
+                               Expect (Lex.Tok_Equal, "'='");
+                               Next;
+                               if O2c_BC.Bytecode_Mode then
+                                  --  The base goes UNDER the value Parse_Expr
+                                  --  is about to push: the store below is
+                                  --  the field assignment's [base, value].
+                                  Bc_Base (Head (1 .. H_Len), U);
+                               end if;
+                               declare
+                                  V : Expr_Rec := Parse_Expr;
+                               begin
                                  if FTyp = T_Real then
                                     if V.Typ = T_Int then
                                        V.Text := To_Unbounded_String
@@ -9749,8 +9755,23 @@ package body O2c_Compiler is
                                     raise O2c_Error with "field '" & FNm
                                       & "' has the wrong type";
                                  end if;
-                                 Val (NI, FI) := V.Text;
-                              end;
+                                  Val (NI, FI) := V.Text;
+                                  if O2c_BC.Bytecode_Mode then
+                                     if FTyp = T_Real and then V.Typ = T_Int
+                                     then
+                                        --  The integer literal went on the
+                                        --  stack as an integer; the field is
+                                        --  real, so convert what was pushed.
+                                        O2c_BC.Bin (O2c_BC.I2R);
+                                     end if;
+                                     O2c_Ir_Lower.Store_Fld
+                                       (Field_Offset (U, Chain (NI), FI),
+                                        (if FTyp = T_Real
+                                            or else FTyp = T_LReal
+                                         then O2c_Ir_Lower.Fld_Real
+                                         else O2c_Ir_Lower.Fld_Int));
+                                  end if;
+                               end;
                            end;
                            exit when Cur.Kind /= Lex.Tok_Comma;
                            Next;
@@ -9791,18 +9812,38 @@ package body O2c_Compiler is
                                 & To_String (Res) & ")";
                            end Build;
                         begin
-                           --  FOUND BY THE 3cq SWEEP, and it was SILENT: the
-                           --  aggregate was parsed, its text built, and no
-                           --  bytecode at all was emitted - so `r := {a = 1,
-                           --  b = 2}` compiled, ran, and left r as it was
-                           --  (the probe printed 00).  Refusal is the default:
-                           --  this raises until the aggregate emits the field
-                           --  stores its layout already knows.
-                           if O2c_BC.Bytecode_Mode then
-                              raise O2c_BC.Wrong_Construct with "bytecode "
-                                & "backend: a record aggregate is not yet "
-                                & "supported";
-                           end if;
+                            --  FOUND BY THE 3cq SWEEP, and it was SILENT: the
+                            --  aggregate was parsed, its text built, and no
+                            --  bytecode at all was emitted - so `r := {a = 1,
+                            --  b = 2}` compiled, ran, and left r as it was
+                            --  (the probe printed 00).  The given fields were
+                            --  stored as they were parsed, above; the fields
+                            --  left out take Scalar_Init's zero here, at the
+                            --  offsets Field_Offset already computes for the
+                            --  extension chain.
+                            if O2c_BC.Bytecode_Mode then
+                               for C in 1 .. NCh loop
+                                  for F in 1 .. UTypes (Chain (C)).N_F loop
+                                     if not Used (C, F) then
+                                        Bc_Base (Head (1 .. H_Len), U);
+                                        if UTypes (Chain (C)).F (F).Typ = T_Real
+                                          or else UTypes (Chain (C)).F (F).Typ
+                                                    = T_LReal
+                                        then
+                                           O2c_Ir_Lower.Push_Real (0.0);
+                                           O2c_Ir_Lower.Store_Fld
+                                             (Field_Offset (U, Chain (C), F),
+                                              O2c_Ir_Lower.Fld_Real);
+                                        else
+                                           O2c_Ir_Lower.Push_Int (0);
+                                           O2c_Ir_Lower.Store_Fld
+                                             (Field_Offset (U, Chain (C), F),
+                                              O2c_Ir_Lower.Fld_Int);
+                                        end if;
+                                     end if;
+                                  end loop;
+                               end loop;
+                            end if;
                            Append_Body ("      " & Head (1 .. H_Len)
                                         & " := " & Build (U) & ";");
                         end;
@@ -9810,14 +9851,10 @@ package body O2c_Compiler is
                   elsif not UTypes (U).Is_Rec
                     and then Cur.Kind = Lex.Tok_LBrace
                   then
-                     --  M36: numeric fixed-array aggregate { e1, e2, .. }
-                     --  The same silence as the record aggregate above, found
-                     --  by the same sweep: `a := {1, 2, 3}` printed 000.
-                     if O2c_BC.Bytecode_Mode then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "a numeric array aggregate is not yet supported";
-                     end if;
-                     Next;
+                      --  M36: numeric fixed-array aggregate { e1, e2, .. }
+                      --  The same silence as the record aggregate above, found
+                      --  by the same sweep: `a := {1, 2, 3}` printed 000.
+                      Next;
                      declare
                         A : Unbounded_String;
                         N : Natural := 0;
@@ -9825,18 +9862,36 @@ package body O2c_Compiler is
                         loop
                            exit when Cur.Kind = Lex.Tok_RBrace;
                            N := N + 1;
-                           if N > UTypes (U).Arr_Len then
-                              raise O2c_Error with "array aggregate has "
-                                & "too many elements (line "
-                                & Natural'Image (Cur.Line) & ")";
-                           end if;
-                           declare
-                              V : Expr_Rec := Parse_Expr;
-                           begin
-                              if UTypes (U).Elem = T_Char
-                                and then V.Typ = T_Str
-                              then
-                                 --  single-character string literal
+                            if N > UTypes (U).Arr_Len then
+                               raise O2c_Error with "array aggregate has "
+                                 & "too many elements (line "
+                                 & Natural'Image (Cur.Line) & ")";
+                            end if;
+                            if O2c_BC.Bytecode_Mode then
+                               --  [base, index] under the value Parse_Expr
+                               --  is about to push: the store below is the
+                               --  indexed assignment's shape exactly.
+                               Bc_Base (Head (1 .. H_Len), U);
+                               O2c_Ir_Lower.Push_Int (N - 1);
+                            end if;
+                            declare
+                               V : Expr_Rec := Parse_Expr;
+                            begin
+                               if UTypes (U).Elem = T_Char
+                                 and then V.Typ = T_Str
+                               then
+                                  --  single-character string literal
+                                  if O2c_BC.Bytecode_Mode then
+                                     --  A one-character LITERAL parses as
+                                     --  T_Char and never reaches here; what
+                                     --  reaches here is a string VALUE (a
+                                     --  pool address on the stack), and no
+                                     --  char store can follow it.  Say which.
+                                     raise O2c_BC.Wrong_Construct with
+                                       "bytecode backend: a one-character "
+                                       & "string constant as a CHAR array "
+                                       & "aggregate element";
+                                  end if;
                                  declare
                                     T : constant String :=
                                       To_String (V.Text);
@@ -9851,11 +9906,18 @@ package body O2c_Compiler is
                                     end if;
                                  end;
                               end if;
-                              if V.Typ /= UTypes (U).Elem then
-                                 raise O2c_Error with "array element type "
-                                   & "mismatch (line "
-                                   & Natural'Image (Cur.Line) & ")";
-                              end if;
+                               if V.Typ /= UTypes (U).Elem then
+                                  raise O2c_Error with "array element type "
+                                    & "mismatch (line "
+                                    & Natural'Image (Cur.Line) & ")";
+                               end if;
+                               if O2c_BC.Bytecode_Mode then
+                                  --  The indexed assignment's store: bytes
+                                  --  for a CHAR element, slots otherwise.
+                                  O2c_Ir_Lower.Store_Idx
+                                    ((if UTypes (U).Elem = T_Char then 1
+                                      else 8));
+                               end if;
                               if N > 1 then
                                  A := A & ", ";
                               end if;

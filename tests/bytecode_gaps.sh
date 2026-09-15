@@ -475,10 +475,12 @@ note "--- FOUND BY THE 3cq SWEEP: aggregates were SILENT, not refused ---"
 #  Both of these compiled, ran, and left their target untouched: `r := {a = 1, b = 2}` printed
 #  00 and `a := {1, 2, 3}` printed 000.  They are the fifth and sixth instances of one habit -
 #  a parser branch that builds Ada text and emits no bytecode - which is why the sweep exists.
-#  They refuse now.  When the real fix lands (the field and element stores whose offsets and
-#  kinds the type descriptor already carries) these flip to `ok`, and that flip is the point.
-check "record aggregate"  blocked 'module G50; type R = record a: integer; b: integer end; var r: R; begin r := {a = 1, b = 2} end G50.'
-check "numeric array aggregate"  blocked 'module G51; type A3 = array 3 of integer; var a: A3; begin a := {1, 2, 3} end G51.'
+#  FIXED (3hc): the given fields/elements store as parsed - [base, value] for a record field at
+#  Field_Offset's offset, [base, index, value] for an array element, both mirroring the ordinary
+#  assignment paths - and the record fields left out take Scalar_Init's zero.  recagg.ob2 and
+#  arragg.ob2 hold both by value, differential-corroborated.
+check "record aggregate"  ok 'module G50; type R = record a: integer; b: integer end; var r: R; begin r := {a = 1, b = 2} end G50.'
+check "numeric array aggregate"  ok 'module G51; type A3 = array 3 of integer; var a: A3; begin a := {1, 2, 3} end G51.'
 
 note "--- FOUND BY THE 3cr region-A AUDIT: four arms were SILENT too ---"
 #  The expression-side dispatch (region A) turned out to emit or refuse, never to be silent - but

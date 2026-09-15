@@ -256,7 +256,6 @@ LOUDLY. Regenerate with:
                               designator as well does not vanish with it - that
                               half is fixed, see 3h in RESUME.
     a method on a VAR record receiver
-    an ARRAY OF actual that is a local array
     forwarding a global ARRAY OF parameter
     a field's owning record not on the variable's type chain
     a record nesting too deeply to lay out

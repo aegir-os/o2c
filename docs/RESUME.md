@@ -7863,6 +7863,41 @@ type inside its own formal part ("cannot be used before end of specification"): 
 ADA_BROKEN name-collision family, so the fixture names it Rec.  Whole-copy of a local record
 probed consistent (copy-ok).  Differential corroborates all three: 78 fixtures.
 
+### 3hc. Parity milestones 4+5: the aggregates - the survey's last two divergences
+
+The 3cq sweep's two silent sites, refused since and now emitted.  Both fixes are one idea: the
+aggregate's parse loop already walks each value in order, so each value is stored where the
+ordinary assignment paths put it, and nothing about the shape is new.
+
+    record  {a = 40, b = 2, r = 1.5}    per field, as parsed:  Bc_Base (Head, U), then
+                                        Parse_Expr's push, then Store_Fld at
+                                        Field_Offset (U, owner, field) - the same [base,
+                                        value] a `r.a := 1` emits.  A REAL field given an
+                                        integer literal gets Bin (I2R) on what was pushed.
+                                        Fields left out store Scalar_Init's zero after the
+                                        parse, over the whole extension chain.
+    array   {1, 2, 3}                   per element: Bc_Base, Push_Int (N - 1), the value,
+                                        Store_Idx - the indexed assignment's shape exactly,
+                                        1 byte for a CHAR element, 8 otherwise.
+
+Two details the walk surfaced.  One: a one-character string LITERAL ("h") parses as T_Char
+with Push_Char, so the CHAR conversion branch the Ada side carries never sees a literal - what
+reaches it is a string VALUE (a pool address on the stack), which no char store can follow, so
+that branch refuses loudly in bytecode mode rather than storing an address's low byte.  Two:
+Field_Offset was already the answer for the extension chain (parents first, by SLOTS), so the
+Ext case needed no new layout work - y := {a = 1, d = 41} with a inherited just works.
+
+Fixtures: recagg (given fields, defaults, the REAL/int mix, an extension aggregate with a
+parent field and an inherited default: six checks), arragg (INTEGER elements, CHAR elements).
+Both differential-corroborated against the Ada oracle, which was measured accepting both shapes
+before the fix was written.  G50/G51 in bytecode_gaps.sh flip blocked -> ok, and the stale
+"an ARRAY OF actual that is a local array" entry in docs/bytecode-gaps.md section A - missed at
+3hb - is removed with them.
+
+That closes the survey's list: all five true divergences are fixed.  What remains on the parity
+page is the SHARED front-end limits (both backends refuse), the recorded ADA_BROKEN family, and
+the emitter-side open items (per-proc stack_max, stale refusal text).
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
