@@ -771,7 +771,14 @@ package body O2c_BC is
       declare
          Id : constant Natural := Frame_Proc;
       begin
-         Procs (Id).Frame_Slots := Next_Frame;
+         --  Never let a frame be EMPTY: a call to a nested procedure pushes
+         --  the caller's frame base as Load_Addr_L (0), and the VM rejects
+         --  slot 0 in a zero-slot frame, so a procedure with no locals and
+         --  no parameters could not call its own nested one (a module-level
+         --  A calling its B failed verification).  The padding slot is never
+         --  read or written - nothing can name it.
+         Procs (Id).Frame_Slots := (if Next_Frame = 0 then 1
+                                    else Next_Frame);
          --  Restore from THIS procedure's own saved values, not the shared
          --  slots: a nested declaration between this frame's Reserve and its
          --  END has already overwritten them.

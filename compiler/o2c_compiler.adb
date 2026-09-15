@@ -8839,7 +8839,15 @@ package body O2c_Compiler is
                      Step : Unbounded_String := To_Unbounded_String ("1");
                      BRef : constant Boolean := Syms (Id).By_Ref;
                      ANm  : constant String := Ada_Id (Nm (1 .. N_Len));
+                     Owner : Natural := 0;
+                     Dist  : Natural := 0;
+                     Slot  : Integer := -1;
                   begin
+                     if not BRef
+                       and then O2c_BC.Local_Slot (ANm) < 0
+                     then
+                        Find_Up_Level (ANm, Owner, Dist, Slot);
+                     end if;
                      if O2c_BC.Bytecode_Mode then
                         --  The current value first, so the step lands on top
                         --  and Sub computes x - step (Add would commute, Sub
@@ -8857,6 +8865,16 @@ package body O2c_Compiler is
                            O2c_Ir_Lower.Load_Local
                              (Natural (O2c_BC.Local_Slot (ANm)));
                            O2c_Ir_Lower.Push_Int (0);
+                           O2c_Ir_Lower.Load_Idx (8);
+                        elsif Owner /= 0 then
+                           --  Up-level: the store's [base, idx] goes down
+                           --  FIRST (Bc_Store cannot slip them under the
+                           --  value, which is the refusal this replaces),
+                           --  then the value reads through the same chase.
+                           Bc_Chase (Dist);
+                           O2c_Ir_Lower.Push_Int (Slot);
+                           Bc_Chase (Dist);
+                           O2c_Ir_Lower.Push_Int (Slot);
                            O2c_Ir_Lower.Load_Idx (8);
                         else
                            Bc_Load (ANm);
@@ -8886,7 +8904,7 @@ package body O2c_Compiler is
                         O2c_Ir_Lower.Bin_Op
                           ((if Neg then O2c_Ir.Op_Sub
                             else O2c_Ir.Op_Add));
-                        if BRef then
+                        if BRef or else Owner /= 0 then
                            O2c_Ir_Lower.Store_Idx (8);
                         else
                            Bc_Store (ANm);
@@ -8979,8 +8997,25 @@ package body O2c_Compiler is
                            --  is one leaked slot per execution, which a loop
                            --  turns into a steady climb to the stack ceiling.
                            O2c_BC.Drop;
-                           O2c_BC.Alloc_New (Desc_For (Tgt));
-                           Bc_Store (NNm);
+                           declare
+                              Owner : Natural;
+                              Dist  : Natural;
+                              Slot  : Integer;
+                           begin
+                              Find_Up_Level (Ada_Id (NNm),
+                                             Owner, Dist, Slot);
+                              if Owner /= 0 then
+                                 --  Up-level: the store's [base, idx] goes
+                                 --  down before the allocator's result.
+                                 Bc_Chase (Dist);
+                                 O2c_Ir_Lower.Push_Int (Slot);
+                                 O2c_BC.Alloc_New (Desc_For (Tgt));
+                                 O2c_Ir_Lower.Store_Idx (8);
+                              else
+                                 O2c_BC.Alloc_New (Desc_For (Tgt));
+                                 Bc_Store (NNm);
+                              end if;
+                           end;
                         end if;
                      else
                         Append_Body ("      " & To_String (D.Text)

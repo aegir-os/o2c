@@ -9,6 +9,16 @@ begin
   DEC(v, 3)
 end Bump;
 
+procedure Up;
+  procedure Inner;
+  begin
+    INC(n, 3);
+    DEC(n)
+  end Inner;
+begin
+  Inner
+end Up;
+
 begin
   x := 3;
   INC(x);
@@ -26,5 +36,8 @@ begin
   INC(n, 4);
   DEC(n, 5);
   if n = 10 then Out.String("long-ok") else Out.String("long-bad") end;
+  Out.Ln;
+  Up;
+  if n = 12 then Out.String("up-ok") else Out.String("up-bad") end;
   Out.Ln
 end IncDec.
