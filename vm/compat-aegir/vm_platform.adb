@@ -99,6 +99,24 @@ package body VM_Platform is
    begin
       Aegir_User.CLI.Init;
       if Aegir_User.Files.Stat (Path, Sz) /= Aegir_User.Files.Status_Ok then
+         --  A bare volume root ("BD0:") is not a file, so Stat answers
+         --  not-found for it even when the volume is mounted.  The Files
+         --  module's Wait polls exactly that path, and the poll's
+         --  400 x 2,000,000 spin is seconds for compiled code but minutes
+         --  under the interpreter - the run looked hung at m8401.  The
+         --  volume question has its own op: Volume_Info, the one the
+         --  launcher's `await BD0:` uses.
+         if Path'Length >= 2 and then Path (Path'Last) = ':' then
+            declare
+               Total, Free, Cluster : Aegir_User.Files.U64;
+            begin
+               if Aegir_User.Files.Volume_Info
+                 (Path, Total, Free, Cluster) = Aegir_User.Files.Status_Ok
+               then
+                  return 0;
+               end if;
+            end;
+         end if;
          return -1;
       end if;
       return Long_Integer (Sz);

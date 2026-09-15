@@ -76,6 +76,15 @@ begin
    Aegir_User.Console.Put_Line ("o2c 0.3 (Oberon-2 to Ada for Aegir)");
    Aegir_User.CLI.Init;
 
+   --  The demo's two library modules, read once and shared by both passes
+   --  (the bytecode hello run and the Ada capture below).
+   Libs (1) := (Name => To_Unbounded_String ("Geom"),
+                Text => To_Unbounded_String
+                  (Read_Module ("RD0:Tests/O2cLib/Geom.ob2")));
+   Libs (2) := (Name => To_Unbounded_String ("Geo"),
+                Text => To_Unbounded_String
+                  (Read_Module ("RD0:Tests/O2cLib/Geo.ob2")));
+
    --  M53: compile a slice-sized program to bytecode, execute it in-process
    --  and publish it for the standalone VM (Tests/Vm, program 42).
    --
@@ -170,17 +179,61 @@ begin
                  ("o2c bytecode: image write failed: "
                   & Ada.Exceptions.Exception_Message (E));
          end;
-      end;
-   Libs (1) := (Name => To_Unbounded_String ("Geom"),
-                Text => To_Unbounded_String
-                  (Read_Module ("RD0:Tests/O2cLib/Geom.ob2")));
-   Libs (2) := (Name => To_Unbounded_String ("Geo"),
-                Text => To_Unbounded_String
-                  (Read_Module ("RD0:Tests/O2cLib/Geo.ob2")));
-   Res := O2c_Compiler.Compile_Multi
-     (Main_Source => Read_Module (Demo_Main), Libs => Libs,
-      N_Libs => N_Libs, Count => Count);
-   for I in 1 .. Count loop
+       end;
+       --  Compile the FULL demo to bytecode and run it in the guest - the
+       --  milestone the VmGreet slice was the rehearsal for.  Only when the
+       --  boot staged the marker (O2C_BYTECODE=1): boot 1's purpose is a
+       --  quiet Ada capture, and the demo's 94 console lines would tear it.
+       --  This run REPLACES the Ada-compiled demo as program 41 in that
+       --  boot: both do the same BD0: delete/create/rename sequence, and
+       --  two concurrent instances of it would race on those files.
+       --
+       --  The probe is Read_Module - the same path that reads the demo
+       --  sources in both boots.  Aegir_User.Files.Stat on the RD0: volume
+       --  returned not-OK for a marker that WAS staged (measured: the pass
+       --  skipped itself silently, no error, no image line), and a guard
+       --  that can answer wrong has to fail noisily, not quietly.
+       declare
+          Run_Hello_BC : Boolean := False;
+       begin
+          begin
+             Run_Hello_BC :=
+               Read_Module ("RD0:Tests/O2cLib/HelloBc.mrk")'Length > 0;
+          exception
+             when O2c_Compiler.O2c_Error =>
+                Run_Hello_BC := False;   --  no marker: boot 1, quiet capture
+          end;
+          if Run_Hello_BC then
+             O2c_Compiler.Bytecode_Requested := True;
+             Res := O2c_Compiler.Compile_Multi
+               (Main_Source => Read_Module (Demo_Main), Libs => Libs,
+                N_Libs => N_Libs, Count => Count);
+             O2c_Compiler.Bytecode_Requested := False;
+             declare
+                Img : constant String := O2c_Compiler.Bytecode_Image;
+                St  : OBC_VM.Status;
+             begin
+                if Img'Length = 0 then
+                   raise O2c_Compiler.O2c_Error with
+                     "no hello bytecode image produced";
+                end if;
+                Aegir_User.Console.Put_Line
+                  ("o2c bytecode: hello image" & Natural'Image (Img'Length)
+                   & " bytes");
+                --  Same embedded run as VmGreet above: what the demo prints
+                --  is the VM's own Out.* natives under Aegir, and the demo's
+                --  Files/In/Input/Env/Args parts exercise the guest services
+                --  through the same VM_Platform the standalone VM uses.
+                St := OBC_VM.Run_Image (Img);
+                Aegir_User.Console.Put_Line
+                  ("o2c bytecode: hello vm " & OBC_VM.Image (St));
+             end;
+          end if;
+       end;
+    Res := O2c_Compiler.Compile_Multi
+      (Main_Source => Read_Module (Demo_Main), Libs => Libs,
+       N_Libs => N_Libs, Count => Count);
+    for I in 1 .. Count loop
       Aegir_User.Console.Put_Line ("--- unit "
                                    & To_String (Res (I).File) & " ---");
       Emit_Gen (To_String (Res (I).Text));

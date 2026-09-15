@@ -7910,6 +7910,51 @@ their probes are the strings check plus the suites.  BOOLEAN = BOOLEAN does reac
 site and showed the new text.  The one surviving allow-list message - record fields - is the 3g
 one, and it is accurate.
 
+### 3he. hello.ob2 compiles and runs INSIDE the Aegir guest
+
+o2c's guest run now has a third pass: after the VmGreet slice it compiles the full 530-line,
+18-import hello.ob2 TO BYTECODE and runs it in the embedded VM, printing the same 94 lines the
+Ada-compiled demo used to print as program 41 - which is gone from boot 2, because both do the
+same BD0: delete/create/rename sequence and two concurrent instances race on those files.  The
+run_m1 assertions are unchanged; only the producer changed.  Boot 1 must NOT do this pass (its
+console lines would tear the Ada capture), so the aegir Makefile stages a marker file only for
+the bytecode boot, and o2c probes it by READING it - Aegir_User.Files.Stat on the RD0: volume
+returned not-OK for a file that was there (measured), and a guard that can answer wrong has to
+fail noisily.
+
+Four real defects surfaced in order, and the last three are the kind only this run could see:
+
+1. **Second bytecode compile in one process: "unresolved label".**  Bc_Labels (the label-id
+   counter) was never reset; O2c_BC.Begin_Mode zeroes the table the ids index.  Pass 2 allocated
+   past the fresh table and Encode refused the low ids.  Reset next to Begin_Mode.  N_XT (the
+   exported-type table) had the same leak one pass later: pass 3 imported every type twice and
+   died on "too many type declarations (imported types)".  Both counters are per compilation now.
+
+2. **Secondary stack: 64K was exactly one compilation.**  The compiler's String-returning
+   machinery (Read_Module, unit texts, Encode) lives on it; hello exhausted it at Encode
+   (s-secsta raise).  crate/o2c.gpr binds -D512k for THIS partition only (gnatbind's -Dnnk; the
+   uppercase K is rejected, measured).
+
+3. **FStat("BD0:") lies about volume roots.**  Stat is a file op; a bare "BD0:" answers
+   not-found even mounted, so Files.Wait always spun its full 400x2,000,000 poll - seconds for
+   compiled code (which is why the Ada demo passed), minutes under the interpreter (which is why
+   the VM run looked hung at m8401).  Both backends' Stat_File/O2c_FStat now fall back to
+   Volume_Info - the launcher's own `await BD0:` op - for bare-volume paths, and Wait exits on
+   the first check.  Volume_Info is pinned in aegir_interface.
+
+4. **Two native divergences the host suites cannot see.**  Out.LongReal shared native 3's
+   THREE decimals with Out.Real ("8.000"), but O2c_Put_LReal prints SIX ("8.000000"): new native
+   48 o2c_putlreal (foreign entry 44, appended never renumbered).  XYplane.Dot IGNORED its mode
+   and always drew: an erased dot still read back as drawn (8102 for 8103).  The mode is now the
+   value written - and the bytecode_gaps XYplane probe turned out to have ENCODED the bug: it
+   drew with mode 0 (erase) and expected the dot set.  Fixtures lreal (corroborated: both
+   backends print 8.000000/3.141593/2.500) and plane (8100/8103/8105; the Ada side is recorded
+   ADA_BROKEN, the Aegir_User.CLI environment family).
+
+Also in passing: run_m1's boot-2 marker moved from '406' to the run's completion line, because
+a bare number also appears inside the O2C| source capture; '406' got its own anchored
+assertion instead.  Full gate green, differential 81.
+
 ### 3hd. Per-procedure stack_max - the emitter side of 3gz's verifier fix
 
 3gz made the verifier walk one procedure at a time with "the proc's own Stack_Max" as the depth

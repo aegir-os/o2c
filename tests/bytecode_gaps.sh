@@ -222,7 +222,9 @@ fi
 
 #  XYplane.  Dot and Clear are only observable through IsDot, so all four are
 #  asserted together - and IsDot is the first thing here to return a value,
-#  which is what makes it the probe for the expression path as well.
+#  which is what makes it the probe for the expression path as well.  The Dot
+#  below draws with mode 1: mode was ignored (always drawn) until the guest
+#  demo caught it, and this probe's 0 - which is ERASE - had encoded the bug.
 cat > "$WORK/plane.ob2" <<'EOB'
 module PlaneT;
 import XYplane, Out;
@@ -232,7 +234,7 @@ begin
   if XYplane.IsDot(99, 99) then i := i + 1 end;
   Out.Int(i, 0); Out.Ln;
   XYplane.Open;
-  XYplane.Dot(10, 20, 0);
+  XYplane.Dot(10, 20, 1);
   i := 0;
   if XYplane.IsDot(10, 20) then i := i + 10 end;
   if XYplane.IsDot(99, 99) then i := i + 1 end;

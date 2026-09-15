@@ -633,6 +633,11 @@ package body OBC_VM is
       --  string in, the REAL it names out.  Entry 43, i.e. id 47.  Appended,
       --  never renumbered.
       43 => (Sym => new String'("o2c_strtoreal"), Pops => 1),
+      --  Out.LongReal: value and width in, the six-decimal print of
+      --  O2c_Put_LReal out - REAL's native 3 prints three decimals and
+      --  LONGREAL formats differently in the Ada backend, so it cannot
+      --  share.  Entry 44, i.e. id 48.  Appended, never renumbered.
+      44 => (Sym => new String'("o2c_putlreal"), Pops => 2),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -681,6 +686,7 @@ package body OBC_VM is
       40 => 2,    --  o2c_math_arctan2
       45 => 1,    --  o2c_errwrite: the address of a NUL-terminated string
       47 => 1,    --  o2c_strtoreal: the string's address
+      48 => 2,    --  o2c_putlreal: the value and the (unused) width
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1627,7 +1633,11 @@ package body OBC_VM is
                   end if;
                elsif Idx = Max_Natives + 11 then
                   if Live then
-                     Plane (C (1) * Plane_W + C (0)) := 1;
+                     --  draw = 1, erase = 0: the mode is the value the dot
+                     --  gets.  It used to be ignored (always 1), so an
+                     --  erased dot still read back as drawn.
+                     Plane (C (1) * Plane_W + C (0)) :=
+                       (if C (2) = 0 then 0 else 1);
                   end if;
                else
                   Result :=
@@ -1924,6 +1934,35 @@ package body OBC_VM is
                 Result := (Pushes => True, Value => R64_To_U64 (V));
              end;
              return Ok;
+
+          when Max_Natives + 43 =>
+             --  o2c_putlreal (48): Out.LongReal.  REAL shares native 3
+             --  (three decimals, O2c_Put_Real's shape), but O2c_Put_LReal
+             --  prints SIX, and the shared native made the demo's MathL
+             --  lines read 8.000 where the Ada backend prints 8.000000.
+             --  The width argument is accepted and unused, as in native 3.
+             declare
+                V   : constant Long_Float := To_R64 (Args (0));
+                IP  : constant I64 := (if V < 0.0
+                                       then I64 (V - 0.5) + 1
+                                       else I64 (V - 0.5));
+                FR  : I64 := I64 (abs (V - Long_Float (IP)) * 1000000.0);
+                Ip2 : I64 := IP;
+             begin
+                if FR > 999999 then
+                   Ip2 := Ip2 + 1;
+                   FR := 0;
+                end if;
+                Put_Int (Ip2, 0);
+                Put ('.');
+                Put (Character'Val (48 + Integer (FR / 100000)));
+                Put (Character'Val (48 + Integer ((FR / 10000) mod 10)));
+                Put (Character'Val (48 + Integer ((FR / 1000) mod 10)));
+                Put (Character'Val (48 + Integer ((FR / 100) mod 10)));
+                Put (Character'Val (48 + Integer ((FR / 10) mod 10)));
+                Put (Character'Val (48 + Integer (FR mod 10)));
+                return Ok;
+             end;
 
           when Max_Natives + 21 .. Max_Natives + 24 =>
             --  o2c_fstat (26), o2c_fread (27), o2c_fwrite (28), o2c_fclose (29):

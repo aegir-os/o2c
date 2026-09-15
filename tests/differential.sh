@@ -147,6 +147,7 @@ threadyield	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 inputuse	ADA_BROKEN	the ADa side emits the builtin Input, whose body
 argsuse	ADA_BROKEN	the Ada side emits the builtin Args, whose body
 envset	ADA_BROKEN	the Ada side emits the builtin Env, whose body
+plane	ADA_BROKEN	the Ada side emits the builtin XYplane, whose body
 errwrite	GOLDEN_SUSPECT	the Ada side builds and runs this one (its Err
 #  calls the same Aegir_User.CLI unit - the identical environment limit as
 #  inputuse above, and the same reason it is not a defect: the Ada backend is
@@ -159,6 +160,11 @@ errwrite	GOLDEN_SUSPECT	the Ada side builds and runs this one (its Err
 #  envset is the same again, one module further on: the Ada side emits the
 #  builtin Env (o2c_envset/o2c_envget), which reaches Aegir_User.CLI for the
 #  same reason.
+#  plane is the same class: the Ada side emits the builtin XYplane, whose
+#  helpers reach Aegir_User.CLI, a guest unit the host build does not have.
+#  The fixture still earns its place: run_bc exercises the VM's Dot mode
+#  (draw writes 1, erase writes 0 - it used to write 1 always, and an
+#  erased dot still read back as drawn).
 #  errwrite is a DIFFERENT class - GOLDEN_SUSPECT, not ADA_BROKEN - and the
 #  distinction is informative: the Ada side builds and runs it, because its Err
 #  helper does NOT reach Aegir_User.CLI the way Env's does.  It still disagrees

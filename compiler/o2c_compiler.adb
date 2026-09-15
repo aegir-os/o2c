@@ -15,7 +15,9 @@ package body O2c_Compiler is
 
    --  Bytecode backend (M53).  Control-flow hooks need labels and label
    --  ids must be unique across the whole program, so they come from one
-   --  counter that only ever grows.
+   --  counter that only ever grows WITHIN a compilation - Compile_Multi
+   --  resets it next to O2c_BC.Begin_Mode, because the ids index a table
+   --  that Begin_Mode just zeroed.
    Bc_Labels : Natural := 0;
 
    function New_Bc_Label return Natural is
@@ -10524,21 +10526,27 @@ package body O2c_Compiler is
                            end if;
                         elsif Member = "Real" or else Member = "LongReal"
                         then
-                           --  REAL and LONGREAL share a slot and the printing
-                           --  native; only the Ada formatting differs.  The
-                           --  optional width is accepted and unused, as it is
-                           --  in O2c_Put_Real.
+                           --  REAL prints through native 3 (three decimals,
+                           --  O2c_Put_Real's shape); LONGREAL has its own
+                           --  native 48 (six decimals, O2c_Put_LReal's) -
+                           --  sharing made the demo's MathL lines read 8.000
+                           --  where the Ada backend prints 8.000000, which
+                           --  the guest run of both backends made visible.
+                           --  The optional width is accepted and unused by
+                           --  either native.
                            if not Had_Width then
                               O2c_Ir_Lower.Push_Int (0);
                            end if;
-                           --  M4e: REAL and LONGREAL share this native and therefore this
-                           --  route - they differ only in the Ada formatting.  Two
-                           --  arguments, both already pushed above (the default width
-                           --  and the value); Op_Arg declares them.
+                           --  Two arguments, both already pushed above (the
+                           --  default width and the value); Op_Arg declares
+                           --  them.
                            if O2c_BC.Bytecode_Mode then
                               O2c_Ir.Emit (O2c_Ir.Op_Arg);
                               O2c_Ir.Emit (O2c_Ir.Op_Arg);
-                              O2c_Ir.Emit (O2c_Ir.Op_Call_Native, Imm_1 => 3, Imm_2 => 2);
+                              O2c_Ir.Emit (O2c_Ir.Op_Call_Native,
+                                           Imm_1 => (if Member = "LongReal"
+                                                     then 48 else 3),
+                                           Imm_2 => 2);
                               O2c_Ir_Lower.Emit_Quad
                                 (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count - 2)));
                               O2c_Ir_Lower.Emit_Quad
@@ -11740,10 +11748,22 @@ package body O2c_Compiler is
                  & ASCII.LF
                  & "      use type Interfaces.Unsigned_64;" & ASCII.LF
                  & "      Sz : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      T, F, C : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      Q  : constant String := O2c_Name (Nm);" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
-                 & "      if Aegir_User.Files.Stat (O2c_Name (Nm), Sz) /= "
+                 & "      if Aegir_User.Files.Stat (Q, Sz) /= "
                  & "Aegir_User.Files.Status_Ok then" & ASCII.LF
+                 --  Same fallback as the VM's Stat_File: a bare volume
+                 --  root is not a file, and Files.Wait polls exactly
+                 --  that - the volume question is Volume_Info's.
+                 & "         if Q'Length >= 2 and then Q (Q'Last) = ':' then"
+                 & ASCII.LF
+                 & "            if Aegir_User.Files.Volume_Info (Q, T, F, C)"
+                 & " = Aegir_User.Files.Status_Ok then" & ASCII.LF
+                 & "               return 0;" & ASCII.LF
+                 & "            end if;" & ASCII.LF
+                 & "         end if;" & ASCII.LF
                  & "         return -1;" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      return Long_Integer (Sz);" & ASCII.LF
@@ -13444,6 +13464,13 @@ package body O2c_Compiler is
       N_X := 0;
       N_Prov := 0;
       N_Init_Procs := 0;
+      --  The exported-type table is per compilation too: it is not reset
+      --  anywhere else, and every builtin re-registers its exported types
+      --  each pass, so a second Compile_Multi in one process saw every
+      --  imported type twice (a third, three times) and the importer's
+      --  UTypes filled with duplicates until "too many type declarations
+      --  (imported types)".  o2c's guest run does three passes.
+      N_XT := 0;
       Multi_Ok := True;
 
       --  Collect imports first (see Emits).
@@ -13496,6 +13523,13 @@ package body O2c_Compiler is
       --  becoming a silent wrong answer.
       if Bytecode_Requested then
          O2c_BC.Begin_Mode;
+         --  The label counter must restart with the compilation: its ids are
+         --  per image ("unique across the whole program" means THIS program),
+         --  and O2c_BC.Reset just zeroed the table they index.  A second
+         --  bytecode Compile_Multi in one process - o2c's guest run does
+         --  exactly two - otherwise kept allocating past the fresh table and
+         --  Encode refused every low id as an "unresolved label".
+         Bc_Labels := 0;
       end if;
 
       Compile_Builtin (Oak_Strings_Src, Scoped => True);

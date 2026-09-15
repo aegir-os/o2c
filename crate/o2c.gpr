@@ -19,4 +19,15 @@ project O2c extends "aegir_program.gpr" is
    package Builder is
       for Executable ("o2c.adb") use "o2c.elf";
    end Builder;
+
+   --  The compiler's String-returning machinery (Read_Module, the Ada unit
+   --  texts, O2c_BC.Encode and the image getter) lives on the secondary
+   --  stack, and the runtime default (64K, gnat_user/s-parame) fits exactly
+   --  one compilation: the VmGreet slice passed, but compiling hello.ob2 to
+   --  bytecode in the same process raised Storage_Error from s-secsta at
+   --  Encode time.  Bump it for THIS partition only - the other Aegir
+   --  programs keep the runtime default.
+   package Binder is
+      for Default_Switches ("Ada") use ("-D512k");
+   end Binder;
 end O2c;

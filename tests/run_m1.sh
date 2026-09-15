@@ -6,8 +6,9 @@
 #      module sources from the initrd (Tests/O2cLib/*.ob2), compiles
 #      them as separate modules and prints each generated Ada unit
 #      between markers; rebuild them all on the host
-#   3. boot again staging Tests/Hello; assert the full demo output,
-#      including the cross-module tail (Math exports)
+#   3. boot again with O2C_BYTECODE=1: o2c compiles hello.ob2 TO
+#      BYTECODE in the guest and runs it in its embedded VM; assert
+#      the full demo output, including the cross-module tail
 #
 # Requires AEGIR_ROOT (the aegir checkout; no default).
 set -eu
@@ -18,11 +19,11 @@ WORK="${TMPDIR:-/tmp}/o2c-m1"
 QEMU_LOG="$WORK/boot.log"
 RUNTIME_LOG="$WORK/boot_runtime.log"
 #  Boot windows in seconds, per boot.  Boot 1 (the Ada capture) stays at the
-#  original 280 and does NOT request the bytecode half: o2c then finds no
-#  bytecode source staged and its pass reduces to one line (the pass sits in
-#  an exception handler), so the capture is quiet and as fast as before.
-#  Boot 2 requests it (O2C_BYTECODE=1, which stages VmGreet.ob2, the VM and
-#  its manifest entry) and therefore carries two full compiler passes - hence
+#  original 280 and does NOT request the bytecode hello pass: the aegir
+#  Makefile stages HelloBc.mrk only for the bytecode boot, so in boot 1 o2c
+#  finds no marker and skips the pass whose 94 console lines would tear the
+#  capture.  Boot 2 requests it (O2C_BYTECODE=1: the marker, the VM and its
+#  manifest entry) and therefore carries three full compiler passes - hence
 #  the wider window - and its log is the one the bytecode assertions read.
 RUN_MIN=${RUN_MIN:-280}
 RUN_MIN_BC=${RUN_MIN_BC:-460}
@@ -119,28 +120,45 @@ if [ "$ATT" -ge 6 ]; then
    exit 1
 fi
 
-echo "run_m1: boot 2/2 - assert hello output incl. shared O2c_Types"
-echo "  exports (406) and the Files module reading the staged"
+echo "run_m1: boot 2/2 - o2c compiles hello.ob2 TO BYTECODE in the guest"
+echo "  and runs it in the embedded VM; assert the demo output incl. shared"
+echo "  O2c_Types exports (406) and the Files module reading the staged"
 echo "  Tests/O2cLib/Sample.txt (M40)"
-boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf O2C_BYTECODE=1" '406' "$RUN_MIN_BC"
+#  No O2C_HELLO_ELF: the Ada-compiled demo used to run here as program 41,
+#  but it does the same BD0: delete/create/rename sequence the bytecode run
+#  does, and two concurrent instances race on those files.  The bytecode
+#  run prints the same 94 lines, so every assertion below is unchanged -
+#  only the producer changed.  Boot 1 still builds the emitted Ada on the
+#  host, which is the Ada backend's remaining gate.
+#  The boot marker is the run's completion line, not '406': a bare number
+#  also appears inside the O2C| source capture, and matching it there would
+#  return before the run even produced it.
+boot_once "O2C_BYTECODE=1" 'o2c bytecode: hello vm ' "$RUN_MIN_BC"
 
-#  The demo's last marker does not order o2c's work: the demo (program 41)
-#  and o2c (program 40) are separate manifest programs that run CONCURRENTLY
-#  (the spawner does not wait for one before starting the next), and o2c
-#  prints its bytecode line after its own capture.  So wait for that line
-#  before asserting on the log, or the check races the program it checks.
-#  The last thing o2c prints is the publish line, and it comes *after*
-#  everything else it does (including its embedded run and waiting for the
-#  volume), so wait for that - not for an earlier line, which would kill the
-#  boot while the program was still working.
+#  o2c's own order is: the VmGreet pass and its publish line, THEN the hello
+#  bytecode pass, whose in-guest run prints every demo marker this script
+#  asserts.  boot_once returns on '406', which lands in the MIDDLE of that
+#  run - and the publish line is already behind us - so before reading the
+#  log, wait for the run's own completion line.  It comes after the demo's
+#  last marker; anything earlier would let the assertions read a log the
+#  demo was still writing.
 for _ in $(seq 1 36); do
-   grep -aq 'o2c bytecode: published BD0:VmGreet.obc' "$QEMU_LOG" && break
+   grep -aq 'o2c bytecode: hello vm ' "$QEMU_LOG" && break
    sleep 5
 done
 #  The boot-1 source capture also contains every string/number literal the
 #  demo uses, so the demo assertions below must look at the runtime console
 #  only - never at the O2C| capture lines.
 grep -av '^O2C|' "$QEMU_LOG" > "$RUNTIME_LOG" || true
+
+#  The '406' line was the boot marker while the demo was a separate program;
+#  with the marker moved to the run's completion line it needs its own
+#  assertion.  Anchored: '406' is also a substring of the m8406 marker.
+if ! grep -aq '^406$' "$RUNTIME_LOG"; then
+   echo "run_m1: the demo's shared O2c_Types export line (406) not seen" >&2
+   tail -30 "$RUNTIME_LOG" >&2
+   exit 1
+fi
 
 #  Temporary (M53): the demo's BD0 sequence is bracketed with m8401..m8407 so
 #  a stall names the op it stalled in; assert the whole sequence for now.
@@ -213,9 +231,7 @@ fi
 #  M53: the VM ran an image inside the guest.  The fixture's output line is
 #  unique on purpose, so it cannot be confused with the Ada backend's own
 #  markers - seeing it proves the Aegir build of the VM loaded, verified and
-#  executed a .obc image under Aegir.  (The image is emitted by the host
-#  front end for now; wiring the in-guest compiler to write its own .obc is
-#  the next step, at which point the fixture disappears.)
+#  executed a .obc image under Aegir.
 #  Both tokens are written by a *single* console write (a Put_Line), which
 #  matters because o2c and the demo run concurrently: 'vm elf ok ' and '55'
 #  come from separate Out.String/Out.Int calls, so a racing writer can land
@@ -241,8 +257,13 @@ fi
 #  more often than the six retries tolerate.  That is harness fragility, and a
 #  flaky assertion is worse than none - so boot 1 should stop carrying this
 #  work (see the note in the o2c README) before the assertion comes back.
+#  Three producers, three tokens: the standalone VM ran the published slice
+#  ('vm elf ok'), o2c ran the slice in-process ('vm ok'), and o2c compiled
+#  hello.ob2 to bytecode and ran THAT in-process ('hello vm ok') - the full
+#  demo, compiled and executed inside the guest.
 if ! grep -aq 'vm elf ok' "$RUNTIME_LOG" \
-   || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG"; then
+   || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG" \
+   || ! grep -aq 'o2c bytecode: hello vm ok' "$RUNTIME_LOG"; then
    echo "run_m1: the guest did not compile and run bytecode" >&2
    tail -30 "$RUNTIME_LOG" >&2
    exit 1
