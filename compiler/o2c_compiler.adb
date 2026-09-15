@@ -8314,6 +8314,16 @@ package body O2c_Compiler is
                  & Natural'Image (Cur.Line) & ")";
             end if;
             Next;
+            declare
+               --  An INTEGER value returned from a REAL/LONGREAL function
+               --  widens: the Ada text writes it as Float(...), the
+               --  bytecode side needs I2R on the stack - without it the
+               --  caller reads the integer word as a denormal REAL
+               --  (a `return 1` printed 0.000 and compared < 0.5).
+               --  REAL and LONGREAL share the VM's slot and opcodes, so
+               --  the T_Real -> T_LReal arm needs nothing.
+               Ret_I2R : Boolean := False;
+            begin
             if Cur_Proc_Ret then
                declare
                   V : Expr_Rec := Parse_Expr;
@@ -8338,9 +8348,11 @@ package body O2c_Compiler is
                   elsif Cur_Ret_Type = T_Real and then V.Typ = T_Int then
                      V.Text := To_Unbounded_String
                        ("Float (" & To_String (V.Text) & ")");
+                     Ret_I2R := True;
                   elsif Cur_Ret_Type = T_LReal and then V.Typ = T_Int then
                      V.Text := To_Unbounded_String
                        ("Long_Float (" & To_String (V.Text) & ")");
+                     Ret_I2R := True;
                   elsif Cur_Ret_Type = T_LReal and then V.Typ = T_Real then
                      V.Text := To_Unbounded_String
                        ("Long_Float (" & To_String (V.Text) & ")");
@@ -8372,11 +8384,15 @@ package body O2c_Compiler is
             --  last step.  Cur_Proc_Ret says which kind of return this is.
             if O2c_BC.Bytecode_Mode then
                if Cur_Proc_Ret then
+                  if Ret_I2R then
+                     O2c_Ir_Lower.Un_Op (O2c_Ir.Op_I2R, O2c_Ir.Tc_Word);
+                  end if;
                   O2c_BC.Return_Value;
                else
                   O2c_BC.Return_Void;
                end if;
             end if;
+            end;
          elsif Cur.Kind = Lex.Tok_If then
             Parse_If;
          elsif Cur.Kind = Lex.Tok_While then
@@ -10984,6 +11000,18 @@ package body O2c_Compiler is
                      if Cur.Kind = Lex.Tok_Comma then
                         Had_Width := True;
                         Next;
+                        --  Oakwood gives Out.Char and Out.String no width.
+                        --  Accepting one here parsed AND pushed it, and the
+                        --  Char/String arms never consume it: the Ada side
+                        --  silently ignored it, the bytecode side printed
+                        --  the width as a character (or took it for the
+                        --  pool offset and printed nothing).  Refuse in the
+                        --  shared parser, before anything is pushed.
+                        if Member = "Char" or else Member = "String" then
+                           raise O2c_Error with "Out." & Member
+                             & " takes no width (line "
+                             & Natural'Image (Cur.Line) & ")";
+                        end if;
                         declare
                            W : Expr_Rec := Parse_Expr;
                         begin

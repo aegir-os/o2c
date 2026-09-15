@@ -109,6 +109,21 @@ else
    bad "deep2: two-level-up name failed: $(cat "$WORK/deep2.log")"
 fi
 
+#  ---- Out.Char / Out.String take no width, and the refusal says so ----
+#  The width used to be parsed and pushed and then never consumed: Char
+#  printed the width as a character code, a literal String printed nothing,
+#  and the Ada side silently ignored it.  Oakwood gives neither member a
+#  width, so the shared parser refuses before anything is pushed.
+printf 'module W1; import Out; begin Out.Char("x", 3) end W1.\n' > "$WORK/w1.ob2"
+if timeout 120 "$FRONT" "$WORK/w1.ob2" "$WORK/w1.obc" >"$WORK/w1.log" 2>&1
+then
+   bad "w1: Out.Char with a width compiled instead of being refused"
+elif grep -aq 'takes no width' "$WORK/w1.log"; then
+   note "negative: Out.Char with a width refused (takes no width)"
+else
+   bad "w1: refused for the wrong reason: $(cat "$WORK/w1.log")"
+fi
+
 #  ---- imported constants: fold like locals, and CHAR ones push their code ----
 #  An imported INTEGER constant carried only its pushed value, never the fold,
 #  so `const M = Lib.N * 2` had nothing to fold and was refused at the use.
