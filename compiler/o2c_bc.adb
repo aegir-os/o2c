@@ -83,6 +83,17 @@ package body O2c_BC is
       --  not see a small procedure running deeper than its own code ever
       --  should.
       Stack_Max   : Integer := 0;
+      --  The frame slot holding this procedure's OWN static link, so a
+      --  deeper procedure can chase THROUGH this frame to a frame above it.
+      --  -1 for the module body (no enclosing frame, no link).
+      Link_Slot   : Integer := -1;
+      --  The enclosing frame's bookkeeping, saved at Reserve so End_Proc can
+      --  restore it.  It MUST live here, per procedure: the single Saved_*
+      --  slots this replaced were overwritten by a nested declaration, so an
+      --  outer procedure's END restored the INNER one's parent and every
+      --  later top-level procedure recorded the wrong parent chain.
+      Saved_Next  : Natural := 0;
+      Saved_Link  : Integer := -1;
    end record;
 
    Procs        : array (1 .. Max_Procs) of Proc_Entry;
@@ -719,7 +730,10 @@ package body O2c_BC is
                      NResults    => NResults,
                      Nested      => Nested,
                      Parent      => Saved_Frame_Proc,
-                     Stack_Max   => 0);
+                     Stack_Max   => 0,
+                     Link_Slot   => -1,
+                     Saved_Next  => Saved_Next_Frame,
+                     Saved_Link  => Saved_Link_Of);
       return Id;
    end Reserve_Proc;
 
@@ -754,11 +768,18 @@ package body O2c_BC is
          raise Wrong_Construct with
            "bytecode backend: no procedure is open";
       end if;
-      Procs (Frame_Proc).Frame_Slots := Next_Frame;
-      Frame_Proc := Saved_Frame_Proc;
-      Next_Frame := Saved_Next_Frame;
-      Link_Of := Saved_Link_Of;
-      Cur_Proc := 0;
+      declare
+         Id : constant Natural := Frame_Proc;
+      begin
+         Procs (Id).Frame_Slots := Next_Frame;
+         --  Restore from THIS procedure's own saved values, not the shared
+         --  slots: a nested declaration between this frame's Reserve and its
+         --  END has already overwritten them.
+         Frame_Proc := Procs (Id).Parent;
+         Next_Frame := Procs (Id).Saved_Next;
+         Link_Of := Procs (Id).Saved_Link;
+         Cur_Proc := 0;
+      end;
    end End_Proc;
 
    procedure Begin_Body is
@@ -829,9 +850,52 @@ package body O2c_BC is
    procedure Set_Link_Slot (Slot : Natural) is
    begin
       Link_Of := Integer (Slot);
+      if Frame_Proc /= 0 then
+         Procs (Frame_Proc).Link_Slot := Integer (Slot);
+      end if;
    end Set_Link_Slot;
 
    function Link_Slot return Integer is (Link_Of);
+
+   function Parent_Proc (Id : Natural) return Natural is
+     (if Id in Procs'Range then Procs (Id).Parent else 0);
+
+   function Proc_Link_Slot (Id : Natural) return Integer is
+     (if Id in Procs'Range then Procs (Id).Link_Slot else -1);
+
+   function Open_Proc_Id return Natural is (Frame_Proc);
+
+   function Slot_In_Proc (P : Natural; Ada_Name : String) return Integer is
+   begin
+      if P = 0 then
+         return -1;
+      end if;
+      for I in 1 .. N_Locals loop
+         if Locals (I).Proc = P
+           and then To_String (Locals (I).Name) = Ada_Name
+         then
+            return Integer (Locals (I).Slot);
+         end if;
+      end loop;
+      return -1;
+   end Slot_In_Proc;
+
+   function Ancestor_Distance (A : Natural) return Integer is
+      P : Natural := Frame_Proc;
+      D : Integer := 0;
+   begin
+      if A = 0 then
+         return -1;
+      end if;
+      while P /= 0 loop
+         if P = A then
+            return D;
+         end if;
+         P := Procs (P).Parent;
+         D := D + 1;
+      end loop;
+      return -1;
+   end Ancestor_Distance;
 
    function Up_Level_Slot (Ada_Name : String) return Integer is
    begin

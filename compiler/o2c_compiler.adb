@@ -353,6 +353,55 @@ package body O2c_Compiler is
    --  LOAD_G/STORE_G against the globals block.  Getting this wrong is
    --  silent - reading a zeroed global instead of a parameter - so it is
    --  one helper rather than a convention at each site.
+   --  A name owned by an enclosing procedure, at ANY depth: its frame is
+   --  reached by chasing static links.  Every nested procedure's frame holds
+   --  its own link in a recorded slot, so the chain is unbroken - the old
+   --  one-level limit was bookkeeping, not a property of the machine.  Owner
+   --  is 0 when no enclosing frame has the name (a module global, or unknown).
+   procedure Find_Up_Level (Ada_Name : String;
+                            Owner : out Natural; Dist : out Natural;
+                            Slot : out Integer) is
+      P : Natural := O2c_BC.Parent_Proc (O2c_BC.Open_Proc_Id);
+   begin
+      Owner := 0;
+      Dist := 0;
+      Slot := -1;
+      while P /= 0 loop
+         Dist := Dist + 1;
+         Slot := O2c_BC.Slot_In_Proc (P, Ada_Name);
+         if Slot >= 0 then
+            Owner := P;
+            return;
+         end if;
+         P := O2c_BC.Parent_Proc (P);
+      end loop;
+      Slot := -1;
+   end Find_Up_Level;
+
+   --  The Owner half of Find_Up_Level, for call sites that only need the
+   --  choice (store through the chase vs store local/global), not the frame.
+   function Enclosing_Has (Ada_Name : String) return Boolean is
+      Owner : Natural;
+      Dist  : Natural;
+      Slot  : Integer;
+   begin
+      Find_Up_Level (Ada_Name, Owner, Dist, Slot);
+      return Owner /= 0;
+   end Enclosing_Has;
+
+   --  Push the base of the frame Dist levels up (Dist >= 1): the current
+   --  frame's link, then each intermediate frame's own link slot in turn.
+   procedure Bc_Chase (Dist : Natural) is
+      Q : Natural := O2c_BC.Parent_Proc (O2c_BC.Open_Proc_Id);
+   begin
+      O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
+      for J in 2 .. Dist loop
+         O2c_Ir_Lower.Push_Int (O2c_BC.Proc_Link_Slot (Q));
+         O2c_Ir_Lower.Load_Idx (8);
+         Q := O2c_BC.Parent_Proc (Q);
+      end loop;
+   end Bc_Chase;
+
    procedure Bc_Load (Ada_Name : String;
                       By_Ref_Scalar : Boolean := False;
                       Size : Positive := 8) is
@@ -373,19 +422,17 @@ package body O2c_Compiler is
          O2c_Ir_Lower.Load_Local (Natural (S));
       else
          declare
-            Up : constant Integer := O2c_BC.Up_Level_Slot (Ada_Name);
+            Owner : Natural;
+            Dist  : Natural;
+            Slot  : Integer;
          begin
-            if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
-               O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
-               O2c_Ir_Lower.Push_Int (Up);
+            Find_Up_Level (Ada_Name, Owner, Dist, Slot);
+            if Owner /= 0 then
+               --  Any depth: chase the link chain to the owning frame,
+               --  then index the slot in it.
+               Bc_Chase (Dist);
+               O2c_Ir_Lower.Push_Int (Slot);
                O2c_Ir_Lower.Load_Idx (Size);
-            elsif O2c_BC.Too_Deep_Up_Level (Ada_Name) then
-               --  Higher than the one enclosing frame the static link reaches.
-               --  Refusing beats reading a module global of the same name, which
-               --  is a fresh zeroed variable - the silent wrong answer of 3ec.
-               raise O2c_BC.Wrong_Construct with "bytecode backend: '"
-                 & Ada_Name & "' is more than one level up, which is not "
-                 & "supported yet";
             else
                O2c_Ir_Lower.Load_Global (Ada_Name);
             end if;
@@ -402,13 +449,29 @@ package body O2c_Compiler is
       --  the IR expresses as a source that IS the operand stack.
       if S >= 0 then
          O2c_Ir_Lower.Store_Local (Natural (S));
-      elsif O2c_BC.Too_Deep_Up_Level (Ada_Name) then
-         raise O2c_BC.Wrong_Construct with "bytecode backend: '"
-           & Ada_Name & "' is more than one level up, which is not supported yet";
       else
+         declare
+            Owner : Natural;
+            Dist  : Natural;
+            Slot  : Integer;
+         begin
+            Find_Up_Level (Ada_Name, Owner, Dist, Slot);
+            if Owner /= 0 then
+               --  A store consumes the value already pushed, and Store_Idx
+               --  wants [base, idx, value] - the chase cannot go under the
+               --  value, so an up-level store is the caller's job (the
+               --  assignment path chases BEFORE pushing the value).  It used
+               --  to fall through to Store_Global here: a same-named fresh
+               --  global, the silent wrong answer of 3ec.
+               raise O2c_BC.Wrong_Construct with "bytecode backend: a store"
+                 & " to '" & Ada_Name & "' in an enclosing frame is not "
+                 & "supported here";
+            end if;
+         end;
          O2c_Ir_Lower.Store_Global (Ada_Name);
       end if;
    end Bc_Store;
+
 
    --  Mixed REAL/INTEGER arithmetic.  The dialect allows the mix only with
    --  an integer LITERAL (Real_Like's B.Lit), and the integer side needs an
@@ -4204,13 +4267,17 @@ package body O2c_Compiler is
                               --  array-of travels as TWO slots, so the LENGTH is
                               --  one above the address (3em).
                               declare
-                                 Up : constant Integer :=
-                                   O2c_BC.Up_Level_Slot (Ada_Id (LNm));
+                                 Owner : Natural;
+                                 Dist  : Natural;
+                                 Slot  : Integer;
                               begin
-                                 if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
-                                    O2c_Ir_Lower.Load_Local
-                                      (Natural (O2c_BC.Link_Slot));
-                                    O2c_Ir_Lower.Push_Int (Up + 1);
+                                 Find_Up_Level (Ada_Id (LNm),
+                                                Owner, Dist, Slot);
+                                 if Owner /= 0 then
+                                    --  The LENGTH is one slot above the
+                                    --  address, at any depth (3em).
+                                    Bc_Chase (Dist);
+                                    O2c_Ir_Lower.Push_Int (Slot + 1);
                                     O2c_Ir_Lower.Load_Idx (8);
                                  else
                                     raise O2c_BC.Wrong_Construct with "bytecode "
@@ -5194,18 +5261,15 @@ package body O2c_Compiler is
                            O2c_Ir_Lower.Load_Local (Natural (Sl));
                         else
                            declare
-                              Up : constant Integer :=
-                                O2c_BC.Up_Level_Slot (Ada_Id (Nm));
+                              Owner : Natural;
+                              Dist  : Natural;
+                              Slot  : Integer;
                            begin
-                              if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
-                                 O2c_Ir_Lower.Load_Local
-                                   (Natural (O2c_BC.Link_Slot));
-                                 O2c_Ir_Lower.Push_Int (Up);
+                              Find_Up_Level (Ada_Id (Nm), Owner, Dist, Slot);
+                              if Owner /= 0 then
+                                 Bc_Chase (Dist);
+                                 O2c_Ir_Lower.Push_Int (Slot);
                                  O2c_Ir_Lower.Load_Idx (8);
-                              elsif O2c_BC.Too_Deep_Up_Level (Ada_Id (Nm)) then
-                                 raise O2c_BC.Wrong_Construct with "bytecode "
-                                   & "backend: '" & Nm & "' is more than one level "
-                                   & "up, which is not supported yet";
                               else
                                  raise O2c_BC.Wrong_Construct with "bytecode "
                                    & "backend: ARRAY OF parameter is not in the "
@@ -5251,13 +5315,15 @@ package body O2c_Compiler is
                               O2c_Ir_Lower.Load_Local (Len);
                            else
                               declare
-                                 Up : constant Integer :=
-                                   O2c_BC.Up_Level_Slot (Ada_Id (Nm));
+                                 Owner : Natural;
+                                 Dist  : Natural;
+                                 Slot  : Integer;
                               begin
-                                 if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
-                                    O2c_Ir_Lower.Load_Local
-                                      (Natural (O2c_BC.Link_Slot));
-                                    O2c_Ir_Lower.Push_Int (Up + 1);
+                                 Find_Up_Level (Ada_Id (Nm),
+                                                Owner, Dist, Slot);
+                                 if Owner /= 0 then
+                                    Bc_Chase (Dist);
+                                    O2c_Ir_Lower.Push_Int (Slot + 1);
                                     O2c_Ir_Lower.Load_Idx (8);
                                  else
                                     raise O2c_BC.Wrong_Construct with "bytecode "
@@ -9786,12 +9852,15 @@ package body O2c_Compiler is
                         --  yields the base an indexed access needs - the same
                         --  shape as the LEN site above (3em).
                         declare
-                           Up : constant Integer :=
-                             O2c_BC.Up_Level_Slot (Ada_Id (Head (1 .. H_Len)));
+                           Owner : Natural;
+                           Dist  : Natural;
+                           Slot  : Integer;
                         begin
-                           if Up >= 0 and then O2c_BC.Link_Slot >= 0 then
-                              O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
-                              O2c_Ir_Lower.Push_Int (Up);
+                           Find_Up_Level (Ada_Id (Head (1 .. H_Len)),
+                                          Owner, Dist, Slot);
+                           if Owner /= 0 then
+                              Bc_Chase (Dist);
+                              O2c_Ir_Lower.Push_Int (Slot);
                               O2c_Ir_Lower.Load_Idx (8);
                            else
                               raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -10991,15 +11060,23 @@ package body O2c_Compiler is
                   --  reached its caller (3dd, 3de).
                   declare
                      By_Ref : constant Boolean := Syms (Idx).By_Ref;
-                     Up     : constant Integer :=
-                       (if By_Ref then -1
-                        else O2c_BC.Up_Level_Slot (Ada_Id (Head (1 .. H_Len))));
+                     Owner  : Natural := 0;
+                     Dist   : Natural := 0;
+                     Slot   : Integer := -1;
                   begin
-                     if O2c_BC.Bytecode_Mode and then Up >= 0
-                       and then O2c_BC.Link_Slot >= 0
+                     if not By_Ref
+                       and then O2c_BC.Local_Slot
+                         (Ada_Id (Head (1 .. H_Len))) < 0
                      then
-                        O2c_Ir_Lower.Load_Local (Natural (O2c_BC.Link_Slot));
-                        O2c_Ir_Lower.Push_Int (Up);
+                        Find_Up_Level (Ada_Id (Head (1 .. H_Len)),
+                                       Owner, Dist, Slot);
+                     end if;
+                     if O2c_BC.Bytecode_Mode and then Owner /= 0 then
+                        --  base and index first, at any depth: Store_Idx
+                        --  consumes [base, idx, value] and the value is
+                        --  parsed (and pushed) next.
+                        Bc_Chase (Dist);
+                        O2c_Ir_Lower.Push_Int (Slot);
                      end if;
                      if O2c_BC.Bytecode_Mode and then By_Ref then
                         O2c_Ir_Lower.Load_Local
@@ -11033,9 +11110,11 @@ package body O2c_Compiler is
                              & " assignment is not supported";
                         end if;
                         if Syms (Idx).By_Ref
-                          or else (O2c_BC.Link_Slot >= 0
-                                   and then O2c_BC.Up_Level_Slot
-                                     (Ada_Id (Head (1 .. H_Len))) >= 0)
+                          or else
+                            (O2c_BC.Local_Slot
+                               (Ada_Id (Head (1 .. H_Len))) < 0
+                             and then Enclosing_Has
+                               (Ada_Id (Head (1 .. H_Len))))
                         then
                            O2c_Ir_Lower.Store_Idx
                              ((if Syms (Idx).Typ = T_Char

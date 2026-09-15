@@ -234,6 +234,19 @@ package O2c_BC is
    --  to a module global: a fresh, zeroed variable, which is a wrong answer rather
    --  than a refusal.  Callers refuse instead.
    function Too_Deep_Up_Level (Ada_Name : String) return Boolean;
+   --  N-level static-link chasing.  Every nested procedure's frame holds its
+   --  own static link in a recorded slot, so a name ANY number of levels up
+   --  is reachable: chase the link chain frame by frame, then index the slot.
+   --  Parent_Proc walks the nesting; Proc_Link_Slot is a frame's own link
+   --  slot (-1 for the module body); Slot_In_Proc is a name's slot in a given
+   --  procedure's frame (-1 when it is not there); Ancestor_Distance is how
+   --  many parent hops separate the open procedure from A (0 = A itself,
+   --  -1 = not an ancestor).
+   function Parent_Proc (Id : Natural) return Natural;
+   function Proc_Link_Slot (Id : Natural) return Integer;
+   function Slot_In_Proc (P : Natural; Ada_Name : String) return Integer;
+   function Ancestor_Distance (A : Natural) return Integer;
+   function Open_Proc_Id return Natural;
    --  Which frame a call must pass as the callee's static link: Own_Frame = the
    --  caller's own frame (the callee is nested directly in the caller), a slot
    --  >= 0 = the frame slot holding the caller's link (the callee is a SIBLING,

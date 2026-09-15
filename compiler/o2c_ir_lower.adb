@@ -529,17 +529,28 @@ package body O2c_Ir_Lower is
          --  calling Put is - the link must be the PARENT's frame, i.e. the
          --  caller's own link.  Pushing the caller's frame instead made the
          --  callee write through the wrong frame: a silent wrong answer, and the
-         --  wild address behind Reals' STORAGE_ERROR (3eu).
+         --  wild address behind Reals' STORAGE_ERROR (3eu).  Deeper still, the
+         --  callee's parent is an ANCESTOR at distance D: the frame is reached
+         --  by chasing the link chain, because every nested frame records its
+         --  own link slot (D = 1 is the sibling case).
          declare
-            L : constant Integer := O2c_BC.Link_For_Callee (Proc_Id);
+            D : constant Integer :=
+              O2c_BC.Ancestor_Distance (O2c_BC.Parent_Proc (Proc_Id));
+            Q : Natural;
          begin
-            if L = O2c_BC.Own_Frame then
+            if D = 0 then
                Load_Addr_L (0);       --  the caller's own frame base
-            elsif L >= 0 then
-               Load_Local (Natural (L));   --  the caller's link = the parent
+            elsif D >= 1 then
+               Load_Local (Natural (O2c_BC.Link_Slot));
+               Q := O2c_BC.Parent_Proc (O2c_BC.Open_Proc_Id);
+               for J in 2 .. D loop
+                  Push_Int (O2c_BC.Proc_Link_Slot (Q));
+                  Load_Idx (8);
+                  Q := O2c_BC.Parent_Proc (Q);
+               end loop;
             else
-               raise O2c_BC.Wrong_Construct with "bytecode backend: a call to a "
-                 & "procedure two levels out is not supported yet";
+               raise O2c_BC.Wrong_Construct with "bytecode backend: a call"
+                 & " to a procedure that is not visible from here";
             end if;
          end;
          N_Args := N_Args + 1;

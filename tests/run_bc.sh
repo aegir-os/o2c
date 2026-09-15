@@ -91,20 +91,22 @@ for fcase in 'zero|by 0|must not be zero' \
    fi
 done
 
-#  ---- a name more than one level up must be REFUSED, never silently global ----
-#  A nested procedure reaches its ENCLOSING frame through the static link.  A name
-#  TWO levels up has no link to travel - the emitter knows one enclosing frame - and
-#  it used to fall back to a module global: a fresh, zeroed variable, which is a
-#  wrong answer rather than a refusal.  Deep is written so C's read of A's x is
-#  exactly that case.
-printf 'module Deep;\nvar g: integer;\nprocedure A;\nvar x: integer;\n  procedure B;\n    procedure C;\n    begin\n      g := x\n    end C;\n  begin\n    C\n  end B;\nbegin\n  B\nend A;\nbegin\n  A\nend Deep.\n' > "$WORK/deep.ob2"
-if timeout 120 "$FRONT" "$WORK/deep.ob2" "$WORK/deep.obc" >"$WORK/deep.log" 2>&1
+#  ---- a name more than one level up is chased, never silently global ----
+#  A nested procedure reaches an ENCLOSING frame through the static link, and
+#  every nested frame records its own link slot, so a name TWO levels up is
+#  reachable by chasing the chain.  It used to be refused - and before that it
+#  fell back to a module global of the same name, a fresh zeroed variable,
+#  which is the silent wrong answer of 3ec.  The working version is the
+#  deep.ob2 fixture; this probe keeps the module-global trap shut: C's g IS a
+#  global, x is two levels up, and both must come out right.
+printf 'module Deep2;\nvar g: integer;\nprocedure A;\nvar x: integer;\n  procedure B;\n    procedure C;\n    begin\n      g := x\n    end C;\n  begin\n    C\n  end B;\nbegin\n  x := 41;\n  B\nend A;\nbegin\n  A;\n  Out.Int(g, 0)\nend Deep2.\n' > "$WORK/deep2.ob2"
+sed -i 's/var g: integer;/import Out;\nvar g: integer;/' "$WORK/deep2.ob2"
+if timeout 120 "$FRONT" "$WORK/deep2.ob2" "$WORK/deep2.obc" >"$WORK/deep2.log" 2>&1 \
+   && [ "$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/deep2.obc" 2>/dev/null | tr -d '\n\r')" = "41" ]
 then
-   bad "deep: a name two levels up compiled instead of being refused"
-elif grep -aq 'more than one level up' "$WORK/deep.log"; then
-   note "negative: a name two levels up refused (more than one level up)"
+   note "positive: a name two levels up is chased (g := x lands in the global)"
 else
-   bad "deep: refused for the wrong reason: $(cat "$WORK/deep.log")"
+   bad "deep2: two-level-up name failed: $(cat "$WORK/deep2.log")"
 fi
 #  The VM must report exhaustion rather than corrupt itself.  Before the
 #  collector was fixed it freed the live list and returned a wrong answer,
