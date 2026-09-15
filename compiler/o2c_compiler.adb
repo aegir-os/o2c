@@ -409,6 +409,23 @@ package body O2c_Compiler is
          O2c_Ir_Lower.Store_Global (Ada_Name);
       end if;
    end Bc_Store;
+
+   --  Mixed REAL/INTEGER arithmetic.  The dialect allows the mix only with
+   --  an integer LITERAL (Real_Like's B.Lit), and the integer side needs an
+   --  I2R before the real op.  Converting the RIGHT operand is one unary op
+   --  on the top of the stack; converting the LEFT takes a swap dance,
+   --  because the right operand was already pushed over it.  LONGINT never
+   --  reaches here (Real_Like excludes it, so both backends refuse it).
+   procedure Bc_Real_Coerce (R_Typ, X_Typ : EType) is
+   begin
+      if X_Typ = T_Int then
+         O2c_Ir_Lower.Un_Op (O2c_Ir.Op_I2R, O2c_Ir.Tc_Word);
+      elsif R_Typ = T_Int then
+         O2c_Ir_Lower.Swap;
+         O2c_Ir_Lower.Un_Op (O2c_Ir.Op_I2R, O2c_Ir.Tc_Word);
+         O2c_Ir_Lower.Swap;
+      end if;
+   end Bc_Real_Coerce;
    Used_Int_Arr  : Boolean := False;  --  need O2c_Int_Arr base (M12)
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
@@ -5427,14 +5444,10 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
-                  --  Both operands are real-valued here; a coerced
-                  --  integer would need an I2R first and is refused.
+                  --  A mixed INTEGER/REAL pair coerces its integer side
+                  --  (always a literal, Real_Like's B.Lit) with I2R.
                   if O2c_BC.Bytecode_Mode then
-                     if R.Typ = T_Int or else X.Typ = T_Int then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "a mixed INTEGER/REAL operation is not yet "
-                          & "supported";
-                     end if;
+                     Bc_Real_Coerce (R.Typ, X.Typ);
                      O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Mul, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " * " & X.Text;
@@ -5529,14 +5542,10 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
-                  --  Both operands are real-valued here; a coerced
-                  --  integer would need an I2R first and is refused.
+                  --  A mixed INTEGER/REAL pair coerces its integer side
+                  --  (always a literal, Real_Like's B.Lit) with I2R.
                   if O2c_BC.Bytecode_Mode then
-                     if R.Typ = T_Int or else X.Typ = T_Int then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "a mixed INTEGER/REAL operation is not yet "
-                          & "supported";
-                     end if;
+                     Bc_Real_Coerce (R.Typ, X.Typ);
                      O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Div, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " / " & X.Text;
@@ -5626,14 +5635,10 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
-                  --  Both operands are real-valued here; a coerced
-                  --  integer would need an I2R first and is refused.
+                  --  A mixed INTEGER/REAL pair coerces its integer side
+                  --  (always a literal, Real_Like's B.Lit) with I2R.
                   if O2c_BC.Bytecode_Mode then
-                     if R.Typ = T_Int or else X.Typ = T_Int then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "a mixed INTEGER/REAL operation is not yet "
-                          & "supported";
-                     end if;
+                     Bc_Real_Coerce (R.Typ, X.Typ);
                      O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Add, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " + " & X.Text;
@@ -5696,14 +5701,10 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
-                  --  Both operands are real-valued here; a coerced
-                  --  integer would need an I2R first and is refused.
+                  --  A mixed INTEGER/REAL pair coerces its integer side
+                  --  (always a literal, Real_Like's B.Lit) with I2R.
                   if O2c_BC.Bytecode_Mode then
-                     if R.Typ = T_Int or else X.Typ = T_Int then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "a mixed INTEGER/REAL operation is not yet "
-                          & "supported";
-                     end if;
+                     Bc_Real_Coerce (R.Typ, X.Typ);
                      O2c_Ir_Lower.Bin_Op (O2c_Ir.Op_Sub, O2c_Ir.Tc_Real);
                   end if;
                   R.Text := R.Text & " - " & X.Text;

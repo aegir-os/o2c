@@ -79,6 +79,7 @@ package O2c_Ir is
                --  arithmetic and comparison, three-address
                Op_Copy,                      --  d := s1
                Op_Add, Op_Sub, Op_Mul, Op_Div, Op_Mod, Op_Neg, Op_Abs,
+               Op_I2R,                       --  integer to real (unary)
                Op_Eq, Op_Ne, Op_Lt, Op_Le, Op_Gt, Op_Ge,
                Op_Not, Op_And, Op_Or,
 
@@ -175,6 +176,7 @@ package O2c_Ir is
                --  kind byte the VM READS (0 = index out of range), which is why
                --  the emitter's Trap takes one rather than emitting a bare op.
                Op_Dup,                       --  push a copy of the top
+               Op_Swap,                      --  exchange the top two
                Op_Trap,                      --  trap, kind Imm_1
                --  FOR's pair, appended because FOR is the ONE statement whose
                --  labels are OPERANDS of the opcode (a fixup each) rather than

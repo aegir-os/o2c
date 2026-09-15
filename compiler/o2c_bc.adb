@@ -449,7 +449,8 @@ package body O2c_BC is
         --  group, taken from its start so that nothing is renumbered.
         when Band       => 16#72#,
         when Bor        => 16#73#,
-      when Str_Addr   => 16#74#);
+      when Str_Addr   => 16#74#,
+        when Swap       => 16#75#);
 
    function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural;
                       Has_Ptrs : Boolean) return Natural is
@@ -921,6 +922,14 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
       Pushed (1);
    end Dup_Top;
+
+   procedure Swap_Top is
+   begin
+      --  Depth-neutral: two slots change places, none come or go, so the
+      --  stack_max accounting hears nothing about it.
+      Put_Byte (16#75#);          --  SWAP
+      N_Insns := N_Insns + 1;
+   end Swap_Top;
 
    procedure Discard is
    begin

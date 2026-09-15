@@ -163,6 +163,11 @@ package O2c_Ir_Lower is
    --  matching.
    procedure Dup;
 
+   --  Exchange the top two: the only way a conversion reaches the operand
+   --  UNDER the one the parser pushed last (a left INTEGER in a mixed
+   --  REAL/INTEGER operation).
+   procedure Swap;
+
    --  TRAP with its kind byte (spec: 0 = index out of range).
    procedure Trap (Kind : Natural);
 

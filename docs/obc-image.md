@@ -287,7 +287,8 @@ guard failure, 3 = division by zero, 4 = `CASE` with no matching label
 | 0x72 | `BAND` | `[a,b] -> [bool]` | BOOLEAN `&` — true iff both are true |
 | 0x73 | `BOR` | `[a,b] -> [bool]` | BOOLEAN `or` — true iff either is true |
 | 0x74 | `STR_ADDR` | `[s] -> [addr]` | a string word -> its characters' address |
-| 0x75–0x7F | reserved | | |
+| 0x75 | `SWAP` | `[a,b] -> [b,a]` | exchange the top two slots (depth-neutral) |
+| 0x76–0x7F | reserved | | |
 
 `BAND` and `BOR` take the first two of the block this table used to reserve
 whole. Nothing is renumbered by that: the reserved bytes were allocated for

@@ -100,6 +100,7 @@ package body OBC_VM is
    Op_Nop         : constant := 16#00#;
    Op_Halt        : constant := 16#01#;
    Op_Dup         : constant := 16#02#;
+   Op_Swap        : constant := 16#75#;
    Op_Drop        : constant := 16#03#;
    Op_Assert_Fail : constant := 16#05#;
    Op_Trap        : constant := 16#06#;
@@ -1160,6 +1161,9 @@ package body OBC_VM is
                   PC := PC + 1;
                when Op_Dup =>
                   Depth := Depth + 1;
+                  PC := PC + 1;
+               when Op_Swap =>
+                  --  Depth-neutral: two slots change places.
                   PC := PC + 1;
                when Op_Drop =>
                   Depth := Depth - 1;
@@ -2944,6 +2948,15 @@ package body OBC_VM is
                return Ok;
             when Op_Dup =>
                Push (Top);
+               PC := PC + 1;
+            when Op_Swap =>
+               declare
+                  B : constant U64 := Pop;
+                  A : constant U64 := Pop;
+               begin
+                  Push (B);
+                  Push (A);
+               end;
                PC := PC + 1;
             when Op_Drop =>
                --  a stack adjustment: the slot is not read

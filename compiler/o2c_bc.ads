@@ -62,7 +62,13 @@ package O2c_BC is
    --  member, and its byte (0x15) comes from Byte_Of - the spec's first row of
    --  the address group, "VAR params, arrays".  Input and output of a by-ref
    --  scalar both need it now that frame slots have stable addresses (3dk).
-   Load_Addr_L);
+   Load_Addr_L,
+   --  Exchange the top two operand-stack slots.  Depth-neutral, and its byte
+   --  (0x75) is the next one in the spec's reserved BOOLEAN-group block -
+   --  appended like everything else.  Mixed REAL/INTEGER arithmetic needs it:
+   --  an integer literal on the LEFT was pushed before the real operand that
+   --  covers it, so the I2R can only reach it through a swap.
+   Swap);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -290,6 +296,8 @@ package O2c_BC is
    --  DUP pushes and DROP pops, so emitting them through Un() would make
    --  the computed stack_max and the underflow checks wrong.
    procedure Dup_Top;
+   --  Exchange the top two slots (depth-neutral).
+   procedure Swap_Top;
    procedure Discard;
 
    procedure Load_Local (Slot : Natural);

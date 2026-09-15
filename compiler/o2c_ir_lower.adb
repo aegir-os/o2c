@@ -49,6 +49,7 @@ package body O2c_Ir_Lower is
                when O2c_Ir.Op_Mod => return O2c_Bc.IMod;
                when O2c_Ir.Op_Neg => return O2c_Bc.Neg;
                when O2c_Ir.Op_Abs => return O2c_Bc.IAbs;
+               when O2c_Ir.Op_I2R => return O2c_Bc.I2R;
                when O2c_Ir.Op_Eq => return O2c_Bc.Eq;
                when O2c_Ir.Op_Ne => return O2c_Bc.Ne;
                when O2c_Ir.Op_Lt => return O2c_Bc.Lt;
@@ -283,6 +284,16 @@ package body O2c_Ir_Lower is
       O2c_Ir_Lower.Emit_Quad
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Dup;
+
+   procedure Swap is
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      O2c_Ir.Emit (O2c_Ir.Op_Swap);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Swap;
 
    procedure Trap (Kind : Natural) is
    begin
@@ -783,6 +794,9 @@ package body O2c_Ir_Lower is
          when Op_Dup =>
             O2c_BC.Dup_Top;
 
+         when Op_Swap =>
+            O2c_BC.Swap_Top;
+
          when Op_Trap =>
             --  The kind byte is an immediate because a bare Trap would
             --  desynchronise the VM, which reads it.
@@ -835,7 +849,7 @@ package body O2c_Ir_Lower is
             O2c_BC.For_Next (Q.Imm_1, Integer (Value_At (Q.Src2).Int),
                              Q.Imm_2, Bc_Label_Of (Q.Src1));
 
-         when Op_Neg | Op_Abs =>
+         when Op_Neg | Op_Abs | Op_I2R =>
             --  UNARY, and that is not a detail.  The emitter's Un leaves the
             --  depth alone while Bin counts two operands in and one out, so a
             --  negate routed through Bin would tell the stack model to pop a
