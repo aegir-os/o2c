@@ -3508,6 +3508,39 @@ package body O2c_Compiler is
                   declare
                      E : Expr_Rec := Parse_Expr;
                   begin
+                     --  A LITERAL element outside 0 .. 31 is a front-end
+                     --  error, not a runtime one: the Ada side's 32-bit
+                     --  shift would silently produce an empty set, and the
+                     --  VM's trap is late.  A variable element keeps the
+                     --  runtime trap - its value is not known here.
+                     if E.Lit then
+                        declare
+                           V : Integer := -1;
+                        begin
+                           if E.Typ = T_Char
+                             and then To_String (E.Text)'Length = 3
+                           then
+                              V := Character'Pos
+                                (To_String (E.Text)
+                                   (To_String (E.Text)'First + 1));
+                           elsif E.Typ = T_Int then
+                              begin
+                                 V := Integer'Value (To_String (E.Text));
+                              exception
+                                 when Constraint_Error =>
+                                    V := -1;
+                              end;
+                           end if;
+                           if E.Typ = T_Char or else E.Typ = T_Int then
+                              if V < 0 or else V > 31 then
+                                 raise O2c_Error with "SET elements must "
+                                   & "lie in 0 .. 31 ('"
+                                   & To_String (E.Text) & "', line "
+                                   & Natural'Image (Cur.Line) & ")";
+                              end if;
+                           end if;
+                        end;
+                     end if;
                      if E.Typ = T_Char then
                         Add ("Character'Pos (" & To_String (E.Text) & ")");
                         if O2c_BC.Bytecode_Mode then
@@ -4013,6 +4046,17 @@ package body O2c_Compiler is
                     Eq_No_Case (Cur.Text (1 .. Cur.Len), "PLANEISDOT");
                   A1, A2 : Expr_Rec;
                begin
+                  if O2c_BC.Bytecode_Mode then
+                     --  This arm appends Ada text and emits nothing - the
+                     --  builtin's own body, which today never reaches
+                     --  bytecode mode.  If that changes, a compiled body
+                     --  would run and quietly do nothing (the Input arm
+                     --  below carries the same guard's history), so refuse
+                     --  by name instead.
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & Cur.Text (1 .. Cur.Len) & " is the builtin XYplane's"
+                       & " own primitive; its body compiles Ada-side only";
+                  end if;
                   Next;
                   if not Is_Dot and then Cur.Kind /= Lex.Tok_LParen then
                      --  PlaneKey takes no arguments: written bare

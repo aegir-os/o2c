@@ -12,5 +12,8 @@ begin
   Out.LongReal(MathL.power(2.0D0, 3.0D0), 0); Out.Ln;
   Out.LongReal(MathL.pi, 0); Out.Ln;
   r := 2.5;
-  Out.Real(r, 0); Out.Ln
+  Out.Real(r, 0); Out.Ln;
+  lre := 2.5D0;
+  lre := lre * 2.0D0 + 0.5D0;
+  Out.LongReal(lre, 0); Out.Ln
 end LRealP.

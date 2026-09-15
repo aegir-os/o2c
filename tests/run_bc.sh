@@ -124,6 +124,19 @@ else
    bad "w1: refused for the wrong reason: $(cat "$WORK/w1.log")"
 fi
 
+#  A SET literal's elements lie in 0 .. 31.  A literal outside them used to
+#  compile: the bytecode side trapped at runtime and the Ada side's 32-bit
+#  shift silently produced an EMPTY set.  The shared front end names it now.
+printf 'module S65; var s: set; begin s := {65} end S65.\n' > "$WORK/s65.ob2"
+if timeout 120 "$FRONT" "$WORK/s65.ob2" "$WORK/s65.obc" >"$WORK/s65.log" 2>&1
+then
+   bad "s65: {65} compiled instead of being refused"
+elif grep -aq 'SET elements must lie in 0 .. 31' "$WORK/s65.log"; then
+   note "negative: SET literal element outside 0 .. 31 refused by name"
+else
+   bad "s65: refused for the wrong reason: $(cat "$WORK/s65.log")"
+fi
+
 #  ---- imported constants: fold like locals, and CHAR ones push their code ----
 #  An imported INTEGER constant carried only its pushed value, never the fold,
 #  so `const M = Lib.N * 2` had nothing to fold and was refused at the use.
