@@ -5227,8 +5227,13 @@ package body O2c_Compiler is
                   and then Syms (Id).Typ /= T_LReal
                   and then Syms (Id).Typ /= T_Long
                   then
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "only INTEGER/CHAR/BOOLEAN variables are supported";
+                     --  Name the rejected type, never the allowed list: the
+                     --  list this message used to carry was SHORTER than the
+                     --  check above it, and an allow-list refuses by omission
+                     --  - the missing entry is invisible.
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: a "
+                       & EType'Image (Syms (Id).Typ)
+                       & " variable is not supported";
                   end if;
                   Bc_Load (Ada_Id (Cur.Text (1 .. Cur.Len)),
                            Syms (Id).By_Ref,
@@ -5951,9 +5956,14 @@ package body O2c_Compiler is
                                                 or else Op = " /= "))
                              or else Pl)
                      then
+                        --  Name the two operand types, never the allowed
+                        --  list: the list this message used to carry was
+                        --  SHORTER than the condition above it (LONGINT was
+                        --  missing), and an allow-list refuses by omission.
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "only INTEGER/CHAR/REAL comparisons are supported, "
-                          & "and pointers compare only with NIL (line "
+                          & "a comparison of " & EType'Image (R.Typ)
+                          & " with " & EType'Image (X.Typ)
+                          & " is not supported (line "
                           & Natural'Image (Cur.Line) & ")";
                      end if;
                      --  Two opcode NAMES per comparison became one name plus
@@ -10754,9 +10764,14 @@ package body O2c_Compiler is
                           and then Syms (Idx).Typ /= T_LReal
                           and then Syms (Idx).Typ /= T_Long
                         then
+                           --  Name the rejected type, never the allowed
+                           --  list: the list this message used to carry was
+                           --  SHORTER than the check above it, and an
+                           --  allow-list refuses by omission - the missing
+                           --  entry is invisible.
                            raise O2c_BC.Wrong_Construct with "bytecode "
-                             & "backend: only INTEGER/CHAR/BOOLEAN "
-                             & "assignments are supported";
+                             & "backend: a " & EType'Image (Syms (Idx).Typ)
+                             & " assignment is not supported";
                         end if;
                         if Syms (Idx).By_Ref
                           or else (O2c_BC.Link_Slot >= 0

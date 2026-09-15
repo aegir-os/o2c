@@ -7896,7 +7896,20 @@ before the fix was written.  G50/G51 in bytecode_gaps.sh flip blocked -> ok, and
 
 That closes the survey's list: all five true divergences are fixed.  What remains on the parity
 page is the SHARED front-end limits (both backends refuse), the recorded ADA_BROKEN family, and
-the emitter-side open items (per-proc stack_max, stale refusal text).
+the emitter-side open items (per-proc stack_max).
+
+The same session took the stale refusal TEXT off the list too.  Three messages enumerated a
+shorter allow-list than their checks ("only INTEGER/CHAR/BOOLEAN assignments/variables",
+"only INTEGER/CHAR/REAL comparisons" - each missing SET/REAL/LONGREAL/LONGINT as applicable).
+All three now name the REJECTED type instead (`a comparison of T_BOOL with T_BOOL is not
+supported`, `a T_STR assignment is not supported`): an allow-list can go stale again, a
+subject cannot.  Probing them was its own lesson in who guards what: set `<=`
+never reaches the comparison check (the front end's subset path at the ordering dispatch takes
+it first), mixed numeric ordering is refused by the front end too, and the variable/assignment
+sites have no reachable T_Str variable in the language - those two checks are defensive, and
+their probes are the strings check plus the suites.  BOOLEAN = BOOLEAN does reach the comparison
+site and showed the new text.  The one surviving allow-list message - record fields - is the 3g
+one, and it is accurate.
 
 ## 4. Method — what worked, and what did not
 

@@ -262,15 +262,19 @@ LOUDLY. Regenerate with:
     call to an unknown procedure
     integer / real literal out of range
 
-Three of these say MORE than they mean, and the messages are stale - the code
-accepts wider than the text claims:
+Three of these USED to say MORE than they meant - the messages were stale, and
+the code accepted wider than the text claimed:
 
   - "only INTEGER/CHAR/BOOLEAN assignments are supported"  - also SET, REAL,
     LONGREAL and LONGINT
   - "only INTEGER/CHAR/BOOLEAN variables are supported"    - likewise
   - "only INTEGER/CHAR/REAL comparisons are supported"     - also LONGINT
 
-Read the code, not the message. Correcting the text is outstanding work.
+FIXED (3hc): all three now name the REJECTED type (`a T_STR assignment is not
+supported`) rather than listing the allowed ones.  An allow-list can go stale
+again - it refuses by omission, so a missing entry is invisible - while naming
+the subject cannot.  The record-field message below is the documented instance
+of the trap.
 
 There is a SECOND stale-message shape, the mirror of the first, and it is worse
 because the text is not at fault:
