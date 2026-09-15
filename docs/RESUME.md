@@ -7,8 +7,8 @@ operators, construct coverage, descending FOR, and the gap-closing campaign
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         532
-    fixtures        134 in tests/bc/
+    commits         539
+    fixtures        137 in tests/bc/
     foreign natives 45 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -8074,6 +8074,68 @@ change meant to alter behaviour was tested on BOTH cases it covers (the AGENTS.m
 second case failed somewhere the hypothesis said nothing about, and a narrow instrumented run
 (gdb's catchpoint, a RESERVE-DEBUG print) named the site in one pass.  The deduce-then-patch
 loop had spent longer producing confident wrong answers.
+
+### 3hg. The second gap scan - the retiring backend's bar is correctness, not Ada
+
+3hf closed the inventory; a second sweep (three parallel read-only audits, every claimed
+gap re-probed by hand) asked the harder question the retirement decision implies: not
+"does the bytecode side match Ada" but "is it COMPLETE and CORRECT".  It found two fresh
+silent wrong answers the first sweep's shape had missed (a width argument to Out.Char
+printed as a character code; a REAL function returning an INTEGER value compared wrong),
+a cluster of up-level and declaration-time refusals, and one latent arm.  Closed in six
+commits, differential 89 to 91, every batch gated by the seven suites.
+
+- **Out width + REAL return widening (`ddb6d27`).**  Oakwood's Out.Char/Out.String take
+  NO width; the shared parser now refuses before anything is pushed (the Ada side had
+  silently ignored it).  A REAL/LONGREAL function returning an INTEGER value gets I2R at
+  the return site - `return 1` from a `: real` function printed 0.000 and compared false
+  against 0.5.  retreal.ob2.
+
+- **String comparison against a literal; REAL constants (`71913e7`).**  A string LITERAL
+  in a comparison is a CONST-pool offset, not an address, and Str_Cmp walks memory:
+  `s = "hi"` died in the interpreter.  Literal factors and string constants now carry
+  `.Lit`, and the comparison resolves exactly those operands through Str_Addr, either
+  side, ordering included.  And a named REAL/LONGREAL constant was refused at the use:
+  the declaration captures the literal text now (arithmetic clears `.Lit`, so only a
+  genuine literal reaches capture) and the use pushes the value read back from it, the
+  imported path's shape.  strlitcmp.ob2; consts.ob2's Pi line.
+
+- **INC/DEC/NEW up-level; no empty frames (`3bd560c`).**  The store refused because the
+  value is already pushed when Bc_Store runs; the site now chases BEFORE the load, the
+  BRef shape.  The probe surfaced the campaign's latent bug: **a procedure with no
+  locals and no parameters could not call its own nested one** - the link push is
+  Load_Addr_L (0) and the VM rejects slot 0 in a zero-slot frame.  End_Proc pads an
+  empty frame to one slot, never read or written.  A global INC inside a doubly nested
+  procedure tripped over exactly this.  incdec.ob2, newdesig.ob2.
+
+- **LONGINT constants past 32 bits (`7df2e6b`).**  A digit literal past INTEGER'Last is
+  LONGINT, but the upgrade lived inside the bytecode-mode push: an import parse suspends
+  emission, so an exported 5000000000 was recorded T_Int and overflowed Integer'Value at
+  the use - the false refusal "not an INTEGER literal".  The type is decided before the
+  mode guard now, the push falls back to Push_Long, and a local LONGINT constant captures
+  its literal text so local and imported behave the same.  consts.ob2's Big line; the
+  impc probe's imported case.
+
+- **ARRAY OF formals from a nested procedure (`73841d0`).**  An open-array formal is two
+  slots - address, length - in its OWN frame, and four sites assumed the current one:
+  forwarding to another open-array formal, a bare read as a string value, Out.String's
+  copy loop (a range check, not a refusal), and an FFI string actual.  All four chase.
+  forward.ob2; errwrite.ob2's Inner hands Err.Write the enclosing formal.
+
+- **SET bounds; the thin-coverage list (`7a5baf4`).**  A SET literal element outside
+  0 .. 31 compiled - the VM trapped late, the Ada side's 32-bit shift silently produced
+  an EMPTY set - so the shared front end names the element and line now.  The scan's
+  thin-coverage probes became fixture lines: range literals and variable IN (set.ob2),
+  negative labels / comma lists / no-ELSE (case.ob2), a procedure-local FOR control
+  variable (for.ob2), LONGREAL arithmetic (lreal.ob2), pointer-to-pointer equality
+  (ptr.ob2).  The PLANEISDOT/PLANEKEY arm - Ada text only, harmless while the builtin
+  never reaches bytecode mode - refuses by name, the Input arm's precedent.
+
+**What remains, deliberately.**  Methods through a pointer to an IMPORTED record and
+procedure-typed record fields stay recorded (the former needs qualified type names, the
+former-and-a-half sizes the latter); a qualified type in a formal (`var r: Lib.R`) is
+the front-end hole both need.  Hex character literals (`0X`) are out of dialect - the
+corpus spells them CHR/ORD.  The three `blocked` entries stand until the Math flip.
 
 ## 4. Method — what worked, and what did not
 
