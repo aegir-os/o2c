@@ -8179,6 +8179,44 @@ The deferred half of 3hg's list, closed in three commits, each gated.
   with the others.  This was the scan's last deferred finding - the inventory is
   empty now.
 
+### 3hj. The guest CLI: o2c is a compiler now, and o2_vm answers its arguments
+
+The user tried the staged tools in an interactive boot and found neither usable.
+Both reports traced to the same root: **Ada.Command_Line is dead in the guest** -
+a-comlin imports `__gnat_arg_count`, and nothing in the userspace RTS ever sets
+`gnat_argc`, so it always reports zero arguments.  The live API is
+`Aegir_User.CLI.Argument` (the args page the shell stages, milestone 33a).
+
+- **o2c was the demo, not a compiler.**  The staged `o2c` was the M19 boot-test
+  main: it ignored arguments entirely and always compiled the hardcoded demo
+  modules - running it on a source did nothing of the kind, and it sat in
+  `Development/C`, off the CLI search path, so a bare `o2c` did not even resolve.
+  `crate/o2c.adb` now has a compiler mode (`o2c <source.ob2> [<out.obc>]
+  [lib.ob2 ...]`, the host front end's interface with the output defaulted to
+  `.ob2`->`.obc`, written through Aegir_User.Files with a delete first because
+  Write does not truncate); the no-argument demo is untouched - it is run_m1's
+  capture contract.  aegir's Makefile stages the binary to `C/o2c` as well, so
+  the bare name resolves.
+
+- **o2_vm took no argument and waited forever.**  Two defects, one seam: with
+  Ada.Command_Line dead, `o2_vm foo.obc` silently ran the default image; and a
+  no-argument VM polled for `BD0:VmGreet.obc` up to 50 min (Max_Input_Attempts
+  30000, sized for the manifest race with o2c) even in boots where no compiler
+  would ever publish one.  `VM_Platform` gained `Image_Arg` (the CLI token /
+  argv entry) and `Wait_For_Default` (true only when the boot staged
+  `Tests/O2cLib/VmWait.mrk`, which aegir's Makefile stages under exactly the
+  `O2C_VM_ELF` condition that ships the manifest VM - probed by OPEN, not Stat,
+  which has lied about staged initrd files before).  The guest Arg_Get/Arg_Count
+  adopted the host's offset convention (argument 1 is the image).  So: an
+  explicit image runs with a 5 s open grace; a bare `o2_vm` in an interactive
+  boot prints its usage; the manifest boot is byte-for-byte unchanged
+  (run_m1 boot 2 still prints `vm: running BD0:VmGreet.obc` then `vm elf ok`).
+
+All seven suites green.  The aegir Makefile change (VmWait.mrk + `C/o2c`
+staging) rides alongside in that repo - the marker is load-bearing: without it
+a manifest `Tests/Vm` would print its usage and boot 2 would never run the
+published image.
+
 ## 4. Method — what worked, and what did not
 
 ## 4. Method — what worked, and what did not

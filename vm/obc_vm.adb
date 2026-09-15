@@ -4208,7 +4208,7 @@ package body OBC_VM is
       return Run_Buffer (B.all);
    end Run_Image;
 
-   function Run (Path : String) return Status is
+   function Run (Path : String; Attempts : Natural := 0) return Status is
       Data : constant Byte_Array_Access := new Byte_Array (0 .. Max_File - 1);
       Len  : Natural;
       St   : Status;
@@ -4216,7 +4216,7 @@ package body OBC_VM is
       declare
          Io_St : VM_IO.Status;
       begin
-         VM_IO.Read_File (Path, Data.all, Len, Io_St);
+         VM_IO.Read_File (Path, Data.all, Len, Io_St, Attempts);
          case Io_St is
             when VM_IO.Ok =>
                null;

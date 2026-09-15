@@ -42,6 +42,21 @@ package body VM_Platform is
      (30000);
    --  50 min: longer than any boot
 
+   function Image_Arg return String is
+     (Aegir_User.CLI.Argument (1));
+   --  CLI.Argument answers "" out of range, which is the no-argument case.
+
+   --  Probe by OPENING, not Stat: Stat on the initrd volume has answered
+   --  not-OK for a file that was staged, which is why o2c reads its own
+   --  marker (HelloBc.mrk) instead of statting it.  Called once per run,
+   --  so the unclosed handle is the one Get_Env already tolerates per call.
+   function Wait_For_Default return Boolean is
+      Size : Aegir_User.Files.U64;
+   begin
+      return Aegir_User.Files.Open
+        ("RD0:Tests/O2cLib/VmWait.mrk", Size) = Aegir_User.Files.Status_Ok;
+   end Wait_For_Default;
+
    --  The guest has an environment too: Aegir keeps variables as ENV:<Name>
    --  files, and M51's Env builtin reads and writes them through this very
    --  call.  So O2C_QUANTUM works here the same way it does on the host, and
@@ -189,12 +204,15 @@ package body VM_Platform is
 
    function Arg_Get (N : Natural; Buf : out String) return Integer is
    begin
-      --  No offset: a guest program's arguments are its own.
-      if N < 1 or else N > Aegir_User.CLI.Arg_Count then
+      --  Offset by one, the host's convention: the VM's own argument 1 is
+      --  the image, so the interpreted program's Arg N is the CLI token
+      --  N + 1.  (This used to be "no offset" because the manifest spawner
+      --  could not pass an image at all; the CLI can.)
+      if N < 1 or else N + 1 > Aegir_User.CLI.Arg_Count then
          return -1;
       end if;
       declare
-         A : constant String := Aegir_User.CLI.Argument (Positive (N));
+         A : constant String := Aegir_User.CLI.Argument (Positive (N + 1));
          L : Natural := 0;
       begin
          for C of A loop
@@ -223,7 +241,9 @@ package body VM_Platform is
       Ada.Text_IO.New_Line (Ada.Text_IO.Standard_Error);
    end New_Line_Err;
 
-   function Arg_Count return Natural is (Aegir_User.CLI.Arg_Count);
+   function Arg_Count return Natural is
+     (if Aegir_User.CLI.Arg_Count >= 1 then Aegir_User.CLI.Arg_Count - 1
+      else 0);
 
    function Clock_Ms return Long_Integer is
       use type Aegir_User.Syscalls.U64;

@@ -8,10 +8,16 @@ with Ada.Text_IO;
 with Ada.Strings.Unbounded;  use Ada.Strings.Unbounded;
 with O2c_Compiler;
 
---  o2c entry point (M19).  Reads the staged demo module sources from
---  the initrd (Tests/O2cLib/Hello.ob2, Tests/O2cLib/Geom.ob2) and
---  compiles them as separate modules; prints every generated Ada unit
---  between markers, so a test boot can capture the files exactly:
+--  o2c entry point (M19), two modes:
+--
+--  WITH arguments it is the compiler: `o2c <source.ob2> [<out.obc>]
+--  [lib.ob2 ...]` compiles to bytecode and writes the image
+--  (Compile_From_CLI), the guest twin of the host's o2c_bc_host.
+--
+--  WITHOUT arguments it is the boot demo the test harness captures: reads
+--  the staged demo module sources from the initrd (Tests/O2cLib/Hello.ob2,
+--  Tests/O2cLib/Geom.ob2), compiles them as separate modules, and prints
+--  every generated Ada unit between markers:
 --
 --      --- unit <file> ---
 --      O2C| ...
@@ -63,6 +69,100 @@ procedure O2c is
       end if;
    end Emit_Gen;
 
+   --  Compiler mode: `o2c <source.ob2> [<out.obc>] [lib.ob2 ...]`, the
+   --  host front end's (o2c_bc_host) interface with the output defaulted.
+   --  Extra arguments are library module sources, compiled first so the
+   --  main source can import them.  Arguments come from Aegir_User.CLI -
+   --  Ada.Command_Line is not wired into the args page in the guest
+   --  (gnat_argc is never set), so a program asking it always sees none.
+   procedure Compile_From_CLI is
+      --  The file server deals in Unsigned_64 statuses; the use-type at
+      --  the procedure level comes after this nested one.
+      use type Aegir_User.Syscalls.U64;
+      CLibs   : O2c_Compiler.Lib_Array := (others => <>);
+      N_CLibs : Natural := 0;
+      CCount  : Natural;
+      CRes    : O2c_Compiler.Unit_Array;
+      pragma Unreferenced (CRes);   --  the Ada text is not this mode's output
+
+      function Output_Name (Source : String) return String is
+      begin
+         if Aegir_User.CLI.Arg_Count >= 2 then
+            return Aegir_User.CLI.Argument (2);
+         end if;
+         if Source'Length >= 4
+           and then Source (Source'Last - 3 .. Source'Last) = ".ob2"
+         then
+            return Source (Source'First .. Source'Last - 4) & ".obc";
+         end if;
+         return Source & ".obc";
+      end Output_Name;
+
+      Source   : constant String := Aegir_User.CLI.Argument (1);
+      Out_Path : constant String := Output_Name (Source);
+   begin
+      for I in 3 .. Aegir_User.CLI.Arg_Count loop
+         if N_CLibs = O2c_Compiler.Max_Libs then
+            Aegir_User.Console.Put_Line
+              ("o2c error: too many libraries (limit"
+               & Natural'Image (O2c_Compiler.Max_Libs) & ")");
+            Aegir_User.CLI.Exit_With (Aegir_User.CLI.RC_Fail);
+         end if;
+         N_CLibs := N_CLibs + 1;
+         declare
+            P : constant String := Aegir_User.CLI.Argument (I);
+         begin
+            CLibs (N_CLibs) :=
+              (Name => To_Unbounded_String (P),
+               Text => To_Unbounded_String (Read_Module (P)));
+         end;
+      end loop;
+
+      O2c_Compiler.Bytecode_Requested := True;
+      CRes := O2c_Compiler.Compile_Multi
+        (Main_Source => Read_Module (Source), Libs => CLibs,
+         N_Libs => N_CLibs, Count => CCount);
+      O2c_Compiler.Bytecode_Requested := False;
+
+      declare
+         Img     : constant String := O2c_Compiler.Bytecode_Image;
+         Full    : constant String := Aegir_User.CLI.Resolve_Path (Out_Path);
+         St      : Aegir_User.Syscalls.U64;
+         DSt     : Aegir_User.Syscalls.U64;
+         Written : Aegir_User.Syscalls.U64;
+      begin
+         if Img'Length = 0 then
+            raise O2c_Compiler.O2c_Error with "no bytecode image produced";
+         end if;
+         --  Delete first: Write creates a missing file but does not
+         --  truncate an existing one, so a longer previous image would
+         --  leave a tail.  A missing target answers Not_Found, which is
+         --  fine.  No rename dance here - no concurrent reader.
+         DSt := Aegir_User.Files.Delete (Full);
+         St := Aegir_User.Files.Write
+           (Full, 0, Img (Img'First)'Address,
+            Aegir_User.Syscalls.U64 (Img'Length), Written);
+         if St /= Aegir_User.Files.Status_Ok then
+            Aegir_User.Console.Put_Line
+              ("o2c error: write failed for " & Full
+               & ", status" & Aegir_User.Syscalls.U64'Image (St)
+               & " (delete status"
+               & Aegir_User.Syscalls.U64'Image (DSt) & ")");
+            Aegir_User.CLI.Exit_With (Aegir_User.CLI.RC_Fail);
+         end if;
+         Aegir_User.Console.Put_Line
+           ("o2c: " & Out_Path & " (" & Natural'Image (Img'Length)
+            & " bytes)");
+         Aegir_User.CLI.Exit_With (Aegir_User.CLI.RC_Ok);
+      end;
+   exception
+      when E : others =>
+         O2c_Compiler.Bytecode_Requested := False;
+         Aegir_User.Console.Put_Line
+           ("o2c error: " & Ada.Exceptions.Exception_Message (E));
+         Aegir_User.CLI.Exit_With (Aegir_User.CLI.RC_Fail);
+   end Compile_From_CLI;
+
    use type Aegir_User.Syscalls.U64;   --  for the file-server status compares
 
    Empty_Libs : constant O2c_Compiler.Lib_Array := (others => <>);
@@ -73,8 +173,17 @@ procedure O2c is
 
 begin
    Aegir_User.Console.Set_Endpoint (1);
-   Aegir_User.Console.Put_Line ("o2c 0.3 (Oberon-2 to Ada for Aegir)");
    Aegir_User.CLI.Init;
+
+   --  Arguments mean the compiler, not the demo: `o2c hello.ob2` writes
+   --  hello.obc.  The no-argument demo below is the boot test's contract
+   --  (run_m1 captures it), so it stays exactly as it is.
+   if Aegir_User.CLI.Arg_Count >= 1 then
+      Compile_From_CLI;
+      return;
+   end if;
+
+   Aegir_User.Console.Put_Line ("o2c 0.3 (Oberon-2 to Ada for Aegir)");
 
    --  The demo's two library modules, read once and shared by both passes
    --  (the bytecode hello run and the Ada capture below).

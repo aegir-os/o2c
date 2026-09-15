@@ -34,7 +34,10 @@ package OBC_VM is
 
    --  Load, verify and interpret Path.  Returns Ok when the program ran to
    --  HALT, otherwise the first failure.  Diagnostics go to stderr.
-   function Run (Path : String) return Status;
+   --  Attempts bounds the image-open retries; 0 is the platform default
+   --  (the manifest's long wait in the guest).  A caller passing a path a
+   --  user typed should bound it, so a missing image fails fast.
+   function Run (Path : String; Attempts : Natural := 0) return Status;
 
    --  Interpret an image already in memory (same verification and
    --  execution as Run).  o2c uses this to execute the bytecode it just

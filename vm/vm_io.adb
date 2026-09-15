@@ -28,9 +28,12 @@ package body VM_IO is
    Retry_Delay : constant Duration := 0.1;
 
    procedure Read_File (Path : String; Data : out Byte_Array;
-                        Len : out Natural; St : out Status) is
+                        Len : out Natural; St : out Status;
+                        Attempts : Natural := 0) is
       File    : Byte_IO.File_Type;
-      Limit   : constant Natural := VM_Platform.Max_Input_Attempts;
+      Limit   : constant Natural :=
+        (if Attempts = 0 then VM_Platform.Max_Input_Attempts
+         else Attempts);
       Attempt : Natural := 1;
    begin
       Len := 0;
