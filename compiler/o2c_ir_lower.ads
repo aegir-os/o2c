@@ -150,6 +150,10 @@ package O2c_Ir_Lower is
    --  value and nothing else.  The same helper covers an index bound, a literal
    --  operand and a length, which is what the statement sites kept spelling out.
    procedure Push_Int (V : Integer);
+   --  The same for a LONGINT constant: a digit literal above INTEGER'Last
+   --  is still in range here, which is exactly the case Push_Int's own
+   --  profile cannot express.
+   procedure Push_Long (V : Long_Integer);
    --  The same for a REAL constant, which the Math module's e and pi are.
    procedure Push_Real (V : Long_Float);
    procedure Push_Str (Text : String);

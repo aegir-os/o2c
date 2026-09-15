@@ -238,7 +238,7 @@ package body O2c_BC is
    --  A pool word holding an INTEGER: two's complement in 64 bits, so the
    --  VM's signed interpretation of the slot is exact (a plain conversion
    --  of a negative value would zero-extend and read back positive).
-   function Word_Of (V : Integer) return U64 is
+   function Word_Of (V : Long_Integer) return U64 is
      (if V >= 0 then U64 (V) else U64'Last - U64 (-(V + 1)));
 
    procedure Add_Word (V : U64) is
@@ -281,7 +281,7 @@ package body O2c_BC is
       Pushed;
    end Push_Word;
 
-   procedure Push_Int (Value : Integer) is
+   procedure Push_Int (Value : Long_Integer) is
    begin
       Add_Word (Word_Of (Value));
       Put_Byte (16#14#);          --  LOAD_CONST
@@ -292,7 +292,7 @@ package body O2c_BC is
 
    procedure Push_Char (Value : Integer) is
    begin
-      Push_Int (Value);
+      Push_Int (Long_Integer (Value));
    end Push_Char;
 
    procedure Push_Bool (Value : Boolean) is
@@ -638,7 +638,7 @@ package body O2c_BC is
 
    procedure Push_BC_Proc (Proc_Id : Natural) is
    begin
-      Push_Int (Integer (Proc_Id));
+      Push_Int (Long_Integer (Proc_Id));
    end Push_BC_Proc;
 
    procedure Call_Indirect is

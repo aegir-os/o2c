@@ -244,8 +244,11 @@ LOUDLY. Regenerate with:
 
     &                      string concatenation (this is NOT the BOOLEAN `&`,
                            which emits BAND now - see 3k in RESUME)
-    LONGINT literal        above INTEGER'Last (ARITHMETIC now works - see 3i)
-    mixed INTEGER/REAL     an operation needing an implicit I2R
+    mixed INTEGER/REAL     an operation needing an implicit I2R.  NOT a
+                           bytecode gap: the Ada backend refuses it too
+                           (measured), because Oberon-2 has no implicit
+                           numeric conversion.  Kept so the eight refusal
+                           sites are not mistaken for divergence work.
     NEW of a ptr designator   SHARED with the front end: BOTH backends refuse
                               `new(p^.next)` with "NEW needs a POINTER value",
                               so it is not a bytecode gap.  Kept so that the

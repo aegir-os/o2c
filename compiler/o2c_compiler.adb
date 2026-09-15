@@ -3160,16 +3160,29 @@ package body O2c_Compiler is
                              "bytecode backend: real literal out of range: "
                              & To_String (R.Text);
                      end;
-                  else
-                     begin
-                        O2c_Ir_Lower.Push_Int (Integer'Value (Raw));
-                     exception
-                        when Constraint_Error =>
-                           raise O2c_BC.Wrong_Construct with
-                             "bytecode backend: integer literal out of range: "
-                             & Raw;
-                     end;
-                  end if;
+                   else
+                      begin
+                         O2c_Ir_Lower.Push_Int (Integer'Value (Raw));
+                      exception
+                         when Constraint_Error =>
+                            --  A digit literal the parser typed INTEGER can
+                            --  still be LONGINT: INTEGER'Last is the
+                            --  parser's bound, not the value's.  The Ada
+                            --  half never notices - a universal_integer
+                            --  literal in the text takes the TARGET's range
+                            --  - so this branch was the whole divergence.
+                            begin
+                               O2c_Ir_Lower.Push_Long
+                                 (Long_Integer'Value (Raw));
+                               R.Typ := T_Long;
+                            exception
+                               when Constraint_Error =>
+                                  raise O2c_BC.Wrong_Construct with
+                                    "bytecode backend: integer literal out "
+                                    & "of range: " & Raw;
+                            end;
+                      end;
+                   end if;
                end if;
             end;
             R.Lit := True;

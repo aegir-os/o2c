@@ -439,11 +439,13 @@ note "--- LONGINT: arithmetic works, its own literals do not ---"
 #  those two.  A LONGINT is the same 8-byte slot as an INTEGER here, so the
 #  integer opcodes were always the LONGINT opcodes.
 check "LONGINT add/sub/mul/DIV/MOD and unary -" ok 'module G48; var n: longint; begin n := 6; n := n + 1; n := n - 1; n := n * 2; n := n DIV 2; n := n MOD 2; n := -n end G48.'
-#  What is left is the LITERAL, which is a different thing: the parser types an
-#  integer literal as INTEGER, so a value above INTEGER'"'"'Last cannot be
-#  written.  The Ada backend accepts it, so this IS a divergence - recorded so
-#  it is not mistaken for the arithmetic gap again.
-check "LONGINT literal above INTEGER'Last" blocked 'module G49; var n: longint; begin n := 3000000000 end G49.'
+#  The LITERAL was the gap, and it is CLOSED: the parser types an integer
+#  literal INTEGER, Integer'Value raised above INTEGER'"'"'Last, and the same
+#  narrowing sat in THREE more places on the way to the pool (Push_Value,
+#  O2c_BC.Push_Int, Word_Of) - every one Integer-bounded by habit while the
+#  slot is 8 bytes.  tests/bc/longlit.ob2 holds it by value, differential-
+#  corroborated.  This entry flips to ok, and that flip is the point.
+check "LONGINT literal above INTEGER'Last" ok 'module G49; var n: longint; begin n := 3000000000 end G49.'
 
 #  A record or fixed-array ACTUAL was BLOCKED here in 3ci and is gone from the
 #  list because the gap CLOSED (3cj): the caller pushes the variable's address

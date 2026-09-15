@@ -7736,31 +7736,6 @@ for that group rather than at four separate bugs.  That is the next item.
 Fixtures landed for 3gu-3gx: wholecopy, qrecvar(+lib), ptrfun(+lib), varptr, emptyset, mathconst;
 mathln updated.  Fast suites green after each fix: run_bc, run_vm, bytecode_gaps.
 
-### 3gz. The verifier scanned ONLY the module body - and 3gx's explanation was wrong
-
-3gx said the `{}` fault slipped past static checks because hello's image "carried an inflated
-stack_max for the proc".  Wrong mechanism (the inflation is real, but it is not what masked
-the fault).  Measured instead: `Verify` started at `Img.Body_Off` - the module body, which the
-emitter writes LAST - and walked to the end of the code.  In modinit.obc that is a 41-byte
-window at offset 6015; the other 59 procedures (offsets 1444..6015) were never decoded at all.
-`Input.Mouse` is a procedure, so its unbalanced store was invisible statically; the small probe
-reproduced the fault in the main body, which is the one window that was walked.
-
-Proof of the hole (before touching anything): a byte patched to the reserved opcode 0xF1 in a
-NEVER-CALLED procedure - the image verified, ran, and printed 42, exit 0.  The same byte in the
-called library body died at RUN time, not at verification.  The checker, not the artefact.
-
-Fix: `Verify` walks one procedure at a time.  A procedure's window is [its code offset, the
-next HIGHER code offset in the table) - not the next table row, which was the first false
-rejection: a nested procedure's id precedes its parent's but its code is emitted inside the
-parent's, so table order is not code order ("malformed code at code offset 4267" on the good
-image).  Jump targets must stay inside the window (the old rule only forbade targets below the
-body); the depth bound is the procedure's OWN Stack_Max field - still the module high-water
-mark today, per-procedure when the emitter's side lands (that is the inflation fix, a separate
-step).  Fixtures in run_vm.sh's byte-patch harness: ghost.asm (positive control - a legal
-uncalled procedure must RUN), ghostbad (0xF1 in it -> "not implemented"), ghoststack
-(NOP -> DROP -> "operand-stack depth violation").  Both negatives were accepted pre-fix.
-
 ### 3gy. The four wrong values were FOUR bugs; hello.ob2 is now fully correct
 
 3gx guessed "all four are VAR out-parameters, one convention".  Wrong - they shared a symptom
@@ -7806,6 +7781,59 @@ Fixtures: modinit(+lib) (a library body must run before main, and return), reals
 plain, negative, exponent), convffi (ToInt after a FOR on the same global; FromInt with an
 expression actual).  Also this session: `docs/obc-image.md` gained the `STR_ADDR` 0x74 row -
 the only VM opcode missing from the spec; the flat disassembler stalled on it.
+
+### 3gz. The verifier scanned ONLY the module body - and 3gx's explanation was wrong
+
+3gx said the `{}` fault slipped past static checks because hello's image "carried an inflated
+stack_max for the proc".  Wrong mechanism (the inflation is real, but it is not what masked
+the fault).  Measured instead: `Verify` started at `Img.Body_Off` - the module body, which the
+emitter writes LAST - and walked to the end of the code.  In modinit.obc that is a 41-byte
+window at offset 6015; the other 59 procedures (offsets 1444..6015) were never decoded at all.
+`Input.Mouse` is a procedure, so its unbalanced store was invisible statically; the small probe
+reproduced the fault in the main body, which is the one window that was walked.
+
+Proof of the hole (before touching anything): a byte patched to the reserved opcode 0xF1 in a
+NEVER-CALLED procedure - the image verified, ran, and printed 42, exit 0.  The same byte in the
+called library body died at RUN time, not at verification.  The checker, not the artefact.
+
+Fix: `Verify` walks one procedure at a time.  A procedure's window is [its code offset, the
+next HIGHER code offset in the table) - not the next table row, which was the first false
+rejection: a nested procedure's id precedes its parent's but its code is emitted inside the
+parent's, so table order is not code order ("malformed code at code offset 4267" on the good
+image).  Jump targets must stay inside the window (the old rule only forbade targets below the
+body); the depth bound is the procedure's OWN Stack_Max field - still the module high-water
+mark today, per-procedure when the emitter's side lands (that is the inflation fix, a separate
+step).  Fixtures in run_vm.sh's byte-patch harness: ghost.asm (positive control - a legal
+uncalled procedure must RUN), ghostbad (0xF1 in it -> "not implemented"), ghoststack
+(NOP -> DROP -> "operand-stack depth violation").  Both negatives were accepted pre-fix.
+
+### 3ha. Parity milestone 1: the LONGINT literal - and what the gap list actually is
+
+The stated goal is parity with the Ada backend, so the first measurement was the gap list
+itself: every refusal class probed against BOTH backends.  Most bytecode refusals are SHARED
+front-end limits - mixed INTEGER/REAL included (the Ada backend refuses `i * 2.0` identically;
+Oberon-2 has no implicit numeric conversion), also methods, deep nesting, concatenation,
+record-by-value, forwarding.  Exactly five constructs are true divergence (Ada accepts,
+bytecode refuses): the LONGINT literal above INTEGER'Last, a local array as an ARRAY OF
+actual, a LOCAL record as a var actual, and the two aggregates.  That list is the parity
+programme, and bytecode-gaps.md's section A now says so where it claimed otherwise.
+
+Item 1, the literal: the parser types a digit literal INTEGER, and `Integer'Value` raised on
+3000000000.  The fix needed FOUR widenings of one habit - the parse site's handler (now tries
+`Long_Integer'Value` and retypes to T_Long), `Push_Value`'s `Integer (I.Int)`,
+`O2c_BC.Push_Int` and `Word_Of`, all Integer-bounded while the slot is 8 bytes - plus
+`Push_Long` in the lowering.  Arithmetic ON a big literal (`0 - 3000000000`) stays refused:
+the Ada backend refuses it too (the fold computes in Integer), so it is a shared limit and
+the fixture avoids it.
+
+Fixture longlit.ob2 holds it by value; differential corroborates it (75 fixtures now).
+G49 flips from blocked to ok, which is the harness working as designed.
+
+One process note, worth more than the fix: the "confirm the tool contains your change" check
+FAILED to confirm - `strings` found the old message in a freshly built binary - and the check
+was wrong, not the build: GNAT folds `"integer literal out " & "of range: "` into one static
+literal, so old and new code produce the IDENTICAL string.  A confirmation check has to
+distinguish; that one could not.
 
 ## 4. Method — what worked, and what did not
 

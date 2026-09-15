@@ -234,6 +234,18 @@ package body O2c_Ir_Lower is
         (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
    end Push_Int;
 
+   procedure Push_Long (V : Long_Integer) is
+      C : Value_Id;
+   begin
+      if not O2c_BC.Bytecode_Mode or else not O2c_BC.Proc_Open then
+         return;
+      end if;
+      C := O2c_Ir.Const_Int (V, Typ => 1);
+      O2c_Ir.Emit (O2c_Ir.Op_Copy, Src1 => C);
+      O2c_Ir_Lower.Emit_Quad
+        (O2c_Ir.Quad_At (O2c_Ir.Quad_Id (O2c_Ir.Quad_Count)));
+   end Push_Long;
+
    procedure Push_Real (V : Long_Float) is
       C : Value_Id;
    begin
@@ -571,7 +583,7 @@ package body O2c_Ir_Lower is
       --  Only the two kinds M2 needs.  Every other kind names itself in the
       --  failure rather than falling through to a wrong image.
       if I.Kind = V_Const_Int then
-         O2c_BC.Push_Int (Integer (I.Int));
+         O2c_BC.Push_Int (I.Int);
       elsif I.Kind = V_Local then
          S := Local_Slot_Of (V);
          if S < 0 then
@@ -645,7 +657,7 @@ package body O2c_Ir_Lower is
            (O2c_BC.Global_Array (Base_Name, Global_Slots) + Nested / 8);
       elsif Nested > 0 then
          --  Already the object's address; step into it.
-         O2c_BC.Push_Int (Nested);
+         O2c_BC.Push_Int (Long_Integer (Nested));
          O2c_BC.Bin (O2c_BC.Add);
       end if;
    end Push_Base;

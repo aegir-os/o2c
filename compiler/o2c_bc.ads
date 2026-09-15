@@ -91,7 +91,7 @@ package O2c_BC is
    --  ---- emission -------------------------------------------------------
    --  Each call appends one instruction and updates the stack model, so
    --  the emitted `stack_max` is a computed high-water mark, not a guess.
-   procedure Push_Int (Value : Integer);
+   procedure Push_Int (Value : Long_Integer);
    --  A 64-bit constant.  SET masks are 64 bits and an element index may be
    --  above 31, so Push_Int is not enough.
    procedure Push_Word (Value : Interfaces.Unsigned_64);
