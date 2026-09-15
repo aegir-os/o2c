@@ -496,6 +496,12 @@ package body O2c_Compiler is
    Used_LReal    : Boolean := False;  --  need O2c_Put_LReal helper (M47)
    Used_StrCmp   : Boolean := False;  --  need O2c_S_Cmp helper (M33)
    Nested_Depth : Natural := 0;    --  nested PROCEDURE declarations (M32)
+   --  Decl_Const parses its expression with emission suspended (the value
+   --  is re-emitted at every use, and module-level constants precede the
+   --  body proc's Depth tracking).  Value CAPTURE must stay alive under
+   --  that suspension, so the constant-reference paths consult this flag:
+   --  pushes stay off, R.Val / R.Text keep coming.
+   Const_Quiet : Boolean := False;
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
    Loop_N     : Natural := 0;      --  LOOP counter for generated labels
    Loop_Lbl   : array (1 .. 64) of Unbounded_String;  --  per-depth label
@@ -4400,12 +4406,35 @@ package body O2c_Compiler is
                                      then
                                         O2c_Ir_Lower.Push_Str
                                           (CT (CT'First + 1 .. CT'Last - 1));
+                                     elsif Xs (XI).Typ = T_Char
+                                       and then CT'Length = 3
+                                       and then CT (CT'First) = '''
+                                       and then CT (CT'Last) = '''
+                                     then
+                                        --  A char is its code in a slot.
+                                        O2c_Ir_Lower.Push_Int
+                                          (Character'Pos (CT (CT'First + 1)));
                                      else
                                         raise O2c_BC.Wrong_Construct with
                                           "bytecode backend: constant '"
                                           & FNm & "." & MName & "' has no "
                                           & "literal value the VM can push";
                                      end if;
+                                  end;
+                               end if;
+                               --  An imported INTEGER constant folds like a
+                               --  local one, so a const M = Lib.N * 2 has a
+                               --  value - under emission suspension too,
+                               --  which is why this sits OUTSIDE the
+                               --  bytecode-only block above.
+                               if Xs (XI).Typ = T_Int then
+                                  begin
+                                     R.Val := Integer'Value
+                                       (To_String (Xs (XI).Const_Text));
+                                     R.Folds := True;
+                                  exception
+                                     when others =>
+                                        R.Folds := False;
                                   end;
                                end if;
                                R.Text := To_Unbounded_String
@@ -5364,6 +5393,28 @@ package body O2c_Compiler is
                   return R;
                end;
             else
+               if Const_Quiet and then Syms (Id).Kind = S_Const
+                 and then (Length (Syms (Id).Const_Text) > 0
+                           or else Syms (Id).Const_Usable)
+               then
+                  --  Emission is suspended for a constant's own expression:
+                  --  only the value crosses, so the enclosing expression
+                  --  folds.  The text IS the literal for the captured
+                  --  kinds, which is what lets `const D = C` chain.
+                  if Length (Syms (Id).Const_Text) > 0 then
+                     R.Text := Syms (Id).Const_Text;
+                     R.Typ := Syms (Id).Typ;
+                     R.Lit := True;
+                  else
+                     R.Text := Null_Unbounded_String;
+                     R.Typ := Syms (Id).Typ;
+                     R.Lit := True;
+                     R.Val := Syms (Id).Const_Val;
+                     R.Folds := Syms (Id).Typ = T_Int;
+                  end if;
+                  Next;
+                  return R;
+               end if;
                if O2c_BC.Bytecode_Mode then
                   if Syms (Id).Kind = S_Const
                     and then Length (Syms (Id).Const_Text) > 0
@@ -5371,7 +5422,18 @@ package body O2c_Compiler is
                      declare
                         T : constant String := To_String (Syms (Id).Const_Text);
                      begin
-                        if T'Length >= 2 and then T (T'First) = '"'
+                        if Syms (Id).Typ = T_Char and then T'Length = 3
+                          and then T (T'First) = ''' and then T (T'Last) = '''
+                        then
+                           --  A char is its code in a slot, everywhere in
+                           --  this VM; only the literal's text was kept.
+                           O2c_Ir_Lower.Push_Int
+                             (Character'Pos (T (T'First + 1)));
+                        elsif Syms (Id).Typ = T_Bool
+                          and then (T = "True" or else T = "False")
+                        then
+                           O2c_BC.Push_Bool (T = "True");
+                        elsif T'Length >= 2 and then T (T'First) = '"'
                           and then T (T'Last) = '"'
                         then
                            O2c_Ir_Lower.Push_Str (T (T'First + 1 .. T'Last - 1));
@@ -5379,7 +5441,7 @@ package body O2c_Compiler is
                            O2c_Ir_Lower.Push_Str (T);
                         end if;
                      end;
-                     R.Typ := T_Str;
+                     R.Typ := Syms (Id).Typ;
                      R.CStr := False;
                      R.Lit := False;
                      R.Folds := False;
@@ -6260,7 +6322,23 @@ package body O2c_Compiler is
       end if;
       Expect (Lex.Tok_Equal, "'='");
       Next;
-      V := Parse_Expr;
+      if O2c_BC.Bytecode_Mode then
+         --  A constant's value is captured (Const_Val / Const_Text) and
+         --  RE-EMITTED at every use, so emitting the expression here is
+         --  dead code.  Worse than dead: a module-level constant is parsed
+         --  before the body proc opens, and Open_Proc's Depth reset loses
+         --  the tracking for these instructions while the verifier still
+         --  simulates them - two constants in a row and the simulated
+         --  depth passes the recorded limit.  Suspend emission for the
+         --  parse; every capture below is front-end state, unaffected.
+         O2c_BC.Bytecode_Mode := False;
+         Const_Quiet := True;
+         V := Parse_Expr;
+         Const_Quiet := False;
+         O2c_BC.Bytecode_Mode := True;
+      else
+         V := Parse_Expr;
+      end if;
       Expect (Lex.Tok_Semi, "';'");
       Next;
 
@@ -6283,6 +6361,23 @@ package body O2c_Compiler is
          --  leaving Const_Text empty sends the constant to the loud refusal
          --  instead.  (Audit finding 3; reported as medium and unconfirmed, but
          --  the guard costs nothing and closes it.)
+         Syms (N_Sym).Const_Text := V.Text;
+      elsif V.Typ = T_Char
+        and then Length (V.Text) = 3
+        and then To_String (V.Text) (To_String (V.Text)'First) = '''
+        and then To_String (V.Text) (To_String (V.Text)'Last) = '''
+      then
+         --  A CHAR constant is the character's code in a slot: keep the
+         --  quoted literal so the use site can push the code.  Only the
+         --  three-character quoted form is a literal.
+         Syms (N_Sym).Const_Text := V.Text;
+      elsif V.Typ = T_Bool
+        and then (To_String (V.Text) = "True"
+                  or else To_String (V.Text) = "False")
+      then
+         --  TRUE and FALSE parse to exactly these two texts; anything else
+         --  boolean (a comparison's text) is not a literal and stays
+         --  uncaptured, which is the loud refusal at the use site.
          Syms (N_Sym).Const_Text := V.Text;
       end if;
       if V.Folds then
@@ -8770,44 +8865,64 @@ package body O2c_Compiler is
                   Next;             --  past the variable name
                   declare
                      D : Desig := Parse_Rec_Ptr_Chain (NNm, Syms (NId).UT);
+                     --  NEW of a pointer FIELD (h.p): the chain classifies
+                     --  it as a field whose content is a pointer, with the
+                     --  record's base already on the stack.  For the
+                     --  self-referential spelling (next: Node) D.UT IS the
+                     --  target record; for a named pointer type the target
+                     --  is what it points to.
+                     New_Field : constant Boolean :=
+                       D.K = D_Field and then D.Ptr_Field;
+                     Tgt : constant Natural :=
+                       (if UTypes (D.UT).Is_Ptr then UTypes (D.UT).Ptr_Tgt
+                        else D.UT);
                   begin
-                     if D.K /= D_Ptr then
+                     if D.K /= D_Ptr and then not New_Field then
                         raise O2c_Error with "NEW needs a POINTER value "
                           & "(line " & Natural'Image (Cur.Line) & ")";
                      end if;
                      Expect (Lex.Tok_RParen, "')' after the NEW argument");
                      Next;
-                     if UTypes (D.UT).Ptr_Tgt = 0 then
+                     if Tgt = 0 then
                         raise O2c_Error with "cannot NEW an opaque POINTER "
                           & "here (M26)";
                      end if;
                      if O2c_BC.Bytecode_Mode then
-                        --  The target record is N_F scalar slots, so the
-                        --  descriptor's size is N_F * 8.  A designator
-                        --  argument would intern a global named after the
-                        --  Ada text, so it is refused.
-                        if (for some Ch of NNm =>
-                              Ch not in 'A' .. 'Z' | 'a' .. 'z'
-                                        | '0' .. '9' | '_')
-                        then
-                           raise O2c_BC.Wrong_Construct with "bytecode "
-                             & "backend: NEW of a pointer designator is not "
-                             & "yet supported";
+                        if New_Field then
+                           --  [base] is on the stack (the chain pushed it)
+                           --  and the allocator's result is the value:
+                           --  Store_Fld consumes [record, value], exactly
+                           --  the assignment's shape.
+                           O2c_BC.Alloc_New (Desc_For (Tgt));
+                           O2c_Ir_Lower.Store_Fld
+                             (D.Off, O2c_Ir_Lower.Fld_Ptr);
+                        else
+                           --  The target record is N_F scalar slots, so the
+                           --  descriptor's size is N_F * 8.  A designator
+                           --  argument would intern a global named after the
+                           --  Ada text, so it is refused.
+                           if (for some Ch of NNm =>
+                                 Ch not in 'A' .. 'Z' | 'a' .. 'z'
+                                           | '0' .. '9' | '_')
+                           then
+                              raise O2c_BC.Wrong_Construct with "bytecode "
+                                & "backend: NEW of a pointer designator is not "
+                                & "yet supported";
+                           end if;
+                           --  Parsing the argument pushed the pointer's old
+                           --  value, which NEW never reads: the allocator's
+                           --  result is what gets stored.  Left on the stack it
+                           --  is one leaked slot per execution, which a loop
+                           --  turns into a steady climb to the stack ceiling.
+                           O2c_BC.Drop;
+                           O2c_BC.Alloc_New (Desc_For (Tgt));
+                           Bc_Store (NNm);
                         end if;
-                        --  Parsing the argument pushed the pointer's old
-                        --  value, which NEW never reads: the allocator's
-                        --  result is what gets stored.  Left on the stack it
-                        --  is one leaked slot per execution, which a loop
-                        --  turns into a steady climb to the stack ceiling.
-                        O2c_BC.Drop;
-                        O2c_BC.Alloc_New
-                          (Desc_For (UTypes (D.UT).Ptr_Tgt));
-                        Bc_Store (NNm);
                      else
                         Append_Body ("      " & To_String (D.Text)
                                      & " := new "
                                      & Ada_Last (To_String
-                                       (UTypes (UTypes (D.UT).Ptr_Tgt).Name))
+                                       (UTypes (Tgt).Name))
                                      & ";");
                      end if;
                   end;

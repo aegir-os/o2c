@@ -108,6 +108,22 @@ then
 else
    bad "deep2: two-level-up name failed: $(cat "$WORK/deep2.log")"
 fi
+
+#  ---- imported constants: fold like locals, and CHAR ones push their code ----
+#  An imported INTEGER constant carried only its pushed value, never the fold,
+#  so `const M = Lib.N * 2` had nothing to fold and was refused at the use.
+#  An imported CHAR constant had no pushable literal at all.  The local
+#  spellings of both are the consts.ob2 fixture; this probe adds the module
+#  boundary, which the fixture format cannot cross.
+printf 'module ImpCLib;\nconst N* = 4;\n    C* = "x";\nend ImpCLib.\n' > "$WORK/impc_lib.ob2"
+printf 'module ImpC;\nimport Out, ImpCLib;\nconst M = ImpCLib.N * 2;\nvar k: integer;\n    c: char;\nbegin\n  k := M;\n  Out.Int(k, 0);\n  c := ImpCLib.C;\n  if c = "x" then Out.Int(1, 0) else Out.Int(0, 0) end\nend ImpC.\n' > "$WORK/impc.ob2"
+if timeout 120 "$FRONT" "$WORK/impc.ob2" "$WORK/impc.obc" "$WORK/impc_lib.ob2" >"$WORK/impc.log" 2>&1 \
+   && [ "$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/impc.obc" 2>/dev/null | tr -d '\n\r')" = "81" ]
+then
+   note "positive: imported constants fold (M = Lib.N * 2) and CHAR ones push"
+else
+   bad "impc: imported constants failed: $(cat "$WORK/impc.log")"
+fi
 #  The VM must report exhaustion rather than corrupt itself.  Before the
 #  collector was fixed it freed the live list and returned a wrong answer,
 #  which is indistinguishable from success without this check.

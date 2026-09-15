@@ -190,6 +190,13 @@ list	ADA_BROKEN	emits Ada that will not compile: reference to the current instan
 newloop	ADA_BROKEN	emits Ada that will not compile: reference to the current instance of a type
 nested	ADA_BROKEN	emits Ada that will not compile: a component used before the record ends
 realarr	ADA_BROKEN	emits Ada that will not compile: expected type Boolean
+#  newdesig's subject is the BYTECODE side: NEW of a pointer field designator
+#  (h.p, and q^.next for the self-referential spelling).  The Ada side takes
+#  h.p but refuses q^.next with "NEW needs a POINTER value" - the chain's
+#  Ada-mode leaf sends a self-referential field to D_Scalar, which the NEW
+#  statement does not read.  list/newloop's self-referential category, one
+#  statement earlier in the walk.
+newdesig	ADA_REFUSED	refuses: "NEW needs a POINTER value" for the self-referential q^.next (bytecode side is the subject)
 #  arrkind is realarr's category, three element types wider: the Ada side
 #  knows only O2c_Int_Arr and O2c_Bool_Arr as anonymous-array bases, so an
 #  ARRAY OF SET / LONGREAL / LONGINT (like realarr's REAL) is emitted as an
