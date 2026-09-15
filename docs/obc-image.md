@@ -466,6 +466,8 @@ emitting a wrong image — a construct outside the emitter's scope fails loudly
 instead of silently producing a bad program.
 
 The front end's scope today is the **module body** doing INTEGER/CHAR/BOOLEAN
-work on module-level scalars.  A procedure record's `stack_max` is currently
-the module's high-water mark: a conservative bound, which is all the verifier
-needs, rather than the exact per-procedure figure.
+work on module-level scalars.  A procedure record's `stack_max` is that
+procedure's own operand-stack high-water mark, tracked while its body is
+emitted - per procedure because the verifier walks one procedure at a time,
+and a module-wide mark would let a small procedure's depth check pass at a
+depth its own code never reaches.

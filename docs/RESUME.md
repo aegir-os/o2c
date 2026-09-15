@@ -7895,8 +7895,7 @@ before the fix was written.  G50/G51 in bytecode_gaps.sh flip blocked -> ok, and
 3hb - is removed with them.
 
 That closes the survey's list: all five true divergences are fixed.  What remains on the parity
-page is the SHARED front-end limits (both backends refuse), the recorded ADA_BROKEN family, and
-the emitter-side open items (per-proc stack_max).
+page is the SHARED front-end limits (both backends refuse) and the recorded ADA_BROKEN family.
 
 The same session took the stale refusal TEXT off the list too.  Three messages enumerated a
 shorter allow-list than their checks ("only INTEGER/CHAR/BOOLEAN assignments/variables",
@@ -7910,6 +7909,36 @@ sites have no reachable T_Str variable in the language - those two checks are de
 their probes are the strings check plus the suites.  BOOLEAN = BOOLEAN does reach the comparison
 site and showed the new text.  The one surviving allow-list message - record fields - is the 3g
 one, and it is accurate.
+
+### 3hd. Per-procedure stack_max - the emitter side of 3gz's verifier fix
+
+3gz made the verifier walk one procedure at a time with "the proc's own Stack_Max" as the depth
+bound, but the emitter still wrote the MODULE high-water mark into every record (o2c_bc.adb's
+single Max_Depth), so the per-procedure bound was exact only for the deepest procedure in the
+image.  The fix is small because the emitter already had the structure: bodies are emitted one
+at a time (Open_Proc refuses a second), so the running Depth IS the open body's own depth, and
+Pushed now records its high-water into Procs (Cur_Proc).Stack_Max.  Two details mattered:
+Return_Value does not model popping the result, so Depth is NOT zero when a function's body
+ends (Open_Proc resets it rather than asserting it), and the loader rejects a zero stack_max
+as Bad_Size, so the max(.., 1) floor stays - an EXTERN stub, having no body, keeps a 0 mark and
+ships 1.  The Max_Depth global is gone; nothing else read it.
+
+Measured on a two-procedure probe (Shallow `x := 1`, Deep a six-operand sum, 61 procedures with
+the libraries): stack_max is 1 for Shallow, 2 for Deep, 2 for the module body, and varies across
+the library procedures (1..21) where before every record read 21.  Reading it back needed the
+section table walked FROM THE HEADER (id 6 = CODE, 24-byte records) - the first probe script
+assumed a count-prefixed table and decoded garbage, the exact misaligned-reader trap the notes
+warn about.  docs/obc-image.md's "currently the module's high-water mark" is corrected with it.
+
+And the tight bound EARNED ITS KEEP on the first gate run: run_vm failed - vm/bc_emit.adb, the
+encoder self-test, emits its whole program without ever calling Begin_Body, so no push was
+attributed to any procedure and Encode's after-the-fact body shipped the floor value 1, which
+the verifier then enforced ("depth 2, limit 1" at the first two-deep instruction).  Under the
+module-wide mark the same image sailed through.  The fix is in the client, not the encoder:
+bc_emit now opens and ends the body around its emission, which is what the real front end does
+and what the self-test should have been modelling.  Encode's synthesize-the-body fallback stays
+for what it is - an offset-preserving shim for a one-procedure image, not a licence to skip the
+body.
 
 ## 4. Method — what worked, and what did not
 

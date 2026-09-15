@@ -31,11 +31,17 @@ begin
       return;
    end if;
 
-   O2c_BC.Begin_Mode;
-   Slot_I := O2c_BC.Global ("i");
-   Slot_Sum := O2c_BC.Global ("sum");
+    O2c_BC.Begin_Mode;
+    Slot_I := O2c_BC.Global ("i");
+    Slot_Sum := O2c_BC.Global ("sum");
 
-   --  Out.String ("vm slice ok"); Out.Ln
+    --  A body's stack_max is tracked while the body is OPEN: emitting without
+    --  one left every push unattributed, and Encode's after-the-fact body got
+    --  the floor value 1 - which the per-procedure verifier then enforced,
+    --  rejecting this image at the first depth-2 instruction.
+    O2c_BC.Begin_Body;
+
+    --  Out.String ("vm slice ok"); Out.Ln
    O2c_BC.Push_Str ("vm slice ok");
    O2c_BC.Native_Call (1, 1);
    O2c_BC.Native_Call (2, 0);
@@ -67,8 +73,9 @@ begin
    O2c_BC.Load (Slot_Sum);
    O2c_BC.Push_Int (0);
    O2c_BC.Native_Call (0, 2);
-   O2c_BC.Native_Call (2, 0);
-   O2c_BC.Halt_Program;
+    O2c_BC.Native_Call (2, 0);
+    O2c_BC.Halt_Program;
+    O2c_BC.End_Body;
 
    declare
       Img : constant String := O2c_BC.Encode;

@@ -77,6 +77,12 @@ package body O2c_BC is
       NResults    : Natural := 0;
       Nested      : Boolean := False;
       Parent      : Natural := 0;    --  the enclosing procedure, 0 at module level
+      --  The procedure's OWN operand-stack high-water mark, tracked while its
+      --  body is open.  It used to be the module-wide mark written into every
+      --  record, which is a bound so loose the verifier's depth check could
+      --  not see a small procedure running deeper than its own code ever
+      --  should.
+      Stack_Max   : Integer := 0;
    end record;
 
    Procs        : array (1 .. Max_Procs) of Proc_Entry;
@@ -102,8 +108,7 @@ package body O2c_BC is
    Locals   : array (1 .. Max_Locals) of Local_Entry;
    N_Locals : Natural := 0;
 
-   Depth     : Integer := 0;
-   Max_Depth : Integer := 0;
+   Depth : Integer := 0;
 
    --  ---- small encoders --------------------------------------------------
    procedure Put_Byte (V : U64) is
@@ -131,8 +136,11 @@ package body O2c_BC is
    procedure Pushed (N : Natural := 1) is
    begin
       Depth := Depth + Integer (N);
-      if Depth > Max_Depth then
-         Max_Depth := Depth;
+      --  The mark belongs to the procedure whose body is open: with bodies
+      --  emitted one at a time (Open_Proc refuses a second), Depth is that
+      --  body's own depth.  Emission outside a body is not a value push.
+      if Cur_Proc /= 0 and then Depth > Procs (Cur_Proc).Stack_Max then
+         Procs (Cur_Proc).Stack_Max := Depth;
       end if;
    end Pushed;
 
@@ -166,7 +174,6 @@ package body O2c_BC is
       Next_Frame := 0;
       N_Locals := 0;
       Depth := 0;
-      Max_Depth := 0;
       for I in Labels'Range loop
          Labels (I) := -1;
       end loop;
@@ -710,7 +717,8 @@ package body O2c_BC is
                      NParams     => NParams,
                      NResults    => NResults,
                      Nested      => Nested,
-                     Parent      => Saved_Frame_Proc);
+                     Parent      => Saved_Frame_Proc,
+                     Stack_Max   => 0);
       return Id;
    end Reserve_Proc;
 
@@ -722,6 +730,11 @@ package body O2c_BC is
       end if;
       Procs (Id).Buf_Off := Length (Code);   --  the body starts HERE
       Cur_Proc := Id;
+      --  A body begins with an EMPTY operand stack: Depth is reset so the
+      --  per-procedure mark is this body's alone.  (It cannot simply be
+      --  asserted zero on entry: Return_Value does not model popping the
+      --  result, so a function's body ends with Depth at its NResults.)
+      Depth := 0;
       --  Next_Frame is NOT reset: it belongs to the FRAME.
    end Open_Proc;
 
@@ -1185,9 +1198,13 @@ package body O2c_BC is
                W32 (Procs (P).Frame_Slots);           --  frame_slots
                W16 (Procs (P).NParams);               --  nparams
                W16 (Procs (P).NResults);              --  nresults
-               --  stack_max is the module high-water mark: a conservative
-               --  bound, which is all the verifier needs.
-               W32 (Natural (Integer'Max (Max_Depth, 1)));
+               --  stack_max is the procedure's OWN high-water mark now: the
+               --  verifier walks one procedure at a time, so a module-wide
+               --  mark would let a small procedure's depth check pass at a
+               --  depth its own code never reaches.  The floor of 1 is the
+               --  loader's: a zero stack_max is Bad_Size, and an EXTERN
+               --  stub's mark stays 0 because it has no body.
+               W32 (Natural (Integer'Max (Procs (P).Stack_Max, 1)));
                W32 (0);                               --  stackmap_off
                W32 (0);                               --  line_ref
                Payload := Payload & Rec;
